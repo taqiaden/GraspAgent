@@ -7,17 +7,18 @@ import trimesh
 from colorama import Fore
 from torch import nn
 from torch.utils import data
-from Configurations import config
+from Configurations import config, ENV_boundaries
 from dataloaders.opening_GAN_dataloader import opening_dataset, load_training_data_from_online_pool
 from lib.IO_utils import  custom_print
 from lib.bbox import   decode_gripper_pose
 from lib.collision_unit import  grasp_collision_detection
 from lib.dataset_utils import training_data
-from lib.grasp_utils import  update_pose_,  get_homogenous_matrix
+from lib.grasp_utils import  get_homogenous_matrix
 from lib.mesh_utils import construct_gripper_mesh
 from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt
 from lib.report_utils import  progress_indicator
+from masks import get_spatial_mask
 from models.GAGAN import dense_gripper_generator_path, \
      gripper_generator
 from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
@@ -138,7 +139,7 @@ critic_optimizer=None
 generator_optimizer=None
 generator_net=None
 critic_net=None
-def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
+def train(EPOCHS_,batch_size,directory):
     global critic_optimizer
     global generator_optimizer
     global critic_net
@@ -206,16 +207,6 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
             score = score.cuda(non_blocking=True)[:,None]
             index = index.cuda(non_blocking=True)
 
-            def get_spatial_mask(pc):
-                x = pc[:,:, 0:1]
-                y = pc[:,:, 1:2]
-                z = pc[:,:, 2:3]
-                x_mask = (x > 0.280 + 0.00) & (x < 0.582 - 0.00)
-                y_mask = (y > -0.21 + 0.00) & (y < 0.21 - 0.00)
-                z_mask = (z > config.z_limits[0]) & (z < config.z_limits[1])
-                # print(z)
-                spatial_mask = x_mask & y_mask & z_mask
-                return spatial_mask
             def dense_grasps_visualization2(pc,generated_pose_7):
                 with torch.no_grad():
                     regular_dis = initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
@@ -362,10 +353,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
 
             def get_dense_grasp_pose_6(pose_6_positive):
                 with torch.no_grad():
-                    generated_pose_7_softmax,generated_pose_7_tanh,generated_pose_7_direct= gripper_pose_model(pc[:,:,0:3])
-
-                    generated_pose_6=generated_pose_7_direct[:,0:-1,:] # (
-
+                    generated_pose_6= gripper_pose_model(pc[:,:,0:3])[:,0:-1,:]
 
                     generated_pose_6[0,:,index]=pose_6_positive.transpose(0,1)
                 return generated_pose_6
@@ -444,7 +432,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
             running_loss += loss1
             running_loss2 += loss2
 
-            if activate_generator_training and weight==1.0 :
+            if  weight==1.0 :
                 loss_gen=gen_one_pass(pc.clone(),None,pose_7_positive.clone(), index,i,dense_pose_6,positive_scores)
                 running_loss3 += loss_gen
 
@@ -493,15 +481,15 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
     collision_ref_accumulator=0
 
 
-def train_opening_GAN(n_samples=None,activate_generator_training=True):
+def train_opening_GAN(n_samples=None):
     #seeds(time_seed)
     global online_samples_per_round
     if n_samples is not None:
         online_samples_per_round=n_samples
-    # training_data.remove_all_labeled_data()
+    training_data.remove_all_labeled_data()
     if len(training_data) == 0:
         load_training_data_from_online_pool(number_of_online_samples=online_samples_per_round)
-    train(EPOCHS, batch_size=BATCH_SIZE, directory=training_data.dir,activate_generator_training=activate_generator_training)
+    train(EPOCHS, batch_size=BATCH_SIZE, directory=training_data.dir)
     training_data.remove_all_labeled_data()
 
 if __name__ == "__main__":

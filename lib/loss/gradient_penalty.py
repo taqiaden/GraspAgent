@@ -12,7 +12,7 @@ def gradient_penalty(pc,critic,generated_pose_7,index,real,fake):
 
     for ii, j in enumerate(index):
         dense_pose_7[ii, :, j] = interpolated_poses[ii]
-    critic_scores, realty_output = critic(pc, dense_pose_7)
+    critic_scores = critic(pc, dense_pose_7)
     mixed_score = torch.stack([critic_scores[i, :, j] for i, j in enumerate(index)])
 
     gradient=torch.autograd.grad(inputs=interpolated_poses,

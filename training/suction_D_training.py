@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch.utils import data
+
+from Online_data_audit.sample_training_buffer import get_selection_probabilty
 from dataloaders.suction_d_dataloader import suction_dataset
 from lib.loss.D_loss import custom_loss
 from lib.optimizer import export_optm, load_opt
@@ -104,7 +106,7 @@ def load_training_data_from_online_pool(number_of_online_samples,generation_mode
         if label[3] == 1:
             with torch.no_grad():
                 pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
-                _, _, dense_pose = generator(pc_torch)
+                dense_pose = generator(pc_torch)
                 quality_score, grasp_ability_score = regular_dis(pc_torch, dense_pose)
                 target_score = quality_score[0, 0, index].item()
 

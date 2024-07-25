@@ -93,32 +93,6 @@ def grasp_angle_to_vector(grasp_angle):
 
     return closing_vector
 
-def angle_to_vector(azimuth_angle, elevation_angle):
-    x_ = torch.cos(azimuth_angle/180*math.pi)
-    y_ = torch.sin(azimuth_angle/180*math.pi)
-    z_ = -torch.tan((elevation_angle + 15)/180 * math.pi) * torch.sqrt(x_**2 + y_**2)
-    approach_vector_ = torch.stack((x_, y_, z_), axis=0)
-    #print(torch.norm(approach_vector_, dim=0).shape)
-    #print(approach_vector_.shape)
-    #exit()
-    approach_vector = torch.div(approach_vector_, torch.norm(approach_vector_, dim=0))
-    return approach_vector
-def get_grasp_angles(transform):
-    angle_ = math.atan2(transform[1, 1], transform[0, 1])
-    if angle_ < 0:
-        angle_ += math.pi
-    grasp_angle = angle_ / math.pi * 180
-
-    azimuth_ = math.atan2(transform[1, 0], transform[0, 0])
-    azimuth = azimuth_
-    if azimuth_ < 0:
-        azimuth = 2 * math.pi + azimuth_
-
-    azimuth_angle = azimuth / math.pi * 180
-    elevation_ = math.atan2(transform[2, 0], math.sqrt(transform[0, 0] ** 2 + transform[1, 0] ** 2))
-    elevation_angle = elevation_ / math.pi * 180
-
-    return grasp_angle,azimuth_angle,elevation_angle
 
 def encode_gripper_pose_2(distance, width, rotation_matrix):
 

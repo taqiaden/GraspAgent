@@ -8,8 +8,8 @@ import torch.nn.functional as F
 import trimesh
 from colorama import Fore
 from torch.utils import data
-from Configurations import config
-from dataloaders.GAGAN_dataloader import gripper_dataset
+from Configurations import config, ENV_boundaries
+from dataloaders.GAGAN_dataloader import gripper_dataset, load_training_data_from_online_pool
 from dataset.load_test_data import estimate_suction_direction, random_sampling_augmentation
 from lib.IO_utils import  unbalance_check, update_balance_counter, \
     move_single_labeled_sample, custom_print
@@ -21,6 +21,7 @@ from lib.mesh_utils import construct_gripper_mesh
 from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt
 from lib.report_utils import  progress_indicator
+from masks import get_spatial_mask
 from models.GAGAN import dense_gripper_generator_path, contrastive_discriminator_path, gripper_generator, \
     contrastive_discriminator
 from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
@@ -32,133 +33,19 @@ contrastive_discriminator_optimizer_path = r'contrastive_discriminator_optimizer
 dense_gripper_generator_GAN_optimizer_path = r'dense_gripper_generator_GAN_optimizer.pth.tar'
 
 time_seed=math.floor(datetime.now().timestamp())
-rehearsal_data=rehearsal_data()
+
 training_data=training_data()
 online_data=online_data()
-selection_prob_k=0.1
+
 weight_decay = 0.0000001
 print=custom_print
 BATCH_SIZE=1
 learning_rate=5*1e-6
 
 EPOCHS=1
-augmentation_factor =1
 online_samples_per_round=500
 
 move_trained_data=False
-skip_unbalanced_samples = False
-
-activate_balance_data=True
-
-only_success=True
-discriminator_sensitive_training=True
-
-
-
-
-def load_training_data_from_online_pool(number_of_online_samples,move_online_files=False):
-    regular_dis = initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
-
-    regular_dis.eval()
-    generator = initialize_model(gripper_generator,dense_gripper_generator_path)
-    generator.eval()
-    # counters to balance positive and negative
-    # [n_grasp_positive,n_grasp_negative,n_suction_positive,n_suction_negative]
-    # second, copy from online data to training data with down sampled point cloud
-    online_pc_filenames = online_data.get_pc_names()
-    # assert len(online_pc_filenames) >= number_of_online_samples
-
-
-    random.shuffle(online_pc_filenames)
-    selection_p=get_selection_probabilty(online_data,online_pc_filenames)
-
-    from lib.report_utils import progress_indicator as pi
-    progress_indicator=pi(f'Get {number_of_online_samples} training data from online pool and apply maximum augmentation of {augmentation_factor} per sample : ',number_of_online_samples)
-
-    balance_counter2 = np.array([0, 0, 0, 0])
-    n = augmentation_factor
-    counter=0
-    for i,file_name in enumerate(online_pc_filenames):
-        if np.random.rand() > selection_p[i]: continue
-
-        sample_index=online_data.get_index(file_name)
-        try:
-            label=online_data.load_label_by_index(sample_index)
-            # print(label.shape)
-            # exit()
-            if label[23]==1 : continue
-            if only_success and label[3]==0: continue
-
-            point_data=online_data.load_pc(file_name)
-        except Exception as e:
-            print(Fore.RED, str(e),Fore.RESET)
-            continue
-        center_point = np.copy(label[:3])
-
-        if activate_balance_data:
-            balance_data= unbalance_check(label, balance_counter2)==0
-            if skip_unbalanced_samples and not balance_data:
-                continue
-
-            n=augmentation_factor if balance_data else 1
-        # for j in range(n):
-
-        down_sampled_pc, index = random_sampling_augmentation(center_point, point_data, config.num_points)
-        ## check discriminator score
-        # pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
-        # scores=regular_dis(pc_torch)
-        # if index is None:
-        #     break
-        ####################################################################################################
-
-        normals = estimate_suction_direction(down_sampled_pc, view=False)
-        down_sampled_pc = np.concatenate([down_sampled_pc, normals], axis=-1)
-        label[:3] = down_sampled_pc[index, 0:3]
-        distance = label[22]
-        transformation = label[5:21].copy().reshape(-1, 4)
-        transformation[0:3, 3] = label[:3] + transformation[0:3, 0] * distance
-        label[5:21] = transformation.reshape(-1)
-        pose_good_grasp, label = label_to_pose(label)
-        collision_intensity = grasp_collision_detection(pose_good_grasp, point_data, visualize=False)
-
-        if collision_intensity>0:
-            print('collision is found in a success grasp case with intensity=',collision_intensity)
-            continue
-
-        ################
-        # check discriminator score
-        if discriminator_sensitive_training:
-            with torch.no_grad():
-                pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
-                _,_,dense_pose=generator(pc_torch)
-                quality_score,grasp_ability_score=regular_dis(pc_torch,dense_pose)
-                target_score=quality_score[0,0,index].item()
-
-                if target_score<0.5:
-                    print(Fore.RED,'   >', target_score,Fore.RESET)
-                    continue
-                else:
-                    print(Fore.GREEN,'   >', target_score,Fore.RESET)
-
-
-        j=0
-        training_data.save_labeled_data(down_sampled_pc,label,sample_index + f'_aug{j}')
-        if index is None:
-            continue
-
-        balance_counter2 = update_balance_counter(balance_counter2, is_grasp=label[4] == 1,score=label[3],n=n)
-
-        if move_online_files:
-            # move copied labeled_data from online data to rehearsal data
-            move_single_labeled_sample(online_data, rehearsal_data, file_name)
-
-        counter+=1
-        progress_indicator.step(counter)
-
-        if counter >= number_of_online_samples: break
-
-    # view_data_summary(balance_counter=balance_counter2)
-    return balance_counter2
 
 def verify(pc_data,poses_7,idx,view=False,evaluation_metric=None):
 
@@ -226,8 +113,6 @@ def get_mesh(pc_data,poses_7,idx):
 
     return mesh
 
-
-
 bce_loss=nn.BCELoss()
 bce_loss_vec=nn.BCELoss(reduction=False)
 
@@ -248,7 +133,6 @@ counter = 0
 collision_accumulator=None
 collision_ref_accumulator=None
 
-
 def gradient_penalty(pc,critic,generated_pose_7,index,real,fake):
     batch_size,p=real.shape
     epsilon=torch.rand((batch_size,1)).repeat(1,p).to('cuda')
@@ -260,7 +144,7 @@ def gradient_penalty(pc,critic,generated_pose_7,index,real,fake):
 
     for ii, j in enumerate(index):
         dense_pose_7[ii, :, j] = interpolated_poses[ii]
-    critic_scores, realty_output = critic(pc, dense_pose_7)
+    critic_scores = critic(pc, dense_pose_7)
     mixed_score = torch.stack([critic_scores[i, :, j] for i, j in enumerate(index)])
 
     gradient=torch.autograd.grad(inputs=interpolated_poses,
@@ -279,7 +163,7 @@ critic_optimizer=None
 generator_optimizer=None
 generator_net=None
 critic_net=None
-def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
+def train(EPOCHS_,batch_size,directory):
     global critic_optimizer
     global generator_optimizer
     global critic_net
@@ -347,7 +231,6 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
         critic_optimizer=contrastive_dis_optimizer
         generator_optimizer=gen_optimizer
     def train_one_epoch():
-        print(Fore.CYAN, f'Train generator = {activate_generator_training}', Fore.RESET)
         running_loss = 0.
         running_loss2 = 0.
         running_loss3 = 0.
@@ -360,16 +243,6 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
             score = score.cuda(non_blocking=True)[:,None]
             index = index.cuda(non_blocking=True)
 
-            def get_spatial_mask(pc):
-                x = pc[:,:, 0:1]
-                y = pc[:,:, 1:2]
-                z = pc[:,:, 2:3]
-                x_mask = (x > 0.280 + 0.00) & (x < 0.582 - 0.00)
-                y_mask = (y > -0.21 + 0.00) & (y < 0.21 - 0.00)
-                z_mask = (z > config.z_limits[0]) & (z < config.z_limits[1])
-                # print(z)
-                spatial_mask = x_mask & y_mask & z_mask
-                return spatial_mask
             def dense_grasps_visualization2(pc,generated_pose_7):
                 with torch.no_grad():
                     regular_dis = initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
@@ -588,7 +461,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
                     dense_pose_7 = torch.rand(size=(1, 7, config.num_points)).to('cuda')
                     for ii, j in enumerate(index):
                         dense_pose_7[ii, :, j] = pose_7_positive[ii].clone()
-                    contrastive_output_label, realty_output = contrastive_dis(pc[:,:,0:3], dense_pose_7)
+                    contrastive_output_label = contrastive_dis(pc[:,:,0:3], dense_pose_7)
 
                     contrastive_scores_label = torch.stack([contrastive_output_label[i, :, j] for i, j in enumerate(index)])
 
@@ -612,7 +485,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
                 if masked_pose[0, -2] < 0.0 or masked_pose[0, -1] < 0.0 or cos_new<0.5:
                     weight = 1.0
 
-                contrastive_output_pred,realty_output = contrastive_dis(pc[:,:,0:3], generated_pose_7)
+                contrastive_output_pred = contrastive_dis(pc[:,:,0:3], generated_pose_7)
 
                 masked_contrastive_score = torch.stack([contrastive_output_pred[i, :, j] for i, j in enumerate(index)])
 
@@ -637,9 +510,9 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
             running_loss += loss1
             running_loss2 += loss2
 
-            if activate_generator_training :
-                loss_gen=gen_one_pass(pc.clone(),pose_7_positive.clone(), index,i,weight)
-                running_loss3 += loss_gen
+
+            loss_gen=gen_one_pass(pc.clone(),pose_7_positive.clone(), index,i,weight)
+            running_loss3 += loss_gen
 
             pi.step(i)
 
@@ -667,8 +540,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
         print('   Total running loss 2= ',running_loss2,', average total loss = ',running_loss2/n_batches)
         print('   Total running loss 3= ',running_loss3,', average total loss = ',running_loss3/n_batches)
 
-    # except Exception as e:
-    #         print(str(e))
+
     global  counter
     global collision_accumulator
     global collision_ref_accumulator
@@ -682,8 +554,7 @@ def train(EPOCHS_,batch_size,directory,activate_generator_training=True):
     collision_accumulator=0
     collision_ref_accumulator=0
 
-
-def train_generator(n_samples=None,activate_generator_training=True):
+def train_generator(n_samples=None):
     global online_samples_per_round
     if n_samples is not None:
         online_samples_per_round=n_samples
@@ -691,7 +562,7 @@ def train_generator(n_samples=None,activate_generator_training=True):
     if len(training_data) == 0:
         load_training_data_from_online_pool(number_of_online_samples=online_samples_per_round,
                                         move_online_files=move_trained_data)
-    train(EPOCHS, batch_size=BATCH_SIZE, directory=training_data.dir,activate_generator_training=activate_generator_training)
+    train(EPOCHS, batch_size=BATCH_SIZE, directory=training_data.dir)
     training_data.remove_all_labeled_data()
 
 if __name__ == "__main__":

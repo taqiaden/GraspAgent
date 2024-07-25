@@ -10,7 +10,7 @@ from Configurations import config
 from lib.bbox import decode_gripper_pose, encode_gripper_pose
 from lib.grasp_utils import get_homogenous_matrix, get_center_point, shift_a_distance, update_pose_
 from lib.math_utils import change_angle
-
+from lib.mesh_utils import construct_gripper_mesh
 
 increase_depth=True
 width_exploration=True
@@ -20,7 +20,6 @@ view_collision_check = False
 activate_width_clip=False
 explore_theta_p=1.0
 explore_phi_p=1.0
-
 
 def grasp_collision_detection(pose_good_grasp_,point_data, visualize=False,add_floor=False):
     pose_good_grasp=np.copy(pose_good_grasp_)
@@ -34,29 +33,13 @@ def grasp_collision_detection(pose_good_grasp_,point_data, visualize=False,add_f
     width=pose_good_grasp[0,0]
 
     point_data =copy.deepcopy(point_data)
-    import time
-    t1 = time.time()
-    mesh=construct_gripper_mesh(width,T)
 
     assert point_data.shape[0]>0,f'{point_data.shape}'
 
-    # sampled_point = crop_scene_to_gripper(np.copy(point_data),mesh,add_floor=False)
-
-    # downsampling_size=int(sampled_point.shape[0]/3)
-    #
-    # sampled_point = random_down_sampling(sampled_point, downsampling_size)
-
-    # assert sampled_point.shape[0]>0,f'{sampled_point.shape}'
-    # collision_intensity,check_result=check_collision(mesh,sampled_point)
-    # t2 = time.time()
-    
     check_result_fast = collision_detection_fast(width, T, point_data)
-    # print(t2-t1, time.time()-t2)
-    # print('----------',collision_intensity)
-    # print('----------', check_result_fast)
 
-    # if True:
-    if  visualize or view_collision_check: #not collision :
+    if  visualize or view_collision_check:
+        mesh = construct_gripper_mesh(width, T)
         scene = trimesh.Scene()
         scene.add_geometry([trimesh.PointCloud(point_data), mesh])
         scene.show()

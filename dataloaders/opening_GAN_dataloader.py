@@ -43,7 +43,7 @@ def load_training_data_from_online_pool(number_of_online_samples):
     random.shuffle(online_pc_filenames)
     selection_p=get_selection_probabilty(online_data,online_pc_filenames)
     from lib.report_utils import progress_indicator as pi
-    progress_indicator=pi(f'Get {number_of_online_samples} training data from online pool ')
+    progress_indicator=pi(f'Get {number_of_online_samples} training data from online pool ',number_of_online_samples)
 
     balance_counter2 = np.array([0, 0, 0, 0])
     counter=0
@@ -77,7 +77,7 @@ def load_training_data_from_online_pool(number_of_online_samples):
         if discriminator_sensitive_training:
             with torch.no_grad():
                 pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
-                _,_,dense_pose=generator(pc_torch)
+                dense_pose=generator(pc_torch)
                 quality_score,grasp_ability_score=regular_dis(pc_torch,dense_pose)
                 target_score=quality_score[0,0,index].item()
 

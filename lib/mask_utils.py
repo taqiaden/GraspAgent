@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-
 from visualiztion import view_npy_open3d, view_npy_trimesh
 
 

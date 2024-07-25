@@ -4,14 +4,65 @@ import trimesh
 import copy
 import random
 
-from Configurations import config
+from Configurations import config, ENV_boundaries
+from lib.bbox import decode_gripper_pose
 from lib.pc_utils import numpy_to_o3d
 import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
+from masks import get_spatial_mask
+from pose_object import approach_vec_to_theta_phi, output_processing
 
 parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
+
+def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask):
+
+
+    # Method 1
+    pose_good_grasp_list = []
+    for i in range(5000):
+        random_index = np.random.randint(0, config.num_points)
+        if target_mask[0, random_index, 0] == False: continue
+
+        if grasp_score_pred[0, 0, random_index] < 0.4: continue
+
+        tmp_pose = generated_pose_7[0:1, :, random_index]
+
+        poses_7 = tmp_pose[:, None, :].clone()
+
+        # visualize verfication
+        pc_ = pc[0, :, 0:3].cpu().numpy()  # + mean
+
+        center_point = pc_[random_index]
+        target_pose = poses_7[0, :, :]
+        approach = target_pose[:, 0:3]
+
+        theta, phi_sin, phi_cos = approach_vec_to_theta_phi(approach)
+        target_pose[:, 0:1] = theta
+        target_pose[:, 1:2] = phi_sin
+        target_pose[:, 2:3] = phi_cos
+        pose_5 = output_processing(target_pose[:, :, None]).squeeze(-1)
+
+        pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
+
+        # extreme_z = center_point[-1] - poses_7[0,0, -2] * config.distance_scope
+        # if  extreme_z < config.z_limits[0]: continue
+
+        pose_good_grasp_list.append(pose_good_grasp)
+    if len(pose_good_grasp_list) == 0: return
+    pose_good_grasp = np.concatenate(pose_good_grasp_list, axis=0)
+    # print(pose_good_grasp.shape)
+    # print(target_mask.squeeze().shape)
+    # print(pc.shape)
+    # masked_pc=pc[0,target_mask.squeeze(),0:3]
+    # print(masked_pc.shape)
+    # print(pc[0, :, 0:3].shape)
+
+    vis_scene(pose_good_grasp[:, :], npy=pc[0, :, 0:3].cpu().numpy())
+
+    return
+
 
 def view_o3d(pcd,view_coordinate=True,geometries_list=None):
     o = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0]) if view_coordinate else o3d.geometry.PointCloud()
@@ -85,17 +136,6 @@ def visualize_suction_pose(suction_xyz, suction_pose, T, end_effecter_mat,  npy)
     axis_pcd.transform(T)
     axis_left_arm.transform(end_effecter_mat)
     o3d.visualization.draw_geometries([pcd, axis_pcd, axis_left_arm, line_set])
-
-def get_spatial_mask(pc):
-    x = pc[ :, 0:1]
-    y = pc[ :, 1:2]
-    z = pc[ :, 2:3]
-    x_mask = (x > 0.280 + 0.00) & (x < 0.582 - 0.00)
-    y_mask = (y > -0.21 + 0.00) & (y < 0.21 - 0.00)
-    z_mask = (z > config.z_limits[0]) & (z < config.z_limits[1])
-    # print(z)
-    spatial_mask = x_mask & y_mask & z_mask
-    return spatial_mask
 
 def highlight_background(npy):
     colors=np.zeros_like(npy)
