@@ -10,8 +10,8 @@ import smbclient
 import torch
 from colorama import Fore
 
+from lib.pc_utils import random_down_sampling
 from lib.report_utils import counter_progress
-from dataset.load_test_data import random_down_sampling
 from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
 from Configurations.config import  ip_address
 from Configurations import config

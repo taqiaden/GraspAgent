@@ -2,15 +2,120 @@ import os
 import random
 import numpy as np
 import smbclient
+import torch
 from colorama import Fore
 from torch.utils import data
-
+from lib.IO_utils import unbalance_check, update_balance_counter
+from lib.dataset_utils import training_data,online_data
+from Online_data_audit.sample_training_buffer import get_selection_probabilty
+from lib.models_utils import initialize_model
 from lib.pc_utils import point_index
-from dataset.load_test_data import  random_sampling_augmentation
-
 from Configurations import config
 
 from lib.dataset_utils import data as d
+from models.GAGAN import dense_gripper_generator_path, gripper_generator
+from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
+from process_perception import random_sampling_augmentation
+from suction_sampler import estimate_suction_direction
+
+online_data=online_data()
+training_data=training_data()
+
+skip_unbalanced_samples = True
+only_success=False
+
+activate_balance_data=True
+def load_training_data_from_online_pool(number_of_online_samples):
+    regular_dis = initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
+
+    regular_dis.eval()
+    generator = initialize_model(gripper_generator,dense_gripper_generator_path)
+    generator.eval()
+    # counters to balance positive and negative
+    # [n_grasp_positive,n_grasp_negative,n_suction_positive,n_suction_negative]
+    # second, copy from online data to training data with down sampled point cloud
+    balance_indicator=0.0
+    unbalance_allowance=0
+    online_pc_filenames = online_data.get_pc_names()
+    # assert len(online_pc_filenames) >= number_of_online_samples
+    random.shuffle(online_pc_filenames)
+    selection_p=get_selection_probabilty(online_data,online_pc_filenames)
+
+    from lib.report_utils import progress_indicator as pi
+    progress_indicator=pi(f'Get {number_of_online_samples} training data from online pool ',number_of_online_samples)
+
+    balance_counter2 = np.array([0, 0, 0, 0])
+    counter=0
+    for i,file_name in enumerate(online_pc_filenames):
+        if np.random.rand() > selection_p[i]: continue
+        sample_index=online_data.get_index(file_name)
+        try:
+            label=online_data.load_label_by_index(sample_index)
+            if label[4]==1 :continue
+            if only_success and label[3]==0: continue
+            if label[3]==1 and balance_indicator>unbalance_allowance:
+                continue
+            elif label[3]==0 and balance_indicator<-1*unbalance_allowance:
+                continue
+
+            point_data=online_data.load_pc(file_name)
+        except Exception as e:
+            print(Fore.RED, str(e),Fore.RESET)
+            continue
+        center_point = np.copy(label[:3])
+        if activate_balance_data:
+            balance_data= unbalance_check(label, balance_counter2)==0
+            if skip_unbalanced_samples and not balance_data:continue
+
+
+        # for j in range(n):
+        j=0
+        # print(j)
+        # print(center_point)
+
+        down_sampled_pc, index = random_sampling_augmentation(center_point, point_data, config.num_points)
+        if index is None:
+            break
+
+        # data-centric adversial measure
+        if label[3] == 1:
+            with torch.no_grad():
+                pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
+                dense_pose = generator(pc_torch)
+                quality_score, grasp_ability_score = regular_dis(pc_torch, dense_pose)
+                target_score = quality_score[0, 0, index].item()
+
+                if target_score > 0.5:
+                    print(Fore.RED, '   >', target_score, Fore.RESET)
+                    continue
+                else:
+                    print(Fore.GREEN, '   >', target_score, Fore.RESET)
+
+
+
+        normals = estimate_suction_direction(down_sampled_pc, view=False)
+        down_sampled_pc=np.concatenate([down_sampled_pc,normals],axis=-1)
+
+        label[:3] = down_sampled_pc[index,0:3]
+        training_data.save_labeled_data(down_sampled_pc,label,sample_index + f'_aug{j}')
+        if label[3]==1:
+            balance_indicator+=1
+        else:
+            balance_indicator-=1
+
+        if index is None:
+            continue
+
+        balance_counter2 = update_balance_counter(balance_counter2, is_grasp=label[4] == 1,score=label[3])
+
+
+        counter+=1
+        progress_indicator.step(counter)
+
+        if counter >= number_of_online_samples: break
+
+    return balance_counter2
+
 class suction_dataset(data.Dataset):
     def __init__(self, num_points=config.num_points, path='dataset/realtime_dataset/', shuffle=False):
         super().__init__()

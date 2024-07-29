@@ -7,20 +7,18 @@ from Online_data_audit.process_feedback import save_new_data_sample
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import  wait_for_feedback
 from lib.models_utils import  initialize_model
-from Configurations import config, ENV_boundaries
-from lib.bbox import  decode_gripper_pose
-from dataset.load_test_data import get_real_data, estimate_suction_direction
+from Configurations import config
 import subprocess
-from lib.report_utils import save_error_log
 from masks import get_spatial_mask, initialize_masks
 from models.GAGAN import gripper_generator, dense_gripper_generator_path
 from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
 import time
 import numpy as np
 from lib.image_utils import check_image_similarity
-from pose_object import output_processing, vectors_to_ratio_metrics, approach_vec_to_theta_phi
-from process_perception import get_new_perception, get_side_bins_images
-from visualiztion import vis_scene, visualize_grasp_and_suction_points, \
+from pose_object import  vectors_to_ratio_metrics
+from process_perception import get_new_perception, get_side_bins_images, get_real_data
+from suction_sampler import estimate_suction_direction
+from visualiztion import  visualize_grasp_and_suction_points, \
     view_score, dense_grasps_visualization
 
 shuffling_probability= 0.0

@@ -9,7 +9,6 @@ from colorama import Fore
 from Configurations import config
 from lib.bbox import decode_gripper_pose, encode_gripper_pose
 from lib.grasp_utils import get_homogenous_matrix, get_center_point, shift_a_distance, update_pose_
-from lib.math_utils import change_angle
 from lib.mesh_utils import construct_gripper_mesh
 
 increase_depth=True

@@ -1,7 +1,5 @@
 import numpy as np
-
 from Configurations import config
-from visualiztion import view_npy_open3d, vis_depth_map
 
 
 def update_pose_(T, pose_good_grasp=None,width=None,distance=None):
@@ -109,15 +107,7 @@ def get_grasp_width(pose_good_grasp):
 
 
 
-def visualize_vox(npy):
-    points_list = []
-    for i in range(npy.shape[0]):
-        for j in range(npy.shape[1]):
-            for k in range(npy.shape[2]):
-                # points_list.append((i, j, k))
-                if npy[i, j, k] == 1: points_list.append((i, j, k))
-    points_list = np.asarray(points_list)
-    view_npy_open3d(points_list)
+
 
 def distance_based_reorder(results,grasp_score_pred,grasp_pose_pred,k=1.0):
     if k==0: return results

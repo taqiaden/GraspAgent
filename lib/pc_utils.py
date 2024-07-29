@@ -2,7 +2,9 @@ import numpy as np
 import open3d as o3d
 import torch
 from scipy.spatial.transform import Rotation as R
-from Configurations.config import ref_pc_center
+
+from Configurations.ENV_boundaries import ref_pc_center
+
 
 def closest_point(point_data, center_point, radius=0.0025,warning_limit=0.005):
     # Find the neighbour points of the center_point
@@ -48,7 +50,10 @@ def refine_point_cloud(point_cloud):
 
 def numpy_to_o3d( npy,color=None):
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(npy)
+    pcd.points = o3d.utility.Vector3dVector(npy[:,0:3])
+    if npy.shape[-1]==6:
+        pcd.colors = o3d.utility.Vector3dVector(npy[:,3:])
+
     if color is not None: pcd.colors = o3d.utility.Vector3dVector(color)
     return pcd
 

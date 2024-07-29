@@ -4,8 +4,9 @@ import trimesh
 import copy
 import random
 
-from Configurations import config, ENV_boundaries
+from Configurations import config
 from lib.bbox import decode_gripper_pose
+from lib.depth_map import create_point_cloud_from_depth_image, CameraInfo
 from lib.pc_utils import numpy_to_o3d
 import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
@@ -16,6 +17,15 @@ parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
 
+def visualize_vox(npy):
+    points_list = []
+    for i in range(npy.shape[0]):
+        for j in range(npy.shape[1]):
+            for k in range(npy.shape[2]):
+                # points_list.append((i, j, k))
+                if npy[i, j, k] == 1: points_list.append((i, j, k))
+    points_list = np.asarray(points_list)
+    view_npy_open3d(points_list)
 def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask):
 
 
@@ -46,8 +56,7 @@ def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask
 
         pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
 
-        # extreme_z = center_point[-1] - poses_7[0,0, -2] * config.distance_scope
-        # if  extreme_z < config.z_limits[0]: continue
+
 
         pose_good_grasp_list.append(pose_good_grasp)
     if len(pose_good_grasp_list) == 0: return
@@ -232,50 +241,9 @@ def visualize_grasp_and_suction_points(suction_cls_pred_mask, grasp_cls_pred_mas
         scene_all.add_geometry(pointcloud_blue_)
     scene_all.show()
 
-def create_point_cloud_from_depth_image(depth, camera, organized=False):
-    assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
-    # camera.height= depth.shape[0]
-    # camera.width=depth.shape[1]
-    xmap = np.arange(camera.width)
-    ymap = np.arange(camera.height)
-    xmap, ymap = np.meshgrid(xmap, ymap)
-    points_z = depth / camera.scale
-    points_x = (xmap - camera.cx) * points_z / camera.fx
-    points_y = (ymap - camera.cy) * points_z / camera.fy
-    cloud = np.stack([points_x, points_y, points_z], axis=-1)
-    if not organized:
-        cloud = cloud.reshape([-1, 3])
-        mask = cloud[:, 2] != 0
-        cloud = cloud[mask]
-    return cloud
 
-def create_depth_image_from_point_cloud(pc, camera):
-    depth_map = np.zeros([camera.height, camera.width])
 
-    mask = pc[:, 2] != 0
-    pc = pc[mask]
-    depth = pc[:, 2]
-    y = pc[:, 0] * camera.fx / depth + camera.cx
-    x = pc[:, 1] * camera.fy / depth + camera.cy
-    x = np.round(x).astype(int)
-    y = np.round(y).astype(int)
-    x = np.clip(x, 0, camera.height - 1)
-    y = np.clip(y, 0, camera.width - 1)
-    depth = depth * camera.scale
 
-    for i, j, d in zip(x, y, depth):
-        depth_map[i, j] = d
-    return depth_map[175:535, 220:700]
-
-class CameraInfo():
-    def __init__(self, width, height, fx, fy, cx, cy, scale):
-        self.width = width
-        self.height = height
-        self.fx = fx
-        self.fy = fy
-        self.cx = cx
-        self.cy = cy
-        self.scale = scale
 
 def vis_depth_map(depth, view_as_point_cloud=True):
     if view_as_point_cloud:

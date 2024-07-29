@@ -11,12 +11,12 @@ from lib.IO_utils import update_balance_counter
 from lib.collision_unit import grasp_collision_detection
 from lib.models_utils import initialize_model
 from lib.pc_utils import point_index
-from dataset.load_test_data import  random_sampling_augmentation
 from lib.dataset_utils import data as d
 from models.GAGAN import gripper_generator, dense_gripper_generator_path
 from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
 from pose_object import encode_gripper_pose_npy, label_to_pose
 from lib.dataset_utils import  online_data, training_data
+from process_perception import random_sampling_augmentation
 
 discriminator_sensitive_training=False
 only_success=True

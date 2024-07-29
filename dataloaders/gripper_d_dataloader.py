@@ -5,7 +5,6 @@ import smbclient
 import torch
 from colorama import Fore
 from Online_data_audit.sample_training_buffer import get_selection_probabilty
-from dataset.load_test_data import random_sampling_augmentation
 from lib.IO_utils import unbalance_check, update_balance_counter
 from lib.bbox import decode_gripper_pose
 from lib.collision_unit import grasp_collision_detection
@@ -19,6 +18,8 @@ from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_
 from models.suction_D import affordance_net, affordance_net_model_path
 from pose_object import encode_gripper_pose_npy, vectors_to_ratio_metrics
 from lib.dataset_utils import training_data, online_data
+from process_perception import random_sampling_augmentation
+from suction_sampler import estimate_suction_direction
 
 training_data=training_data()
 online_data=online_data()
@@ -104,6 +105,8 @@ def load_training_data_from_online_pool(number_of_online_samples):
 
         ####################
         # get bad label from generator
+        normals = estimate_suction_direction(down_sampled_pc, view=False)
+        down_sampled_pc = np.concatenate([down_sampled_pc, normals], axis=-1)
         if label[3]==1:
             with torch.no_grad():
                 pc_torch=torch.from_numpy(down_sampled_pc).to('cuda')[None,:,0:3].float()
@@ -147,7 +150,6 @@ def load_training_data_from_online_pool(number_of_online_samples):
             else:
                 print(Fore.RED, '-', Fore.RESET)
                 continue
-
         ###########################################
         training_data.save_labeled_data(down_sampled_pc,label,sample_index + f'_aug{j}')
 

@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from visualiztion import view_npy_open3d, view_npy_trimesh
 
-
 def sphere_mask(pc,center,radius,view=False):
     dist = np.linalg.norm(pc - center, axis=1)
     mask = dist < radius
@@ -21,6 +20,7 @@ def cuboid_mask(pc,center,x,y,z,no_limit_for_z=True,view=False):
     if view:
         view_npy_open3d(pc[mask].cpu().numpy())
     return mask
+
 def cubic_mask(pc,center,scope,no_limit_for_z=True,view=False):
     size=scope/2
     return cuboid_mask(pc,center,size,size,size,no_limit_for_z,view)

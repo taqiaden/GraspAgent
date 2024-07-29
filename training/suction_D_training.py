@@ -1,170 +1,31 @@
 import copy
-import math
-import random
-from datetime import datetime
-import numpy as np
 import torch
 from colorama import Fore
 from torch.utils import data
-
-from Online_data_audit.sample_training_buffer import get_selection_probabilty
-from dataloaders.suction_d_dataloader import suction_dataset
+from dataloaders.suction_d_dataloader import suction_dataset, load_training_data_from_online_pool
 from lib.loss.D_loss import custom_loss
 from lib.optimizer import export_optm, load_opt
-from dataset.load_test_data import estimate_suction_direction, random_sampling_augmentation
-from lib.IO_utils import  unbalance_check, update_balance_counter, move_single_labeled_sample, custom_print
-from lib.models_utils import initialize_model
-from models.GAGAN import gripper_generator, dense_gripper_generator_path
+from lib.IO_utils import   custom_print
 from Configurations import config
-from lib.dataset_utils import rehearsal_data,training_data,online_data
+from lib.dataset_utils import training_data
 from lib.report_utils import   progress_indicator
 from lib.models_utils import  export_model_state, initialize_model_state
-
-from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
 from models.suction_D import affordance_net, affordance_net_model_path
 
-time_seed=math.floor(datetime.now().timestamp())
-rehearsal_data=rehearsal_data()
 training_data=training_data()
-online_data=online_data()
-selection_prob_k=1.0
 
 print=custom_print
 BATCH_SIZE=2
 lr=5*1e-6
 weight_decay = 0.000001
-
 EPOCHS = 1
-augmentation_factor =1
 online_samples_per_round=500
-move_trained_data=False
-skip_unbalanced_samples = True
 
-activate_balance_data=True
 
-only_success=False
 
 suction_discriminator_optimizer_path = r'suction_discriminator_optimizer.pth.tar'
 
 
-def load_training_data_from_online_pool(number_of_online_samples,generation_model=None,move_online_files=False,load_grasp=True,load_suction=True):
-    regular_dis = initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
-
-    regular_dis.eval()
-    generator = initialize_model(gripper_generator,dense_gripper_generator_path)
-    generator.eval()
-    # counters to balance positive and negative
-    # [n_grasp_positive,n_grasp_negative,n_suction_positive,n_suction_negative]
-    # second, copy from online data to training data with down sampled point cloud
-    balance_indicator=0.0
-    unbalance_allowance=0
-    online_pc_filenames = online_data.get_pc_names()
-    # assert len(online_pc_filenames) >= number_of_online_samples
-    random.shuffle(online_pc_filenames)
-    selection_p=get_selection_probabilty(online_data,online_pc_filenames)
-
-    from lib.report_utils import progress_indicator as pi
-    progress_indicator=pi(f'Get {number_of_online_samples} training data from online pool and apply maximum augmentation of {augmentation_factor} per sample : ',number_of_online_samples)
-
-    balance_counter2 = np.array([0, 0, 0, 0])
-    n = augmentation_factor
-    counter=0
-    for i,file_name in enumerate(online_pc_filenames):
-        if np.random.rand() > selection_p[i]: continue
-        sample_index=online_data.get_index(file_name)
-        try:
-            label=online_data.load_label_by_index(sample_index)
-            if label[4]==1 and load_grasp==False:continue
-            if label[23]==1 and load_suction==False: continue
-            if only_success and label[3]==0: continue
-            if label[3]==1 and balance_indicator>unbalance_allowance:
-                continue
-            elif label[3]==0 and balance_indicator<-1*unbalance_allowance:
-                continue
-
-            point_data=online_data.load_pc(file_name)
-        except Exception as e:
-            print(Fore.RED, str(e),Fore.RESET)
-            continue
-        center_point = np.copy(label[:3])
-        if activate_balance_data:
-            balance_data= unbalance_check(label, balance_counter2)==0
-            if skip_unbalanced_samples and not balance_data:continue
-
-            n=augmentation_factor if balance_data else 1
-
-        # for j in range(n):
-        j=0
-        # print(j)
-        # print(center_point)
-
-        down_sampled_pc, index = random_sampling_augmentation(center_point, point_data, config.num_points)
-        if index is None:
-            break
-
-        # data-centric adversial measure
-        if label[3] == 1:
-            with torch.no_grad():
-                pc_torch = torch.from_numpy(down_sampled_pc).to('cuda')[None, :, 0:3].float()
-                dense_pose = generator(pc_torch)
-                quality_score, grasp_ability_score = regular_dis(pc_torch, dense_pose)
-                target_score = quality_score[0, 0, index].item()
-
-                if target_score > 0.5:
-                    print(Fore.RED, '   >', target_score, Fore.RESET)
-                    continue
-                else:
-                    print(Fore.GREEN, '   >', target_score, Fore.RESET)
-
-
-
-        normals = estimate_suction_direction(down_sampled_pc, view=False)
-        down_sampled_pc=np.concatenate([down_sampled_pc,normals],axis=-1)
-
-        label[:3] = down_sampled_pc[index,0:3]
-        training_data.save_labeled_data(down_sampled_pc,label,sample_index + f'_aug{j}')
-        if label[3]==1:
-            balance_indicator+=1
-        else:
-            balance_indicator-=1
-
-
-        if index is None:
-            continue
-
-        balance_counter2 = update_balance_counter(balance_counter2, is_grasp=label[4] == 1,score=label[3],n=n)
-        # try:
-        #     if generation_model:
-        #         sample_index=get_sample_index(file_name)
-        #         with torch.no_grad():
-        #             for i in range(n):
-        #                 pc = online_data.load_pc_with_mean(file_name)
-        #                 generation_model.eval()
-        #                 pc = pc.cuda(non_blocking=True)
-        #                 if label[4] == 1: # for grasp ----------
-        #                     generated_label = get_grasp_label(pc, generation_model,get_low_score=label[3]==0)
-        #                 else: # for suction -----------------
-        #                     generated_label = get_suction_label(pc, generation_model,get_low_score=label[3]==0)
-        #                 pc_ = pc.detach().cpu().numpy().squeeze()
-        #                 # save the generated label data
-        #                 training_data.save_labeled_data(pc_,generated_label,sample_index + f'_gen{i}')
-        #
-        #         # The score in the generated label is not 1, but we select the highest score generated by the model.
-        #         # for simplicity the balance counter will be updated considering the score is equal to 1 means success grasp/suction
-        #         balance_counter2 = update_balance_counter(balance_counter2, is_grasp=label[4] == 1,score=label[3],n=n)
-        # except Exception as e:
-        #     print(Fore.RED,'Unable to generate labeled data. exception message: ',str(e),Fore.RESET)
-        if move_online_files:
-            # move copied labeled_data from online data to rehearsal data
-            move_single_labeled_sample(online_data, rehearsal_data, file_name)
-
-        counter+=1
-        progress_indicator.step(counter)
-
-        if counter >= number_of_online_samples: break
-
-    # view_data_summary(balance_counter=balance_counter2)
-    return balance_counter2
 
 
 def train(EPOCHS_,model,batch_size,directory):
@@ -270,9 +131,7 @@ def train_suction(n_samples=None):
         online_samples_per_round=n_samples
     training_data.remove_all_labeled_data()
     if len(training_data) == 0:
-        load_training_data_from_online_pool(number_of_online_samples=online_samples_per_round,
-                                                               generation_model=None, move_online_files=move_trained_data,
-                                                               load_grasp=False, load_suction=True)
+        load_training_data_from_online_pool(number_of_online_samples=online_samples_per_round )
     current_model = affordance_net()
     try:
         current_model = initialize_model_state(current_model, affordance_net_model_path)
