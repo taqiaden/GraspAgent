@@ -291,7 +291,7 @@ def process_feedback(action,state,trail_data,img_grasp_pre,img_suction_pre,full_
     award = 0
     global shuffling_probability
     #states
-        #0 grasp action is performed
+        #0 grasp action is executed
         #1 failed to find a planning path
         #2 reset
         #3 collision

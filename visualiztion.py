@@ -6,7 +6,7 @@ import random
 
 from Configurations import config
 from lib.bbox import decode_gripper_pose
-from lib.depth_map import create_point_cloud_from_depth_image, CameraInfo
+from lib.depth_map import depth_to_point_clouds, CameraInfo
 from lib.pc_utils import numpy_to_o3d
 import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
@@ -250,7 +250,7 @@ def vis_depth_map(depth, view_as_point_cloud=True):
         if isinstance(depth,torch.Tensor):
             depth=depth.numpy()
         camera = CameraInfo(480, 360, 1122.375, 1122.375, 296, 211, 1000)
-        cloud = create_point_cloud_from_depth_image(depth, camera)
+        cloud = depth_to_point_clouds(depth, camera)
 
         points = cloud.reshape(-1, 3)
         point = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))

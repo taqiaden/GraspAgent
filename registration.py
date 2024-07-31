@@ -1,46 +1,13 @@
 import numpy as np
 import cv2
-from PIL import Image
 from Configurations.ENV_boundaries import depth_lower_bound, depth_factor
-from lib.depth_map import create_depth_image_from_point_cloud, CameraInfo, create_point_cloud_from_depth_image
+from lib.depth_map import point_clouds_to_depth, CameraInfo, depth_to_point_clouds
 from lib.image_utils import view_image
-from lib.pc_utils import refine_point_cloud, apply_mask
+from lib.pc_utils import refine_point_cloud
 from visualiztion import view_npy_open3d
 
 camera = CameraInfo(712, 480, 1428, 1466, 682, 287, 1000)
 
-def depth_image_to_voxel(RGB_D, camera):
-    depth=RGB_D[:,:,0]
-    assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
-    xmap = np.arange(camera.width)
-    ymap = np.arange(camera.height)
-    xmap, ymap = np.meshgrid(xmap, ymap)
-    points_z = depth / camera.scale
-    points_x = (xmap - camera.cx) * points_z / camera.fx
-    points_y = (ymap - camera.cy) * points_z / camera.fy
-    if RGB_D.shape[-1]==4:
-        colors=RGB_D[:,:,1:]
-        cloud = np.stack([points_x, points_y, points_z], axis=-1)
-        max_=np.max(cloud[:,:,2])
-        cloud=np.concatenate([cloud,colors],axis=-1)
-        cloud = cloud.reshape([-1, 6])
-    else:
-        cloud = np.stack([points_x, points_y, points_z], axis=-1)
-        cloud = cloud.reshape([-1, 3])
-    mask = cloud[:, 2] != 0
-    cloud = cloud[mask]
-
-    # cloud2=np.copy(cloud)
-    # cloud3=np.copy(cloud)
-    # upper_bound=1.3192
-    # lower_bound=1.0992
-    # print(max_)
-    # cloud2[:,2]=cloud2[:,2]*0.0+max_+0.1
-    # cloud3[:,2]=cloud3[:,2]*0.0+max_-0.3
-    # cloud=np.concatenate([cloud,cloud2,cloud3],axis=0)
-
-    view_npy_open3d(cloud)
-    return cloud
 def transform_to_camera_frame(pc, reverse=False):
     a=-0.4*np.pi/180
     angle_correction1=np.array([[np.cos(a), -np.sin(a), 0.0, 0.0],
@@ -74,8 +41,13 @@ def transform_to_camera_frame(pc, reverse=False):
 
 def pc_to_depth_map(pc):
     transformed = transform_to_camera_frame(pc)
-    depth = create_depth_image_from_point_cloud(transformed, camera)
+    depth = point_clouds_to_depth(transformed, camera)
     return depth[:,:,np.newaxis]
+
+def depth_map_to_pc(depth):
+    pc = depth_to_point_clouds(depth, camera)
+    pc = transform_to_camera_frame(pc,reverse=True)
+    return pc
 
 def get_rgb_heap(rgb_full):
     rgb = cv2.rotate(rgb_full, cv2.ROTATE_180)
@@ -92,48 +64,25 @@ def standardize_depth(depth,reverse=False):
         result_depth=(result_depth-depth_lower_bound)/depth_factor
     return result_depth
 
+def view_colored_point_cloud(RGB,Depth):
+    heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255
+    RGB_D = np.concatenate([Depth, heap_rgb], axis=-1)
+    colored_pc = depth_to_point_clouds(RGB_D, camera)
+    colored_pc[:,0:3] = transform_to_camera_frame(colored_pc[:,0:3], reverse=True)
+    view_npy_open3d(colored_pc)
+
 if __name__ == "__main__":
     rgb = cv2.imread('Frame_0.ppm')  # [1200,1920,3]
-    # rgb_full=cv2.cvtColor(bgr_full,cv2.COLOR_BGR2RGB)
-    # view_image(rgb_full)
 
     heap_rgb=get_rgb_heap(rgb)
-    # view_image(heap_rgb)
 
     pc = np.load('pc_tmp_data.npy')
     pc = refine_point_cloud(pc)
-    pc = apply_mask(pc)
+
     heap_depth=pc_to_depth_map(pc)
 
     standard_heap_depth=standardize_depth(heap_depth, reverse=False)
-    # view_image(standard_heap_depth)
 
-    # print(heap_depth[0,0,0])
-    # print(standard_heap_depth[0,0,0])
-    # print(standard_heap_depth)
-    print(heap_depth.shape)
-    np.save('depth.npy',heap_depth)
-    test = np.load('depth.npy')
-
-
-    print(np.sum(test-heap_depth))
-
-    view_image(test)
-    #
-    # print(heap_rgb.shape)
-    # BGR=cv2.cvtColor(heap_rgb,cv2.COLOR_RGB2BGR)
-    # view_image(heap_rgb)
-    cv2.imwrite('rgb.png',heap_rgb)
-    np.save('rgb.npy', heap_rgb)
-    test = cv2.imread('rgb.png')
-    print(np.sum(test-heap_rgb))
-
-    # view_image(test)
-
-    heap_rgb=cv2.cvtColor(np.float32(heap_rgb), cv2.COLOR_BGR2RGB)/255
-    RGB_D=np.concatenate([heap_depth,heap_rgb],axis=-1)
-    np.save('rgb_d.npy',RGB_D)
-    depth_image_to_voxel(RGB_D, camera)
-    colored_pc = create_point_cloud_from_depth_image(RGB_D, camera)
-
-
+    view_image(heap_rgb)
+    view_image(heap_depth)
+    view_colored_point_cloud(heap_rgb,heap_depth)

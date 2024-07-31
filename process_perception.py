@@ -1,7 +1,7 @@
 import os
 import subprocess
 from colorama import Fore
-
+import cv2
 from Configurations.config import home_dir
 from lib.pc_utils import refine_point_cloud, apply_mask, random_down_sampling, closest_point
 from lib.report_utils import wait_indicator as wi
@@ -9,12 +9,18 @@ import numpy as np
 from Configurations import config
 from Run import simulation_mode
 import cv2 as cv
+
+from registration import pc_to_depth_map
+
 sensory_pc_path = home_dir+'pc_tmp_data.npy'
 get_point_bash='./bash/get_point.sh'
 texture_image_path = config.home_dir + 'texture_image.jpg'
 get_rgb_bash='./bash/get_rgb.sh'
 rgb_path='Frame_0.ppm'
 offline_point_cloud= True
+
+last_rgb=None
+last_depth=None
 
 def get_new_perception():
     ctime_stamp = os.path.getctime(texture_image_path)
@@ -63,8 +69,7 @@ def get_rgb():
 
 
 def get_real_data():
-    point_data = np.load(sensory_pc_path) # (<191000, 3) shape is not constant
-    # np.save(empty_bin, point_data)
+    point_data = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant
 
     point_data=refine_point_cloud(point_data)
 
@@ -72,6 +77,10 @@ def get_real_data():
 
     full_point_clouds = apply_mask(point_data)
 
+    global last_rgb
+    global last_depth
+    last_rgb = cv2.imread(texture_image_path)
+    last_depth=pc_to_depth_map(full_point_clouds)
 
     point_data_choice=random_down_sampling(full_point_clouds,config.num_points)
 

@@ -10,7 +10,7 @@ class CameraInfo():
         self.cy = cy
         self.scale = scale
 
-def create_point_cloud_from_depth_image(RGB_D, camera):
+def depth_to_point_clouds(RGB_D, camera):
     depth=RGB_D[:,:,0]
     assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
 
@@ -32,7 +32,7 @@ def create_point_cloud_from_depth_image(RGB_D, camera):
     cloud = cloud[mask]
     return cloud
 
-def create_depth_image_from_point_cloud(pc, camera):
+def point_clouds_to_depth(pc, camera):
     depth_map = np.zeros([camera.height, camera.width])
     mask = pc[:, 2] != 0
     pc = pc[mask]
