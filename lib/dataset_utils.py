@@ -5,6 +5,7 @@ import re
 import sys
 from datetime import datetime
 
+import cv2
 import numpy as np
 import smbclient
 import torch
@@ -36,30 +37,24 @@ class data():
         self.is_local=is_local
         self.pc_folder='point_cloud/'
         self.label_folder='label/'
+        self.rgb_folder='rgb/'
+        self.depth_folder='depth/'
         self.pc_dir=dir+self.pc_folder
         self.label_dir=dir+self.label_folder
+        self.rgb_dir=dir+self.rgb_folder
+        self.depth_dir=dir+self.depth_folder
         self.down_sampled_dir=dir+'down_sampled/'
         self.pc_file_sufix='_pointdata.npy'
         self.label_file_sufix='_label.npy'
+        self.rgb_file_sufix='_rgb.jpg'
+        self.depth_file_sufix='_depth.npy'
         self.os=os if self.is_local else smbclient
         self.load_numpy=self.custom_np_load if self.is_local else load_numpy_from_server
         self.save_numpy=np.save if self.is_local else save_numpy_to_server
 
-    def initialize_directories(self,ordered_dir_list):
-        for dir in ordered_dir_list:
-            self.make_dir(dir)
     def make_dir(self,dir):
         if not self.os.path.exists(dir):
             self.os.mkdir(dir)
-    def activate_category_pool(self, category_id):
-        if category_id is not None:
-            category_sub_folder = f'Category_{category_id}'
-            # self.pc_folder = category_sub_folder + '/' + 'point_cloud/'
-            # self.label_folder = category_sub_folder + '/' + 'label/'
-            self.dir = self.dir + category_sub_folder + '/'
-            self.pc_dir = self.dir + self.pc_folder
-            self.label_dir = self.dir + self.label_folder
-            self.category_id = category_id
     def custom_np_load(self,file_path):
         return np.load(file_path,allow_pickle=True)
     def check_if_local_dir(self,dir):
@@ -74,6 +69,11 @@ class data():
         return self.get_names(self.pc_dir,subset_indexes)
     def get_label_names(self):
         return self.get_names(self.label_dir)
+    def get_rgb_names(self):
+        return self.get_names(self.rgb_dir)
+    def get_depth_names(self):
+        return self.get_names(self.depth_dir)
+
     def check_missing_label(self):
         filenames = self.os.listdir(self.pc_dir)
         for filename in filenames:
@@ -98,32 +98,45 @@ class data():
     def load_pc_by_index(self,index):
         pc_full_path=self.pc_dir+index+self.pc_file_sufix
         return self.load_numpy(pc_full_path)
+    def load_rgb_by_index(self,index):
+        rgb_full_path=self.rgb_dir+index+self.rgb_file_sufix
+        return cv2.imread(rgb_full_path)
+    def load_depth_by_index(self,index):
+        depth_full_path=self.depth_dir+index+self.depth_file_sufix
+        return self.load_numpy(depth_full_path)
     def load_label(self,filename):
         label_full_path = self.label_dir + filename
         return self.load_numpy(label_full_path)
     def load_pc(self, filename):
-
         pc_full_path = self.pc_dir + filename
         return self.load_numpy(pc_full_path)
-    def load_pc_with_mean(self,filename):
-        point_data=self.load_pc(filename)
-        # point_data = refine_point_cloud(point_data)
-        # point_data = apply_mask(point_data)
-        point_data_choice = random_down_sampling(point_data, config.num_points)
-        new_point_data = point_data_choice[:, :3]
-        new_point_data = torch.from_numpy(new_point_data).float().unsqueeze(0)
-        return new_point_data
-    def load_labeled_data(self,pc_filename=None,label_filename=None):
-        if pc_filename and (label_filename is None):label_filename = pc_filename.replace(self.pc_file_sufix, self.label_file_sufix)
-        if label_filename and (pc_filename is None):pc_filename = label_filename.replace(self.label_file_sufix, self.pc_file_sufix)
-
-        pc=self.load_pc(pc_filename)
+    def load_rgb(self, filename):
+        rgb_full_path = self.rgb_dir + filename
+        return cv2.imread(rgb_full_path)
+    def load_depth(self, filename):
+        depth_full_path = self.depth_dir + filename
+        return self.load_numpy(depth_full_path)
+    def load_labeled_data(self,rgb_filename=None,depth_filename=None,label_filename=None):
+        if rgb_filename is not None:
+            label_filename = rgb_filename.replace(self.rgb_file_sufix, self.label_file_sufix)
+            depth_filename = rgb_filename.replace(self.rgb_file_sufix, self.depth_file_sufix)
+        elif depth_filename is not None:
+            label_filename = depth_filename.replace(self.depth_file_sufix, self.label_file_sufix)
+            rgb_filename = depth_filename.replace(self.depth_file_sufix, self.rgb_file_sufix)
+        elif label_filename is not None:
+            depth_filename = label_filename.replace(self.label_filename, self.depth_file_sufix)
+            rgb_filename = label_filename.replace(self.label_filename, self.rgb_file_sufix)
+        else:
+            print(Fore.Red(),'pass file name',Fore.RESET)
+            return None,None,None
+        rgb=self.load_rgb(rgb_filename)
+        depth=self.load_depth(depth_filename)
         label=self.load_label(label_filename)
-        return pc,label
-    def save_labeled_data(self,pc, label, name_without_suffix,save_to=None):
-        if save_to is None:save_to=self.dir
-        self.save_numpy(save_to+self.pc_folder + name_without_suffix + self.pc_file_sufix, pc)
-        self.save_numpy(save_to+self.label_folder + name_without_suffix + self.label_file_sufix, label)
+        return rgb,depth,label
+    def save_labeled_data(self,rgb,depth, label, name_without_suffix):
+        cv2.imwrite(self.dir+self.rgb_dir + name_without_suffix + self.rgb_file_sufix, rgb)
+        self.save_numpy(self.dir+self.depth_folder + name_without_suffix + self.depth_file_sufix, depth)
+        self.save_numpy(self.dir+self.label_folder + name_without_suffix + self.label_file_sufix, label)
 
     def save_label(self, label, name_without_suffix, save_to=None):
         if save_to is None: save_to = self.dir
@@ -139,10 +152,12 @@ class data():
                 return False
         return True
     def remove_all_labeled_data(self):
-        self.remove_all_files(self.pc_dir)
+        self.remove_all_files(self.rgb_dir)
+        self.remove_all_files(self.depth_dir)
         self.remove_all_files(self.label_dir)
     def remove_labeled_data(self,name_without_suffix):
-        self.os.remove(self.pc_dir+name_without_suffix+self.pc_file_sufix)
+        self.os.remove(self.rgb_dir+name_without_suffix+self.rgb_file_sufix)
+        self.os.remove(self.depth_dir+name_without_suffix+self.depth_file_sufix)
         self.os.remove(self.label_dir+name_without_suffix+self.label_file_sufix)
     def length_of_label_container(self):
         return len(self.os.listdir(self.label_dir))
@@ -223,7 +238,7 @@ class data():
     def labels_len(self):
         return len(self.os.listdir(self.label_dir))
     def __len__(self):
-        return len(self.os.listdir(self.pc_dir))
+        return len(self.os.listdir(self.label_dir))
 
 class realtime_data(data):
     def __init__(self):
@@ -248,7 +263,6 @@ class online_data_local(data):
 # rehearsal_data=rehearsal_data()
 # training_data=training_data()
 # online_data=online_data()
-
 
 def export_suction_labels(from_dataset,to_dataset):
     suction_label_names = from_dataset.get_suction_labels()

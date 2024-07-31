@@ -8,3 +8,6 @@ floor_elevation=0.05
 
 ref_pc_center=torch.tensor([0.4364,-0.0091,0.0767]).to('cuda')
 ref_pc_center_6=torch.tensor([0.4364,-0.0091,0.0767,0,0,0]).to('cuda')
+
+depth_lower_bound=1200.
+depth_factor=100.

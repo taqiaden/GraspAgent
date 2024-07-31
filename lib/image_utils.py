@@ -1,3 +1,4 @@
+import cv2
 import torch
 from PIL import Image
 import numpy as np
@@ -28,3 +29,7 @@ def resize_image(im,size):
     image=image.resize((size[1],size[0]),Image.ANTIALIAS)
     image = np.asarray(image)
     return image
+
+def view_image(image,title=''):
+    cv2.imshow(title, image)
+    cv2.waitKey(0)
