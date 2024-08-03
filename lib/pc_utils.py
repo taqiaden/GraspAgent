@@ -48,13 +48,12 @@ def refine_point_cloud(point_cloud):
     return point_cloud
 
 
-def numpy_to_o3d( npy,color=None):
+def numpy_to_o3d( pc,normals=None,color=None):
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(npy[:,0:3])
-    if npy.shape[-1]==6:
-        pcd.colors = o3d.utility.Vector3dVector(npy[:,3:])
-
+    pcd.points = o3d.utility.Vector3dVector(pc)
     if color is not None: pcd.colors = o3d.utility.Vector3dVector(color)
+    if normals is not None: pcd.normals = o3d.utility.Vector3dVector(normals)
+
     return pcd
 
 def apply_mask(point_data):
@@ -67,7 +66,7 @@ def get_o3d_norms(pcd):
     pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     return pcd
 def get_npy_norms(pc):
-    pcd=numpy_to_o3d(npy=pc)
+    pcd=numpy_to_o3d(pc=pc)
     pcd=get_o3d_norms(pcd)
     return pcd
 

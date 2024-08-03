@@ -27,8 +27,6 @@ def visualize_vox(npy):
     points_list = np.asarray(points_list)
     view_npy_open3d(points_list)
 def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask):
-
-
     # Method 1
     pose_good_grasp_list = []
     for i in range(5000):
@@ -56,17 +54,9 @@ def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask
 
         pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
 
-
-
         pose_good_grasp_list.append(pose_good_grasp)
     if len(pose_good_grasp_list) == 0: return
     pose_good_grasp = np.concatenate(pose_good_grasp_list, axis=0)
-    # print(pose_good_grasp.shape)
-    # print(target_mask.squeeze().shape)
-    # print(pc.shape)
-    # masked_pc=pc[0,target_mask.squeeze(),0:3]
-    # print(masked_pc.shape)
-    # print(pc[0, :, 0:3].shape)
 
     vis_scene(pose_good_grasp[:, :], npy=pc[0, :, 0:3].cpu().numpy())
 
@@ -87,8 +77,8 @@ def view_o3d_objects(list_of_objects):
         vis.run()
         vis.destroy_window()
 
-def view_npy_open3d(npy, view_coordinate=True,geometries_list=None):
-    pcd = numpy_to_o3d(npy=npy)
+def view_npy_open3d(pc,normals=None,color=None, view_coordinate=True,geometries_list=None):
+    pcd = numpy_to_o3d(pc,normals=normals,color=color)
     view_o3d(pcd,view_coordinate,geometries_list)
 
 def get_random_color():
@@ -241,16 +231,12 @@ def visualize_grasp_and_suction_points(suction_cls_pred_mask, grasp_cls_pred_mas
         scene_all.add_geometry(pointcloud_blue_)
     scene_all.show()
 
-
-
-
-
 def vis_depth_map(depth, view_as_point_cloud=True):
     if view_as_point_cloud:
         if isinstance(depth,torch.Tensor):
             depth=depth.numpy()
         camera = CameraInfo(480, 360, 1122.375, 1122.375, 296, 211, 1000)
-        cloud = depth_to_point_clouds(depth, camera)
+        cloud,mask = depth_to_point_clouds(depth, camera)
 
         points = cloud.reshape(-1, 3)
         point = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))

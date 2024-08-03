@@ -45,7 +45,7 @@ def pc_to_depth_map(pc):
     return depth[:,:,np.newaxis]
 
 def depth_map_to_pc(depth):
-    pc = depth_to_point_clouds(depth, camera)
+    pc,mask = depth_to_point_clouds(depth, camera)
     pc = transform_to_camera_frame(pc,reverse=True)
     return pc
 
@@ -66,8 +66,7 @@ def standardize_depth(depth,reverse=False):
 
 def view_colored_point_cloud(RGB,Depth):
     heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255
-    RGB_D = np.concatenate([Depth, heap_rgb], axis=-1)
-    colored_pc = depth_to_point_clouds(RGB_D, camera)
+    colored_pc,mask = depth_to_point_clouds(Depth.squeeze(), camera,rgb=heap_rgb)
     colored_pc[:,0:3] = transform_to_camera_frame(colored_pc[:,0:3], reverse=True)
     view_npy_open3d(colored_pc)
 

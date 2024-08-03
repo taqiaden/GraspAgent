@@ -1,15 +1,16 @@
 import torch
 from colorama import Fore
 
+from Configurations.config import check_points_extension
 from lib.models_utils import load_optimizer_state, export_model_state
 
 
 def load_opt(optimizer,path):
     try:
         if isinstance(optimizer,torch.optim.Adam):
-            optimizer=load_optimizer_state(optimizer, path+'.ADAM')
+            optimizer=load_optimizer_state(optimizer, path+'_ADAM'+check_points_extension)
         else:
-            optimizer=load_optimizer_state(optimizer, path+'.SGD')
+            optimizer=load_optimizer_state(optimizer, path+'_SGD'+check_points_extension)
     except Exception as e:
         print(Fore.RED,str(e),Fore.RESET)
 
@@ -17,9 +18,9 @@ def load_opt(optimizer,path):
 
 def export_optm(optimizer,path):
     if isinstance(optimizer, torch.optim.Adam):
-        export_model_state(optimizer, path+'.ADAM')
+        export_model_state(optimizer, path+'_ADAM')
     else:
-        export_model_state(optimizer, path+'.SGD')
+        export_model_state(optimizer, path+'_ADAM')
 
 def decay_lr(min_lr,max_lr,model,exponent=1):
     parameters = []

@@ -1,13 +1,14 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from Configurations.config import ref_pc_center
+from Configurations.ENV_boundaries import ref_pc_center
 from lib.models_utils import reshape_for_layer_norm
 from models.pointnet2_backbone import PointNetbackbone
 
 dropout_p=0.0
-dense_gripper_generator_path=r'dense_gripper_generator.pth.tar'
-contrastive_discriminator_path=r'contrastive_discriminator.pth.tar'
+dense_gripper_generator_path=r'dense_gripper_generator'
+contrastive_discriminator_path=r'contrastive_discriminator'
+
 
 class approach_module(nn.Module):
     def __init__(self):
@@ -450,5 +451,3 @@ class contrastive_discriminator(nn.Module):
 
         return contrastive_output
 
-# dense_gripper_generator_net_=initialize_model(gripper_generator,dense_gripper_generator_path)
-# contrastive_discriminator_net_=initialize_model(contrastive_discriminator,contrastive_discriminator_path)

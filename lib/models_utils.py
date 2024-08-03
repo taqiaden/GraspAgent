@@ -5,8 +5,9 @@ import torch
 from colorama import Fore
 
 from Configurations import config
-from Configurations.config import check_points_directory
+from Configurations.config import check_points_directory, check_points_extension
 from lib.IO_utils import save_data_to_server
+
 
 def reshape_for_layer_norm(tensor,reverse=False,n_points=config.num_points):
     if reverse==False:
@@ -70,15 +71,15 @@ def get_model_state(model):
 def export_model_state(model,path):
     checkpoint_dict = get_model_state(model)
 
-    full_path=check_points_directory+path
+    full_path=check_points_directory+path+check_points_extension
     # print('save check point to {}'.format(path))
     if os.path.isdir(check_points_directory):
         torch.save(checkpoint_dict,full_path)
     else:
         save_data_to_server(checkpoint_dict,full_path)
 
-def load_dictionary(path):
-    full_path=check_points_directory+path
+def load_dictionary(file_name):
+    full_path=check_points_directory+file_name
     if os.path.exists(full_path):
         # local path
         return torch.load(full_path, map_location='cpu')
@@ -96,7 +97,7 @@ def load_optimizer_state(optimizer,optimizer_state_path):
     return optimizer
 
 def initialize_model_state(model,model_state_path):
-    pretrained_dict=load_dictionary(model_state_path)
+    pretrained_dict=load_dictionary(model_state_path+check_points_extension)
 
     if pretrained_dict:
         model.load_state_dict(pretrained_dict['state_dict'], strict=False)

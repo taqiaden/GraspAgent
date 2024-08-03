@@ -1,13 +1,13 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from Configurations.config import ref_pc_center
-from lib.models_utils import reshape_for_layer_norm, initialize_model
+from Configurations.ENV_boundaries import ref_pc_center
+from lib.models_utils import reshape_for_layer_norm
 from models.pointnet2_backbone import PointNetbackbone
-from Configurations.config import ip_address
+from models.resunet import res_unet
 
 dropout_p=0.0
-dense_gripper_discriminator_path=r'dense_gripper_discriminator.pth.tar'
+dense_gripper_discriminator_path=r'dense_gripper_discriminator'
 
 class discriminator(nn.Module):
     def __init__(self):
@@ -45,19 +45,22 @@ class discriminator(nn.Module):
         ).to('cuda')
 
     def forward(self, representation, dense_pose, **kwargs):
-        assert dense_pose.shape[1] == 7
-        reshaped_representation = reshape_for_layer_norm(representation)
+        assert dense_pose.shape[1] == 7,f'{dense_pose.shape}'
+        number_of_points=dense_pose.shape[-1]
+
+        reshaped_representation = reshape_for_layer_norm(representation,n_points=number_of_points)
+
 
         encoded_point = self.point_encoder(reshaped_representation)
 
-        reshaped_pose = reshape_for_layer_norm(dense_pose)
+        reshaped_pose = reshape_for_layer_norm(dense_pose,n_points=number_of_points)
         encoded_pose = self.pose_encoder(reshaped_pose)
         encoded_pose = F.softmax(encoded_pose, dim=-1)
 
         attention_map = encoded_point * encoded_pose
 
         output = self.decoderB(attention_map)  # [b,1,n_points]
-        output = reshape_for_layer_norm(output, reverse=True)
+        output = reshape_for_layer_norm(output, reverse=True,n_points=number_of_points)
         return output
 
 class discriminator3(nn.Module):
@@ -88,15 +91,17 @@ class discriminator3(nn.Module):
 
     def forward(self, representation, dense_pose, **kwargs):
         assert dense_pose.shape[1] == 7
-        reshaped_representation = reshape_for_layer_norm(representation)
-        reshaped_pose = reshape_for_layer_norm(dense_pose)
+        number_of_points=dense_pose.shape[-1]
+
+        reshaped_representation = reshape_for_layer_norm(representation,n_points=number_of_points)
+        reshaped_pose = reshape_for_layer_norm(dense_pose,n_points=number_of_points)
 
         encoded_pose=self.pose_encoder(reshaped_pose)
         encoded_rep=self.point_encoder(reshaped_representation)
         features=torch.cat([encoded_rep,encoded_pose],dim=-1)
 
         output = self.decoderB(features)  # [b,1,n_points]
-        output = reshape_for_layer_norm(output, reverse=True)
+        output = reshape_for_layer_norm(output, reverse=True,n_points=number_of_points)
         return output
 
 class grasp_ability(nn.Module):
@@ -114,9 +119,11 @@ class grasp_ability(nn.Module):
         ).to('cuda')
 
     def forward(self, representation, **kwargs):
-        reshaped_representation = reshape_for_layer_norm(representation)
+        number_of_points=representation.shape[-1]
+
+        reshaped_representation = reshape_for_layer_norm(representation,n_points=number_of_points)
         output = self.decoderB(reshaped_representation)  # [b,1,n_points]
-        output = reshape_for_layer_norm(output, reverse=True)
+        output = reshape_for_layer_norm(output, reverse=True,n_points=number_of_points)
         return output
 class gripper_discriminator(nn.Module):
     def __init__(self):
@@ -147,6 +154,4 @@ class gripper_discriminator(nn.Module):
         grasp_ability_score=self.grasp_ability_(representation.detach().clone())
 
 
-        return quality_score,grasp_ability_score
-
-# dense_gripper_discriminator_net_=initialize_model(gripper_discriminator,dense_gripper_discriminator_path)
+        return quality_score

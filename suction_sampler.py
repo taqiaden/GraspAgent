@@ -4,7 +4,7 @@ import open3d as o3d
 
 from lib.pc_utils import get_npy_norms, numpy_to_o3d
 
-def view_suction_direction(point_data,npy_norms,view_mask,score):
+def view_suction_direction(point_data,npy_norms,view_mask=None,score=None):
     torch_norms = torch.from_numpy(npy_norms)
     torch_norms[~view_mask.squeeze(), 0:3] *= 0.0
 

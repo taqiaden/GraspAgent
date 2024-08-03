@@ -9,7 +9,6 @@ import numpy as np
 from Configurations import config
 from Run import simulation_mode
 import cv2 as cv
-
 from registration import pc_to_depth_map
 
 sensory_pc_path = home_dir+'pc_tmp_data.npy'
@@ -23,7 +22,8 @@ last_rgb=None
 last_depth=None
 
 def get_new_perception():
-    ctime_stamp = os.path.getctime(texture_image_path)
+    ctime_stamp_rgb = os.path.getctime(rgb_path)
+    ctime_stamp_texture = os.path.getctime(texture_image_path)
     ctime_stamp_pc = os.path.getctime(sensory_pc_path)
     if simulation_mode and offline_point_cloud == True:
         # get new data from data pool
@@ -36,8 +36,9 @@ def get_new_perception():
     # os.system(get_point_bash)
     wait = wi('Waiting for new perception data')
     i=0
-    while os.path.getctime(texture_image_path)==ctime_stamp or ctime_stamp_pc == os.path.getctime(sensory_pc_path):
-        # if (i>1000 and get_last_data==True) or offline_point_cloud==True:
+    while (os.path.getctime(rgb_path)==ctime_stamp_rgb or
+           ctime_stamp_pc == os.path.getctime(sensory_pc_path) or
+           os.path.getctime(texture_image_path)==ctime_stamp_texture):
         if  offline_point_cloud == True:
             print(Fore.RED, 'Camera is not available. Load data from pool', Fore.RESET)
             break
@@ -55,7 +56,6 @@ def get_side_bins_images():
     img_suction, img_grasp = crop_side_tray_image(im)
     return img_suction, img_grasp
 
-
 def get_rgb():
     ctime_stamp = os.path.getctime(rgb_path)
     subprocess.run(get_rgb_bash)
@@ -66,7 +66,6 @@ def get_rgb():
         wait.step(0.01)
         i += 1
     wait.end()
-
 
 def get_real_data():
     point_data = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant
@@ -79,7 +78,7 @@ def get_real_data():
 
     global last_rgb
     global last_depth
-    last_rgb = cv2.imread(texture_image_path)
+    last_rgb = cv2.imread(rgb_path)
     last_depth=pc_to_depth_map(full_point_clouds)
 
     point_data_choice=random_down_sampling(full_point_clouds,config.num_points)

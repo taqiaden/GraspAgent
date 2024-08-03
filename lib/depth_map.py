@@ -10,27 +10,27 @@ class CameraInfo():
         self.cy = cy
         self.scale = scale
 
-def depth_to_point_clouds(RGB_D, camera):
-    depth=RGB_D[:,:,0]
+def depth_to_point_clouds(depth, camera,rgb=None):
+    '''check camera intrinsic'''
     assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
-
+    '''process point clouds'''
     xmap = np.arange(camera.width)
     ymap = np.arange(camera.height)
     xmap, ymap = np.meshgrid(xmap, ymap)
     points_z = depth / camera.scale
     points_x = (xmap - camera.cx) * points_z / camera.fx
     points_y = (ymap - camera.cy) * points_z / camera.fy
-    if RGB_D.shape[-1]==4:
-        colors=RGB_D[:,:,1:]
-        cloud = np.stack([points_x, points_y, points_z], axis=-1)
-        cloud=np.concatenate([cloud,colors],axis=-1)
-        cloud = cloud.reshape([-1, 6])
-    else:
-        cloud = np.stack([points_x, points_y, points_z], axis=-1)
-        cloud = cloud.reshape([-1, 3])
-    mask = cloud[:, 2] != 0
+    cloud = np.stack([points_x, points_y, points_z], axis=-1)
+
+    '''assign colors'''
+    if rgb is  not None:
+        cloud=np.concatenate([cloud,rgb],axis=-1)
+
+    '''remove points with zero depth'''
+    mask = cloud[:,:, 2] != 0
+
     cloud = cloud[mask]
-    return cloud
+    return cloud,mask
 
 def point_clouds_to_depth(pc, camera):
     depth_map = np.zeros([camera.height, camera.width])

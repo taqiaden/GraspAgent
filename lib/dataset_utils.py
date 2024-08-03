@@ -18,9 +18,7 @@ from Configurations.config import  ip_address
 from Configurations import config
 from lib.report_utils import wait_indicator
 
-rehearsal_data_dir='dataset/rehearsal_data/'
 training_data_dir='dataset/training_data/'
-realtime_data_dir='dataset/realtime_dataset/'
 online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
 online_data_local_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
 def configure_smbclient():
@@ -30,120 +28,64 @@ def configure_smbclient():
     if config.hide_smbclient_log:logging.disable(sys.maxsize)
 configure_smbclient()
 
-class data():
-    def __init__(self,dir,is_local=True,dataset_name=None):
-        self.dir=dir
-        self.pool_name=dataset_name if dataset_name else 'Dataset'
+
+def custom_np_load(file_path):
+    return np.load(file_path, allow_pickle=True)
+class modality_pool():
+    def __init__(self,key_name,parent_dir,extension='npy',is_local=True):
+        self.key_name=key_name
         self.is_local=is_local
-        self.pc_folder='point_cloud/'
-        self.label_folder='label/'
-        self.rgb_folder='rgb/'
-        self.depth_folder='depth/'
-        self.pc_dir=dir+self.pc_folder
-        self.label_dir=dir+self.label_folder
-        self.rgb_dir=dir+self.rgb_folder
-        self.depth_dir=dir+self.depth_folder
-        self.down_sampled_dir=dir+'down_sampled/'
-        self.pc_file_sufix='_pointdata.npy'
-        self.label_file_sufix='_label.npy'
-        self.rgb_file_sufix='_rgb.jpg'
-        self.depth_file_sufix='_depth.npy'
+        self.extension=extension
+        self.folder=self.key_name+'/'
+        self.dir=parent_dir+self.folder
+        self.sufix='_'+self.key_name+'.'+self.extension
+
+        '''set proper local/server functions'''
         self.os=os if self.is_local else smbclient
-        self.load_numpy=self.custom_np_load if self.is_local else load_numpy_from_server
-        self.save_numpy=np.save if self.is_local else save_numpy_to_server
-
-    def make_dir(self,dir):
-        if not self.os.path.exists(dir):
-            self.os.mkdir(dir)
-    def custom_np_load(self,file_path):
-        return np.load(file_path,allow_pickle=True)
-    def check_if_local_dir(self,dir):
-        self.is_local=True if os.path.exists(dir) else False
-    def get_names(self,dir,subset_indexes=None):
-        entire_list=self.os.listdir(dir)
-        if subset_indexes is None:
-            return entire_list
-        else:
-            return [entire_list[x] for x in subset_indexes]
-    def get_pc_names(self,subset_indexes=None):
-        return self.get_names(self.pc_dir,subset_indexes)
-    def get_label_names(self):
-        return self.get_names(self.label_dir)
-    def get_rgb_names(self):
-        return self.get_names(self.rgb_dir)
-    def get_depth_names(self):
-        return self.get_names(self.depth_dir)
-
-    def check_missing_label(self):
-        filenames = self.os.listdir(self.pc_dir)
-        for filename in filenames:
-            label_path = self.label_dir + filename.replace(self.pc_file_sufix, self.label_file_sufix)
-            file_exist=self.os.path.exists(label_path)
-            if not file_exist:
-                print(Fore.RED, f'Label data is missing, expected label path: {label_path}', Fore.RESET)
+        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
+        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+    def make_dir(self):
+        if not self.os.path.exists(self.dir):
+            self.os.mkdir(self.dir)
+    def get_names(self):
+        return self.os.listdir(self.dir)
     def get_index(self,file_name):
         file_name_=os.path.splitext(file_name)[0]
         return re.findall(r'\d+', file_name_)[0]
-    def get_indexes(self,names=None):
-        file_names=self.get_names(self.dir) if names is None else names
+    def get_indexes(self):
+        file_names=self.get_names()
         return [self.get_index(x) for x in file_names]
-    def load_numpy(self,file_full_path):
-        # check if data and label exist
-        assert self.os.path.exists(file_full_path), f' The following file does not exist : {file_full_path}'
-        file = self.load_numpy(file_full_path)
-        return file
-    def load_label_by_index(self,index):
-        label_full_path = self.label_dir + index + self.label_file_sufix
-        return self.load_numpy(label_full_path)
-    def load_pc_by_index(self,index):
-        pc_full_path=self.pc_dir+index+self.pc_file_sufix
-        return self.load_numpy(pc_full_path)
-    def load_rgb_by_index(self,index):
-        rgb_full_path=self.rgb_dir+index+self.rgb_file_sufix
-        return cv2.imread(rgb_full_path)
-    def load_depth_by_index(self,index):
-        depth_full_path=self.depth_dir+index+self.depth_file_sufix
-        return self.load_numpy(depth_full_path)
-    def load_label(self,filename):
-        label_full_path = self.label_dir + filename
-        return self.load_numpy(label_full_path)
-    def load_pc(self, filename):
-        pc_full_path = self.pc_dir + filename
-        return self.load_numpy(pc_full_path)
-    def load_rgb(self, filename):
-        rgb_full_path = self.rgb_dir + filename
-        return cv2.imread(rgb_full_path)
-    def load_depth(self, filename):
-        depth_full_path = self.depth_dir + filename
-        return self.load_numpy(depth_full_path)
-    def load_labeled_data(self,rgb_filename=None,depth_filename=None,label_filename=None):
-        if rgb_filename is not None:
-            label_filename = rgb_filename.replace(self.rgb_file_sufix, self.label_file_sufix)
-            depth_filename = rgb_filename.replace(self.rgb_file_sufix, self.depth_file_sufix)
-        elif depth_filename is not None:
-            label_filename = depth_filename.replace(self.depth_file_sufix, self.label_file_sufix)
-            rgb_filename = depth_filename.replace(self.depth_file_sufix, self.rgb_file_sufix)
-        elif label_filename is not None:
-            depth_filename = label_filename.replace(self.label_filename, self.depth_file_sufix)
-            rgb_filename = label_filename.replace(self.label_filename, self.rgb_file_sufix)
+    def load_as_numpy(self, idx):
+        full_path = self.dir + idx+self.sufix
+        return self.load_numpy_(full_path)
+    def load_as_image(self, idx):
+        full_path = self.dir + idx + self.sufix
+        return cv2.imread(full_path)
+    def load(self, idx):
+        if self.extension=='jpg':
+            return self.load_as_image(idx)
         else:
-            print(Fore.Red(),'pass file name',Fore.RESET)
-            return None,None,None
-        rgb=self.load_rgb(rgb_filename)
-        depth=self.load_depth(depth_filename)
-        label=self.load_label(label_filename)
-        return rgb,depth,label
-    def save_labeled_data(self,rgb,depth, label, name_without_suffix):
-        cv2.imwrite(self.dir+self.rgb_dir + name_without_suffix + self.rgb_file_sufix, rgb)
-        self.save_numpy(self.dir+self.depth_folder + name_without_suffix + self.depth_file_sufix, depth)
-        self.save_numpy(self.dir+self.label_folder + name_without_suffix + self.label_file_sufix, label)
-
-    def save_label(self, label, name_without_suffix, save_to=None):
-        if save_to is None: save_to = self.dir
-        self.save_numpy(save_to + self.label_folder + name_without_suffix + self.label_file_sufix, label)
-    def remove_all_files(self,dir):
-        for filename in self.os.listdir(dir):
-            file_path = self.os.path.join(dir, filename)
+            return self.load_as_numpy(idx)
+    def save_as_numpy(self, data, idx):
+        self.save_numpy_( self.dir + idx + self.sufix, data)
+    def save_as_image(self, data, idx):
+        cv2.imwrite(self.dir + idx + self.sufix,data)
+    def save(self, data,idx):
+        if self.extension=='jpg':
+            return self.save_as_image(data,idx)
+        else:
+            return self.save_as_numpy(data,idx)
+    def remove_file(self,idx):
+        full_path = self.dir + idx + self.sufix
+        try:
+            if self.os.path.isfile(full_path) or self.os.path.islink(full_path):
+                self.os.unlink(full_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (full_path, e))
+            return False
+    def remove_all_files(self):
+        for filename in self.os.listdir(self.dir):
+            file_path = self.os.path.join(self.dir, filename)
             try:
                 if self.os.path.isfile(file_path) or self.os.path.islink(file_path):
                     self.os.unlink(file_path)
@@ -151,16 +93,52 @@ class data():
                 print('Failed to delete %s. Reason: %s' % (file_path, e))
                 return False
         return True
-    def remove_all_labeled_data(self):
-        self.remove_all_files(self.rgb_dir)
-        self.remove_all_files(self.depth_dir)
-        self.remove_all_files(self.label_dir)
-    def remove_labeled_data(self,name_without_suffix):
-        self.os.remove(self.rgb_dir+name_without_suffix+self.rgb_file_sufix)
-        self.os.remove(self.depth_dir+name_without_suffix+self.depth_file_sufix)
-        self.os.remove(self.label_dir+name_without_suffix+self.label_file_sufix)
-    def length_of_label_container(self):
-        return len(self.os.listdir(self.label_dir))
+    def __len__(self):
+        return len(self.os.listdir(self.dir))
+
+class data_pool():
+    def __init__(self,dir,is_local=True,dataset_name=None):
+        self.dir=dir
+        self.pool_name=dataset_name if dataset_name else 'Dataset'
+
+        '''check if dir is local'''
+        if is_local is not None:
+            self.is_local=is_local
+        elif os.path.exists(dir):
+            self.is_local=True
+        else:
+            self.is_local=False
+
+        '''define modalities pool'''
+        self.point_clouds=modality_pool('point_clouds',self.dir,'npy',self.is_local)
+        self.label=modality_pool('label',self.dir,'npy',self.is_local)
+        self.rgb=modality_pool('rgb',self.dir,'jpg',self.is_local)
+        self.depth=modality_pool('depth',self.dir,'npy',self.is_local)
+
+        '''set main modality'''
+        self.main_modality=self.label
+
+        '''set local/server functions'''
+        self.os=os if self.is_local else smbclient
+        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
+        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+
+    def load_numpy(self,file_full_path):
+        # check if data and label exist
+        assert self.os.path.exists(file_full_path), f' The following file does not exist : {file_full_path}'
+        file = self.load_numpy(file_full_path)
+        return file
+    def get_index(self,file_name):
+        file_name_=os.path.splitext(file_name)[0]
+        return re.findall(r'\d+', file_name_)[0]
+    def get_indexes(self):
+        return self.main_modality.get_indexes()
+    def clear(self):
+        self.point_clouds.remove_all_files()
+        self.label.remove_all_files()
+        self.rgb.remove_all_files()
+        self.depth.remove_all_files()
+
     def detect_duplication(self,dir):
         file_names=self.get_names(dir)
         counter=0
@@ -183,12 +161,12 @@ class data():
     def detect_duplicated_pc(self):
         self.detect_duplication(self.pc_dir)
     def get_suction_labels(self):
-        label_names=self.get_label_names()
+        label_names=self.label.get_names()
         suction_label_names=[]
         counter = 0
         view_counter = counter_progress('Number of suction labels found so far : ', counter)
         for label_name_ in label_names:
-            label=self.load_label(label_name_)
+            label=self.label.load_as_numpy(label_name_)
             is_suction=label[23]==1
             if is_suction:
                 suction_label_names.append(label_name_)
@@ -200,11 +178,11 @@ class data():
         load_finish=False
         while load_finish==False:
             try:
-                pc_names=self.get_pc_names()
+                pc_names=self.point_clouds.get_names()
                 time_seed = math.floor(datetime.now().timestamp())
                 np.random.seed(time_seed)
                 id=np.random.randint(0,len(pc_names))
-                pc=self.load_pc(pc_names[id])
+                pc=self.point_clouds.load_as_numpy(pc_names[id])
                 load_finish=True
             except Exception as e:
                 print(f'Load random pc error: {str(e)}')
@@ -213,16 +191,15 @@ class data():
         print('***** Search for suction labels and delete them')
         suction_label_names=self.get_suction_labels()
         for label_name in suction_label_names:
-            idx=self.get_index(label_name)
-            self.remove_labeled_data(idx)
-
+            idx=self.label.get_index(label_name)
+            self.label.remove_file(idx)
     def summary(self):
         wi=wait_indicator('Data are being analyzed ')
-        label_names = self.get_label_names()
+        label_names = self.label.get_names()
         grasp_times,suction_times,success_grasp,success_suction=0,0,0,0
         for filename in label_names:
             wi.step(skip_times=100)
-            label = self.load_label(filename)
+            label = self.label.load_numpy(filename)
             if label[23]>0.:
                 print(filename)
                 print('Score=',label[3])
@@ -235,28 +212,18 @@ class data():
 
         print('Number of grasp samples: ',grasp_times, f' ,among, {success_grasp} are successful attempts')
         print('Number of suction samples: ',suction_times, f' ,among, {success_suction} are successful attempts')
-    def labels_len(self):
-        return len(self.os.listdir(self.label_dir))
     def __len__(self):
-        return len(self.os.listdir(self.label_dir))
+        return len(self.main_modality)
 
-class realtime_data(data):
-    def __init__(self):
-        super(realtime_data,self).__init__(dir=realtime_data_dir,dataset_name='realtime')
-
-class rehearsal_data(data):
-    def __init__(self):
-        super(rehearsal_data,self).__init__(dir=rehearsal_data_dir,dataset_name='rehearsal')
-
-class training_data(data):
+class training_data(data_pool):
     def __init__(self):
         super(training_data,self).__init__(dir=training_data_dir,dataset_name='traning')
 
-class online_data(data):
+class online_data(data_pool):
     def __init__(self):
         super(online_data,self).__init__(dir=online_data_dir,is_local=False,dataset_name='online')
 
-class online_data_local(data):
+class online_data_local(data_pool):
     def __init__(self):
         super(online_data_local,self).__init__(dir=online_data_local_dir,is_local=True,dataset_name='online_local')
 
@@ -273,45 +240,14 @@ def export_suction_labels(from_dataset,to_dataset):
 
 if __name__ == '__main__':
 
-    realtime_data=realtime_data()
     online_data=online_data_local()
-    rehearsal_data=rehearsal_data()
 
-    label_names=online_data.get_label_names()
+    label_names=online_data.label.get_names()
     COUNTER = 0
     print(len(label_names))
     l=28
     for i in range(len(label_names)):
-        label=online_data.load_label(label_names[i])
+        label=online_data.label.load_numpy(label_names[i])
         assert label.shape[0]==l
         l=label.shape[0]
         print(label.shape)
-    exit()
-
-    # pc_names=online_data.get_pc_names()
-    # for i in range(len(pc_names)):
-    #     pc=online_data.load_pc(pc_names[i])
-    #     print(pc.shape)
-    # exit()
-
-    label_names=realtime_data.get_label_names()
-    COUNTER=0
-    for label_name in label_names:
-        label=realtime_data.load_label(label_name)
-        if label[23]==1:
-            COUNTER+=1
-            pc,label=realtime_data.load_labeled_data(label_filename=label_name)
-            idx=realtime_data.get_index(label_name)
-            rehearsal_data.save_labeled_data(pc,label,idx)
-            print(label_name)
-            print(COUNTER)
-
-
-    # online_data.activate_category_pool(4)
-    # online_data.remove_all_suction_samples()
-    # rehearsal_data=rehearsal_data()
-    # rehearsal_data.check_missing_label()
-    # rehearsal_data.remove_all_suction_samples()
-    # x=len(training_data)
-    # print(training_data.pc_dir)
-    # training_data=data(training_data_dir)

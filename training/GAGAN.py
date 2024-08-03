@@ -29,6 +29,8 @@ from visualiztion import vis_scene
 contrastive_discriminator_optimizer_path = r'contrastive_discriminator_optimizer.pth.tar'
 dense_gripper_generator_GAN_optimizer_path = r'dense_gripper_generator_GAN_optimizer.pth.tar'
 
+
+
 time_seed=math.floor(datetime.now().timestamp())
 
 training_data=training_data()
