@@ -1,43 +1,14 @@
 import numpy as np
 import cv2
 from Configurations.ENV_boundaries import depth_lower_bound, depth_factor
-from lib.depth_map import point_clouds_to_depth, CameraInfo, depth_to_point_clouds
+from lib.depth_map import point_clouds_to_depth, CameraInfo, depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
 from lib.pc_utils import refine_point_cloud
 from visualiztion import view_npy_open3d
 
 camera = CameraInfo(712, 480, 1428, 1466, 682, 287, 1000)
 
-def transform_to_camera_frame(pc, reverse=False):
-    a=-0.4*np.pi/180
-    angle_correction1=np.array([[np.cos(a), -np.sin(a), 0.0, 0.0],
-                       [np.sin(a), np.cos(a), 0.0, 0.0],
-                       [0.0, 0.0, 1.0, 0.0],
-                       [0.0, 0.0, 0.0, 1.0]])
-    b=-0.6*np.pi/180
-    angle_correction2=np.array([[1.0, 0.0, 0.0, 0.0],
-                       [0.0, np.cos(b), -np.sin(b), 0.0],
-                       [0.0, np.sin(b), np.cos(b), 0.0],
-                       [0.0, 0.0, 0.0, 1.0]])
-    matrix = np.array([[0.0, -1.0, 0.0, 0.393],
-                       [-1.0, 0.0, 0.0, -0.280],
-                       [0.0, 0.0, -1.0, 1.337],
-                       [0.0, 0.0, 0.0, 1.0]])
-    matrix=np.matmul(angle_correction2,matrix)
 
-    matrix=np.matmul(matrix,angle_correction1)
-
-    if reverse==True:
-        transformation=matrix
-    else:
-        transformation = np.linalg.inv(matrix)
-
-
-    column = np.ones(len(pc))
-    stacked = np.column_stack((pc, column))
-    transformed_pc = np.dot(transformation, stacked.T).T[:, :3]
-    transformed_pc = np.ascontiguousarray(transformed_pc)
-    return transformed_pc
 
 def pc_to_depth_map(pc):
     transformed = transform_to_camera_frame(pc)

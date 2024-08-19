@@ -17,7 +17,7 @@ check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 while os.path.split(os.getcwd())[-1]!=solution_name:
     os.chdir('../')
 
-theta_scope=60.
+theta_scope=90. # previous scope 60.
 theta_scope_rad=(theta_scope/180)*np.pi
 
 phi_scope=360.

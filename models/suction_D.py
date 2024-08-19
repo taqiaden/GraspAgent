@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from Configurations.config import ref_pc_center_6, ip_address
+from Configurations.ENV_boundaries import ref_pc_center_6
 from lib.models_utils import reshape_for_layer_norm
 from models.pointnet2_backbone import PointNetbackbone
 
-affordance_net_model_path=r'affordance_net_model.pth.tar'
+affordance_net_model_path=r'affordance_net_model'
 
 class affordance_net(nn.Module):
     def __init__(self):
@@ -81,32 +81,33 @@ class affordance_net(nn.Module):
         shifted_pc_data = pc_data - ref_pc_center_6
         normals=shifted_pc_data[:, :, 3:6].transpose(1, 2)
         normals=reshape_for_layer_norm(normals)
+        n_points=pc_data.shape[1]
 
         features = self.back_bone(shifted_pc_data[:,:,0:3])
-        features=reshape_for_layer_norm(features)
+        features=reshape_for_layer_norm(features,n_points=n_points)
 
         features = torch.cat([features, normals], dim=1)
         output = self.decoder(features)  # [b,1,n_points]
-        output=reshape_for_layer_norm(output,reverse=True)
+        output=reshape_for_layer_norm(output,reverse=True,n_points=n_points)
 
         #method2
-        features2 = self.back_bone2(shifted_pc_data[:,:,0:3])
-        features2=reshape_for_layer_norm(features2)
+        # features2 = self.back_bone2(shifted_pc_data[:,:,0:3])
+        # features2=reshape_for_layer_norm(features2,n_points=n_points)
 
-        residual=torch.cat([features2,normals],dim=-1)
-        residual=self.residual(residual)
+        # residual=torch.cat([features2,normals],dim=-1)
+        # residual=self.residual(residual)
 
-        key=self.key(features2)
-        query=self.query(normals)
-        value=self.value(features2)
+        # key=self.key(features2)
+        # query=self.query(normals)
+        # value=self.value(features2)
 
-        att_map=key * query
-        att_map=F.softmax(att_map,dim=-1)
-        att_score=att_map*value
-        cat_features=torch.cat([att_score,residual],dim=-1)
+        # att_map=key * query
+        # att_map=F.softmax(att_map,dim=-1)
+        # att_score=att_map*value
+        # cat_features=torch.cat([att_score,residual],dim=-1)
 
 
-        output2 = self.decoder2(cat_features)  # [b,1,n_points]
-        output2=reshape_for_layer_norm(output2,reverse=True)
+        # output2 = self.decoder2(cat_features)  # [b,1,n_points]
+        # output2=reshape_for_layer_norm(output2,reverse=True,n_points=n_points)
 
-        return output,output2
+        return output

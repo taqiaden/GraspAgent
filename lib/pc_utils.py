@@ -2,14 +2,11 @@ import numpy as np
 import open3d as o3d
 import torch
 from scipy.spatial.transform import Rotation as R
-
 from Configurations.ENV_boundaries import ref_pc_center
-
 
 def closest_point(point_data, center_point, radius=0.0025,warning_limit=0.005):
     # Find the neighbour points of the center_point
     distance = point_data - center_point
-
     distance = np.linalg.norm(distance, axis=1)
     index = np.argmin(distance)
     min_d = distance[index]
@@ -29,7 +26,6 @@ def point_index(point_data, center_point):
     if min_d ==0.:
         return index
     return None
-
 
 def refine_point_cloud(point_cloud):
     from visualiztion import view_o3d
