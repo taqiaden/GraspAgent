@@ -82,6 +82,13 @@ def get_pixel_index(depth, camera,target_point,radius=0.0025):
     pixel_index = np.array(pixel_index)
     return pixel_index
 
+def pixel_to_point(pixel_index,depth_value,camera):
+    z=depth_value/camera.scale
+    x = (pixel_index[1] - camera.cx) * z / camera.fx
+    y = (pixel_index[0] - camera.cy) * z / camera.fy
+    point=np.stack([x,y,z])
+    return point
+
 def depth_to_point_clouds(depth, camera,rgb=None):
     '''check camera intrinsic'''
     assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)

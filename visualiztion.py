@@ -138,10 +138,10 @@ def visualize_suction_pose(suction_xyz, suction_pose, T, end_effecter_mat,  npy)
 
 def highlight_background(npy):
     colors=np.zeros_like(npy)
-    background_mask=get_spatial_mask(npy).squeeze()
+    background_mask=get_spatial_mask(npy[np.newaxis,...]).squeeze()
     colors[background_mask]=[0.,0.,0.24]
     colors[~background_mask] = [0.65, 0.65, 0.65]
-    pcd = numpy_to_o3d(npy=npy,color=colors)
+    pcd = numpy_to_o3d(pc=npy,color=colors)
     return pcd
 def vis_scene(grasp, npy=None):
     # visualize

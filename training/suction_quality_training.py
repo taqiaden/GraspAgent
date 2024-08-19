@@ -1,11 +1,15 @@
+import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
+
+from Verfication_tests.suction_verf import view_suction_label
 from dataloaders.suction_quality_dl import suction_quality_dataset_kd, load_training_buffer, load_training_buffer_kd, \
     suction_quality_dataset
+
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
-from lib.depth_map import depth_to_point_clouds
+from lib.depth_map import depth_to_point_clouds, pixel_to_point
 from lib.loss.D_loss import custom_loss
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
@@ -15,6 +19,7 @@ from models.suction_quality import suction_quality_net, suction_quality_model_st
     suction_scope_model_state_path
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
 from registration import camera, transform_to_camera_frame
+from visualiztion import visualize_suction_pose
 
 suction_quality_optimizer_path=r'suction_quality_optimizer'
 
@@ -27,7 +32,7 @@ BATCH_SIZE=1
 learning_rate=5*1e-5
 EPOCHS = 1
 weight_decay = 0.000001
-workers=2
+workers=1
 
 l1_loss=nn.L1Loss(reduction='none')
 mes_loss=nn.MSELoss()
@@ -174,6 +179,7 @@ def training():
             scope_score = scope_model(generated_normals)
             predictions = suction_score * scope_score
 
+            '''accumulate loss'''
             loss=0.
             for j in range(b):
                 pix_A = pixel_index[j, 0]
@@ -181,6 +187,10 @@ def training():
                 prediction_=predictions[j,:,pix_A,pix_B]
                 label_=score[j:j+1]
                 loss+=custom_loss(prediction_,label_)
+
+
+            '''Verification'''
+            # view_suction_label(depth, normal, pixel_index, b)
 
             loss=loss/b
             print(loss.item())
@@ -208,6 +218,7 @@ def training():
         print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dloader))
 
     return model,scope_model
+
 
 def train_suction_sampler_kd(n_samples=None):
     # training_data.clear()

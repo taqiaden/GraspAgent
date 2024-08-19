@@ -3,7 +3,6 @@ import math
 import random
 import torch
 from colorama import Fore
-from Online_data_audit.process_feedback import save_new_data_sample
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import  wait_for_feedback
 from lib.models_utils import  initialize_model
@@ -21,32 +20,7 @@ from suction_sampler import estimate_suction_direction
 from visualiztion import  visualize_grasp_and_suction_points, \
     view_score, dense_grasps_visualization
 
-shuffling_probability= 0.0
-skip_factor= 0.0 # [1,10] Bigger value will increase the chance for skipping low score candidates
 
-chances_ref = 500
-
-max_grasp_candidates = None # if None then no limitation to the number of candidates
-max_suction_candidates = None
-
-view_grasp_suction_points = False
-isvis= True
-view_score_gradient= True
-simulation_mode = True
-
-report_result=False
-
-view_sampled_griper=False
-view_sampled_suction=False
-
-suction_limit=0.7
-gripper_limit=0.3
-
-score_threshold=0.0
-
-gripper_D_model=None
-suction_D_model=None
-gripper_G_model=None
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'

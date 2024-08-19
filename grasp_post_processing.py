@@ -1,7 +1,7 @@
 import numpy as np
 import trimesh
 from Configurations import config, ENV_boundaries
-from Run import simulation_mode
+from Configurations.run_config import simulation_mode
 from lib.ROS_communication import save_grasp_data, save_suction_data
 from lib.bbox import decode_gripper_pose
 from lib.collision_unit import local_exploration
@@ -35,11 +35,11 @@ def inference_dense_gripper_pose(point_data_npy,center_point,index):
     pose_good_grasp=decode_gripper_pose(pose,center_point)
     return pose_good_grasp
 
-def get_suction_pose_( suction_xyz, normal):
+def get_suction_pose_( target_point, normal):
     suction_pose = normal.reshape(1, 3)  # Normal [[xn,yn,zn]]
-    suction_xyz=suction_xyz.reshape(1,3)
+    target_point=target_point.reshape(1,3)
 
-    pose_good_suction = np.concatenate((suction_xyz, suction_pose), axis=1)  # [[x,y,z,xn,yn,zn]]
+    pose_good_suction = np.concatenate((target_point, suction_pose), axis=1)  # [[x,y,z,xn,yn,zn]]
     position = pose_good_suction[0, [0, 1, 2]]  # [x,y,z]
     v0 = np.array([1, 0, 0])
     v1 = -pose_good_suction[0, [3, 4, 5]]  # [-xn,-yn,-zn]
@@ -52,9 +52,9 @@ def get_suction_pose_( suction_xyz, normal):
 
     pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
 
-    suction_xyz = suction_xyz.squeeze()
+    target_point = target_point.squeeze()
 
-    return suction_xyz, pre_grasp_mat, end_effecter_mat, suction_pose, T, pred_approch_vector
+    return target_point, pre_grasp_mat, end_effecter_mat, suction_pose, T, pred_approch_vector
 
 def get_suction_pose(index, point_data, normal):
     return  get_suction_pose_(point_data[index],normal)
