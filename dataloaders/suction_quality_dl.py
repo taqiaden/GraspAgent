@@ -16,7 +16,7 @@ def load_training_buffer_kd(size):
     file_indexes = online_data.get_indexes()
     random.shuffle(file_indexes)
 
-    progress_indicator=pi(f'load {size} samples for training',size)
+    progress_indicator=pi(f'load {size} samples for training ',size)
     counter=0
     for i,target_file_index in enumerate(file_indexes):
         '''get data'''
@@ -42,7 +42,7 @@ def load_training_buffer(size):
     file_indexes = online_data.get_indexes()
     random.shuffle(file_indexes)
 
-    progress_indicator=pi(f'load {size} samples for training',size)
+    progress_indicator=pi(f'load {size} samples for training ',size)
     counter=0
     positive_samples=0
     negative_samples=0
@@ -72,8 +72,6 @@ def load_training_buffer(size):
         '''save to buffer'''
         training_data.depth.save_as_numpy(depth,target_file_index)
         training_data.label.save_as_numpy(label,target_file_index)
-
-
 
         '''update counters'''
         if label[3]==1:positive_samples+=1

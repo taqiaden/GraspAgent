@@ -10,11 +10,11 @@ from colorama import Fore
 from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo
 import pickle
 
-from pynput.keyboard import  Listener, Key
-
 result=0
 
 def space_key_pressed(): ## starts listener modulefg h
+    # THIS FUNCTION DOES NOT WORK OVER SSH
+    from pynput.keyboard import Listener, Key
     print('-------- Press space key to consider it as success grasp \\')
     global result
     result=0
