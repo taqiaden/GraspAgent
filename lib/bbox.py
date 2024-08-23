@@ -142,7 +142,7 @@ def decode_gripper_pose(output,center_point):
     T[0:3, 3] = center_point
     T[3, 3] = 1
     T = shift_a_distance(T, distance)
-    assert T[0:3, 3].shape == center_point.shape
+    assert T[0:3, 3].shape == center_point.shape,f'{T[0:3, 3].shape},  {center_point.shape}'
     assert T[0:3, 0:3].shape == rotation_matrix.shape
 
     pose_good_grasp = update_pose_(T, width=width, distance=distance)

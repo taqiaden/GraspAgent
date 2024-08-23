@@ -8,10 +8,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 import smbclient
-import torch
-from colorama import Fore
 
-from lib.pc_utils import random_down_sampling
 from lib.report_utils import counter_progress
 from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
 from Configurations.config import  ip_address
@@ -19,8 +16,13 @@ from Configurations import config
 from lib.report_utils import wait_indicator
 
 training_data_dir='dataset/training_data/'
-online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
+# online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
+# online_data_dir=r'/home/taqiaden/online_data/'
+online_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
+
 online_data_local_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
+
+
 def configure_smbclient():
     # initialize smbclient
     smbclient.ClientConfig(username='shenxiaofei', password='774631499')
@@ -221,7 +223,7 @@ class training_data(data_pool):
 
 class online_data(data_pool):
     def __init__(self):
-        super(online_data,self).__init__(dir=online_data_dir,is_local=False,dataset_name='online')
+        super(online_data,self).__init__(dir=online_data_dir,is_local=True,dataset_name='online')
 
 class online_data_local(data_pool):
     def __init__(self):

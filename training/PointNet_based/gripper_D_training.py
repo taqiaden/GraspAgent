@@ -138,7 +138,7 @@ def train(EPOCHS_,batch_size,directory):
                 print(f'prediction = {masked_predictions}')
                 print('---------------------')
 
-            # verify(pc, pose, index, evaluation_metric=score,predictions=masked_predictions)
+            verify(pc, pose, index, evaluation_metric=score,predictions=masked_predictions)
 
             loss=custom_loss(masked_predictions,score.clone())
             loss2=custom_loss(masked_predictions2,score.clone())

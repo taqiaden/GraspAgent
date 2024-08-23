@@ -31,8 +31,8 @@ class suction_scope_net(nn.Module):
 class suction_quality_net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=1,Batch_norm=False,Instance_norm=True).to('cuda')
-        self.decoder=att_res_decoder_A(in_c1=64,in_c2=3,out_c=1,Batch_norm=False,Instance_norm=True).to('cuda')
+        self.back_bone = res_unet(in_c=1,Batch_norm=True,Instance_norm=False).to('cuda')
+        self.decoder=att_res_decoder_A(in_c1=64,in_c2=3,out_c=1,Batch_norm=True,Instance_norm=False).to('cuda')
     def forward(self, depth,pose ):
         spatial_features=self.back_bone(depth)
         output=self.decoder(spatial_features,pose)

@@ -17,6 +17,7 @@ class res_block(nn.Module):
         x=self.c2(x)
         output=x+r
         return output
+
 class att_res_decoder_A(nn.Module):
     def __init__(self,in_c1,in_c2,out_c,Batch_norm=True,Instance_norm=False):
         super().__init__()

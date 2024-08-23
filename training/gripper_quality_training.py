@@ -1,16 +1,19 @@
 import torch
 from colorama import Fore
 from torch import nn
+
+from Verfication_tests.gripper_verf import view_gripper_label
 from dataloaders.gripper_quality_dl import  load_training_buffer, gripper_quality_dataset
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
-from lib.loss.D_loss import custom_loss
+from lib.loss.D_loss import l1_with_threshold
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
 from models.gripper_quality import gripper_quality_model_state_path, gripper_quality_net, gripper_scope_net, \
     gripper_scope_model_state_path
 from models.gripper_sampler import gripper_sampler_net, gripper_generator_model_state_path
+
 
 gripper_quality_optimizer_path=r'gripper_quality_optimizer'
 
@@ -21,7 +24,7 @@ training_data.main_modality=training_data.depth
 print=custom_print
 BATCH_SIZE=1
 learning_rate=5*1e-5
-EPOCHS = 1
+EPOCHS = 3
 weight_decay = 0.000001
 workers=2
 
@@ -64,6 +67,7 @@ def training():
             with torch.no_grad():
                 generated_grasps=generator(depth)
 
+
             '''zero grad'''
             model.zero_grad()
             scope_model.zero_grad()
@@ -86,10 +90,13 @@ def training():
                 pix_B = pixel_index[j, 1]
                 prediction_=predictions[j,:,pix_A,pix_B]
                 label_=score[j:j+1]
-                loss+=custom_loss(prediction_,label_)
-
-            loss=loss/b
+                loss+=l1_with_threshold(prediction_,label_)
+            loss = loss / b
             print(loss.item())
+
+            '''Verification'''
+            view_gripper_label(depth, pose_7, pixel_index, b)
+
 
             '''optimizer step'''
             loss.backward()
@@ -112,12 +119,13 @@ def training():
 
         pi.end()
 
-        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dloader))
+        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dataset))
 
     return model, scope_model
 
+
 def train_gripper_sampler(n_samples=None):
-    # training_data.clear()
+    training_data.clear()
     while True:
         # try:
         if len(training_data) == 0:
@@ -131,4 +139,4 @@ def train_gripper_sampler(n_samples=None):
         #     print(Fore.RED, str(e), Fore.RESET)
 
 if __name__ == "__main__":
-    train_gripper_sampler(10)
+    train_gripper_sampler(30)

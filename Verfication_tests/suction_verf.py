@@ -2,7 +2,6 @@ from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_po
 from registration import camera
 from visualiztion import visualize_suction_pose
 
-
 def view_suction_label(depth,normal,pixel_index,batch_size):
     for j in range(batch_size):
         pix_A = pixel_index[j, 0]

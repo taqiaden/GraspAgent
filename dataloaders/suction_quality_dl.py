@@ -60,7 +60,7 @@ def load_training_buffer(size):
                     continue
             # depth=online_data.load_depth(target_file_index)
 
-            '''load depth maps'''
+            '''load depth map'''
             pc=online_data.point_clouds.load_as_numpy(target_file_index)
             transformed_pc = transform_to_camera_frame(pc)
             depth=point_clouds_to_depth(transformed_pc, camera)

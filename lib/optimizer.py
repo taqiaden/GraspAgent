@@ -9,8 +9,10 @@ def load_opt(optimizer,path):
     try:
         if isinstance(optimizer,torch.optim.Adam):
             optimizer=load_optimizer_state(optimizer, path+'_ADAM'+check_points_extension)
-        else:
+        elif isinstance(optimizer,torch.optim.SGD):
             optimizer=load_optimizer_state(optimizer, path+'_SGD'+check_points_extension)
+        else:
+            print(Fore.RED,'Unknown optimizer type',Fore.RESET)
     except Exception as e:
         print(Fore.RED,str(e),Fore.RESET)
 
@@ -19,8 +21,10 @@ def load_opt(optimizer,path):
 def export_optm(optimizer,path):
     if isinstance(optimizer, torch.optim.Adam):
         export_model_state(optimizer, path+'_ADAM')
+    elif isinstance(optimizer, torch.optim.SGD):
+        export_model_state(optimizer, path+'_SGD')
     else:
-        export_model_state(optimizer, path+'_ADAM')
+        print(Fore.RED, 'Unknown optimizer type', Fore.RESET)
 
 def decay_lr(min_lr,max_lr,model,exponent=1):
     parameters = []

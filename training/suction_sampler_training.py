@@ -86,7 +86,7 @@ def train_():
 
         pi.end()
 
-        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dloader))
+        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dataset))
 
     return model
 
@@ -99,7 +99,6 @@ def train_suction_sampler(n_samples=None):
         print(Fore.GREEN + 'Training round finished' + Fore.RESET)
         export_model_state(new_model, suction_sampler_model_state_path)
         training_data.clear()
-
 
 if __name__ == "__main__":
     train_suction_sampler(10)

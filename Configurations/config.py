@@ -19,6 +19,7 @@ while os.path.split(os.getcwd())[-1]!=solution_name:
 
 theta_scope=90. # previous scope 60.
 theta_scope_rad=(theta_scope/180)*np.pi
+theta_cos_scope=np.cos(theta_scope_rad)
 
 phi_scope=360.
 phi_scope_rad=(phi_scope/180)*np.pi

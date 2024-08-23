@@ -1,10 +1,12 @@
 import torch
 from colorama import Fore
 from torch import nn
+
+from Verfication_tests.suction_verf import view_suction_label
 from dataloaders.suction_quality_dl import load_training_buffer,  suction_quality_dataset
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
-from lib.loss.D_loss import custom_loss
+from lib.loss.D_loss import l1_with_threshold
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
@@ -19,14 +21,14 @@ suction_scope_optimizer_path=r'suction_scope_optimizer'
 training_data=training_data()
 training_data.main_modality=training_data.depth
 print=custom_print
-BATCH_SIZE=1
+BATCH_SIZE=4
 learning_rate=5*1e-5
-EPOCHS = 1
+EPOCHS = 3
 weight_decay = 0.000001
-workers=1
+workers=2
 
 l1_loss=nn.L1Loss(reduction='none')
-mes_loss=nn.MSELoss()
+mse_loss=nn.MSELoss()
 
 def training():
     '''dataloader'''
@@ -88,11 +90,10 @@ def training():
                 pix_B = pixel_index[j, 1]
                 prediction_=predictions[j,:,pix_A,pix_B]
                 label_=score[j:j+1]
-                loss+=custom_loss(prediction_,label_)
-
+                loss+=l1_with_threshold(prediction_, label_)
 
             '''Verification'''
-            # view_suction_label(depth, normal, pixel_index, b)
+            view_suction_label(depth, normal, pixel_index, b)
 
             loss=loss/b
             print(loss.item())
@@ -117,7 +118,7 @@ def training():
 
         pi.end()
 
-        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dloader))
+        print('   Running loss = ',running_loss,', loss per iteration = ',running_loss/len(dataset))
 
     return model,scope_model
 
@@ -136,4 +137,4 @@ def train_suction_sampler(n_samples=None):
         #     print(Fore.RED, str(e), Fore.RESET)
 
 if __name__ == "__main__":
-    train_suction_sampler(10)
+    train_suction_sampler(1600)
