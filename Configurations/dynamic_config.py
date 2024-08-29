@@ -1,13 +1,15 @@
 from configparser import ConfigParser
+from filelock import FileLock
+lock = FileLock("file.lock")
 config = ConfigParser()
 
-config_file_path='config.ini'
+config_file_path='Configurations/config.ini'
 
 def creat_section(section):
     config.read(config_file_path)
     config.add_section(section)
 
-    with open('config.ini', 'w') as f:
+    with open(config_file_path, 'w') as f:
         config.write(f)
 def save_key(key,value,section='main'):
     if not isinstance(value,str): value=str(value)
@@ -24,3 +26,28 @@ def get_float(key,section='main'):
     config.read(config_file_path)
     return config.getfloat(section, key)
 
+def add_to_value_(key,delta,section='main'):
+    old_value=get_float(key,section)
+    new_value=str(delta+old_value)
+    save_key(key,new_value,section)
+
+def add_to_value(key,delta,section='main',lock_other_process=True):
+    if lock_other_process:
+        with lock:
+            add_to_value_(key,delta,section)
+    else: add_to_value_(key,delta,section)
+
+
+
+if __name__ == "__main__":
+    save_key("collision_times", 0.0, section='Grasp_GAN')
+    save_key("out_of_scope_times", 0.0, section='Grasp_GAN')
+    save_key("good_firmness_times", 0.0, section='Grasp_GAN')
+    save_key("C_running_loss", 0.0, section='Grasp_GAN')
+    save_key("G_running_loss", 0.0, section='Grasp_GAN')
+
+    # add_to_value("performance_indicator",0.1, section='Grasp_GAN')
+    # creat_section('Grasp_GAN')
+    # v=get_value("performance_indicator", section='Grasp_GAN')
+    # print(v)
+    # save_key("performance_indicator", 0.1, section='Grasp_GAN')

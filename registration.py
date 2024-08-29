@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from Configurations.ENV_boundaries import depth_lower_bound, depth_factor
+from Configurations.ENV_boundaries import depth_lower_bound, depth_mean, depth_std
 from lib.depth_map import point_clouds_to_depth, CameraInfo, depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
 from lib.pc_utils import refine_point_cloud
@@ -25,15 +25,10 @@ def get_rgb_heap(rgb_full):
     heap_rgb = rgb[229:709, 295:1007, :]
     return heap_rgb
 
-def standardize_depth(depth,reverse=False):
-    result_depth=np.copy(depth)
-    if reverse:
-        result_depth = (result_depth * depth_factor) + depth_lower_bound
-        result_depth[result_depth ==depth_lower_bound] = 0.0
-    else:
-        result_depth[result_depth < 0.0001] = depth_lower_bound
-        result_depth=(result_depth-depth_lower_bound)/depth_factor
-    return result_depth
+def standardize_depth(depth):
+    depth[depth < 0.0001] = depth_lower_bound
+    depth=(depth-depth_mean)/depth_std
+    return depth
 
 def view_colored_point_cloud(RGB,Depth):
     heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255

@@ -135,7 +135,7 @@ class data_pool():
         return re.findall(r'\d+', file_name_)[0]
     def get_indexes(self):
         return self.main_modality.get_indexes()
-    def clear(self):
+    def clear(self,wait=False):
         self.point_clouds.remove_all_files()
         self.label.remove_all_files()
         self.rgb.remove_all_files()

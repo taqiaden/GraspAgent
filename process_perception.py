@@ -7,7 +7,7 @@ from lib.pc_utils import refine_point_cloud, apply_mask, random_down_sampling, c
 from lib.report_utils import wait_indicator as wi
 import numpy as np
 from Configurations import config
-from Run import simulation_mode
+# from Run import simulation_mode
 import cv2 as cv
 from registration import pc_to_depth_map
 

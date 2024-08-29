@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+
 from lib.models_utils import number_of_parameters
 
 class batch_norm_relu(nn.Module):
@@ -9,6 +10,7 @@ class batch_norm_relu(nn.Module):
         self.instance_norm=Instance_norm
         self.Bn = nn.BatchNorm2d(in_c)
         self.In = nn.InstanceNorm2d(in_c)
+
         self.relu = nn.ReLU()
 
     def forward(self, inputs):
@@ -19,6 +21,8 @@ class batch_norm_relu(nn.Module):
             x = self.In(x)
         x = self.relu(x)
         return x
+
+
 
 class residual_block(nn.Module):
     def __init__(self, in_c, out_c, stride=1,Batch_norm=True,Instance_norm=False):

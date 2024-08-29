@@ -2,13 +2,15 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lib.depth_map import depth_to_mesh_grid
-from models.decoders import att_res_decoder_A, res_block
-from models.resunet import res_unet, batch_norm_relu
-from registration import camera
+from models.decoders import att_res_mlp_LN, res_block_mlp_LN
+from models.resunet import res_unet
+from registration import camera, standardize_depth
 
-dropout_p=0.0
 gripper_sampler_path=r'gripper_sampler_model_state'
 gripper_critic_path=r'gripper_critic_model_state'
+
+use_bn=False
+use_in=True
 
 def gripper_output_normalization(output):
     '''approach normalization'''
@@ -24,61 +26,78 @@ def gripper_output_normalization(output):
     normalized_output=torch.cat([approach,beta,dist,width],dim=1)
     return normalized_output
 
+def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
+    if reverse==False:
+        channels=tensor.shape[1]
+        tensor=tensor.permute(0,2,3,1).reshape(-1,channels)
+        return tensor
+    else:
+        batch_size=int(tensor.shape[0]/(camera.width*camera.height))
+        channels=tensor.shape[-1]
+        tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
+        return tensor
+
 class gripper_sampler_net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=1, Batch_norm=True, Instance_norm=False).to('cuda')
-        self.get_approach=att_res_decoder_A(in_c1=64, in_c2=2, out_c=3, Batch_norm=True, Instance_norm=False).to('cuda')
-        self.get_beta=att_res_decoder_A(in_c1=64, in_c2=5, out_c=2, Batch_norm=True, Instance_norm=False).to('cuda')
-        self.get_dist=att_res_decoder_A(in_c1=64, in_c2=7, out_c=1, Batch_norm=True, Instance_norm=False).to('cuda')
-        self.get_width=att_res_decoder_A(in_c1=64, in_c2=8, out_c=1, Batch_norm=True, Instance_norm=False).to('cuda')
-
-        # self.decoder = res_block(in_c=64, medium_c=32, out_c=16, Batch_norm=True, Instance_norm=False).to('cuda')
-        # self.b1 = batch_norm_relu(16, Batch_norm=True, Instance_norm=False).to('cuda')
-        # self.c1 = nn.Conv2d(16, 7, kernel_size=1).to('cuda')
-        # self.test = nn.Conv2d(1, 7, kernel_size=1).to('cuda')
+        self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.get_approach=att_res_mlp_LN(in_c1=64, in_c2=2, out_c=3).to('cuda')
+        self.get_beta_dist=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=3).to('cuda')
+        self.get_width=att_res_mlp_LN(in_c1=64, in_c2=8, out_c=1).to('cuda')
 
     def forward(self, depth):
-        # return self.test(depth)
+        '''input standardization'''
+        depth = standardize_depth(depth)
         representation = self.back_bone(depth)
 
-        # x=self.decoder(representation)
-        # x=self.b1(x)
-        # x=self.c1(x)
-        # output = gripper_output_normalization(x)
-        # return output
 
-        '''get spatial information'''
+        '''backbone'''
+        representation_2d=reshape_for_layer_norm(representation, camera=camera, reverse=False)
+
+
+        '''spatial data'''
         b=depth.shape[0]
         xymap=depth_to_mesh_grid(camera)
 
+        '''decode'''
         params1=xymap.repeat(b,1,1,1)
-        approach=self.get_approach(representation,params1)
+        params1=reshape_for_layer_norm(params1, camera=camera, reverse=False)
+
+        approach=self.get_approach(representation_2d,params1)
 
         params2=torch.cat([approach,params1],dim=1)
-        beta=self.get_beta(representation,params2)
+        beta_dist=self.get_beta_dist(representation_2d,params2)
 
-        params3=torch.cat([beta,params2],dim=1)
-        dist=self.get_dist(representation,params3)
+        params3=torch.cat([beta_dist,params2],dim=1)
 
-        params4=torch.cat([dist,params3],dim=1)
-        width=self.get_width(representation,params4)
+        width=self.get_width(representation_2d,params3)
 
-        output = torch.cat([approach, beta, dist, width], dim=1)
+        output_2d = torch.cat([approach, beta_dist, width], dim=1)
+
+        output=reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
+
         output=gripper_output_normalization(output)
         return output
 
 class critic_net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=1, Batch_norm=True, Instance_norm=False).to('cuda')
-        self.decoder = att_res_decoder_A(in_c1=64, in_c2=7, out_c=1, Batch_norm=True, Instance_norm=False).to('cuda')
+        self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.att_block = att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
 
-        # self.test = nn.Conv2d(1+7, 1, kernel_size=1).to('cuda')
     def forward(self, depth,pose):
-        # test_f=torch.cat([depth,pose],dim=1)
-        # return self.test(test_f)
+        '''input standardization'''
+        depth = standardize_depth(depth)
+
+        '''backbone'''
         features = self.back_bone(depth)
-        output = self.decoder(features, pose)
+        features_2d=reshape_for_layer_norm(features, camera=camera, reverse=False)
+        pose_2d=reshape_for_layer_norm(pose, camera=camera, reverse=False)
+
+        '''decode'''
+        output_2d = self.att_block(features_2d,pose_2d)
+
+        output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
+
         return output
 
