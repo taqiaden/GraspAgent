@@ -12,3 +12,5 @@ ref_pc_center_6=torch.tensor([0.4364,-0.0091,0.0767,0,0,0]).to('cuda')
 depth_lower_bound=1100.
 depth_mean=1180.
 depth_std=85.
+
+dist_allowance=0.006

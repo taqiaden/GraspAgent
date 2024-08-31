@@ -29,12 +29,11 @@ training_data=training_data()
 online_data=online_data()
 
 print=custom_print
-batch_size_per_node=2
 max_lr=0.01
 min_lr=1*1e-6
 weight_decay = 0.000001
 
-loss_power=1.0
+loss_power=2.0
 
 m1=1.0
 m2=1.0
@@ -82,8 +81,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
         pc = transform_to_camera_frame(pc, reverse=True)
 
         '''check collision'''
-        collision_intensity = grasp_collision_detection(pose_good_grasp, pc, visualize=False,
-                                                        add_floor=False)
+        collision_intensity = grasp_collision_detection(pose_good_grasp, pc, visualize=False )
         collision_state_=collision_intensity > 0
         collision_state_list.append(collision_state_)
 
@@ -201,14 +199,14 @@ def prepare_models_and_optimizers(adaptive_lr):
     '''models'''
     Critic = initialize_model(critic_net, gripper_critic_path)
     Critic.train(True)
-    Critic.share_memory()
+    # Critic.share_memory()
     Generator = initialize_model(gripper_sampler_net, gripper_sampler_path)
     Generator.train(True)
-    Generator.share_memory()
+    # Generator.share_memory()
 
     '''optimizers'''
-    C_optimizer = torch.optim.Adam(Critic.parameters(), lr=adaptive_lr, betas=(0.9, 0.999), eps=1e-8,weight_decay=weight_decay)
-    # C_optimizer = torch.optim.SGD(Critic.parameters(), lr=adaptive_lr, weight_decay=weight_decay)
+    # C_optimizer = torch.optim.Adam(Critic.parameters(), lr=adaptive_lr, betas=(0.9, 0.999), eps=1e-8,weight_decay=weight_decay)
+    C_optimizer = torch.optim.SGD(Critic.parameters(), lr=adaptive_lr, weight_decay=weight_decay)
     C_optimizer = load_opt(C_optimizer, gripper_critic_optimizer_path)
     # G_optimizer = torch.optim.Adam(Generator.parameters(), lr=learning_rate,betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
     G_optimizer = torch.optim.SGD(Generator.parameters(), lr=adaptive_lr, weight_decay=weight_decay)
@@ -340,7 +338,7 @@ class TrainerDDP:
             self.export_check_points()
 
 def train_Grasp_GAN(n_samples=None):
-    # training_data.clear()
+    training_data.clear()
     performance_indicator = float(get_value("performance_indicator", section='Grasp_GAN'))
     while True:
         '''zero records'''
@@ -365,8 +363,8 @@ def train_Grasp_GAN(n_samples=None):
             world_size = torch.cuda.device_count() if maximum_gpus is None else maximum_gpus
 
         '''train configurations'''
-        BATCH_SIZE=int(batch_size_per_node*world_size)
-        print(Fore.YELLOW, f'Batch size = {BATCH_SIZE} ', Fore.RESET)
+        BATCH_SIZE=2
+        print(Fore.YELLOW, f'Batch size per node = {BATCH_SIZE} ', Fore.RESET)
         t_config=train_config(BATCH_SIZE,1,0,world_size)
 
         '''prepare buffer'''
@@ -395,7 +393,7 @@ def train_Grasp_GAN(n_samples=None):
         print(Fore.RESET)
 
         '''update performance indicator'''
-        performance_indicator=1-total_collision/buffer_size
+        performance_indicator=1-max(total_collision,total_out_of_scope)/buffer_size
         save_key("performance_indicator", performance_indicator, section='Grasp_GAN')
 
         '''clear buffer'''
@@ -415,4 +413,4 @@ def main_ddp(rank: int, t_config,Critic,Generator,C_optimizer,G_optimizer):
 
 
 if __name__ == "__main__":
-    train_Grasp_GAN(300)
+    train_Grasp_GAN(900)

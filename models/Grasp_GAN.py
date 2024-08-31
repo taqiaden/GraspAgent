@@ -15,14 +15,21 @@ use_in=True
 def gripper_output_normalization(output):
     '''approach normalization'''
     approach=output[:, 0:3, :]
+    approach=F.tanh(approach)
+
     approach=F.normalize(approach, dim=1)
 
     '''beta normalization'''
     beta=output[:, 3:5, :]
+    beta=F.tanh(beta)
+
     beta=F.normalize(beta, dim=1)
 
     dist=output[:, 5:6, :]
+    dist=F.sigmoid(dist)
     width=output[:, 6:7, :]
+    width=F.sigmoid(width)
+
     normalized_output=torch.cat([approach,beta,dist,width],dim=1)
     return normalized_output
 
@@ -48,10 +55,11 @@ class gripper_sampler_net(nn.Module):
     def forward(self, depth):
         '''input standardization'''
         depth = standardize_depth(depth)
-        representation = self.back_bone(depth)
+
 
 
         '''backbone'''
+        representation = self.back_bone(depth)
         representation_2d=reshape_for_layer_norm(representation, camera=camera, reverse=False)
 
 

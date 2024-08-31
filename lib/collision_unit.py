@@ -7,6 +7,7 @@ import trimesh
 from colorama import Fore
 
 from Configurations import config
+from Configurations.ENV_boundaries import dist_allowance
 from lib.bbox import decode_gripper_pose, encode_gripper_pose
 from lib.grasp_utils import get_homogenous_matrix, get_center_point, shift_a_distance, update_pose_
 from lib.mesh_utils import construct_gripper_mesh
@@ -20,7 +21,7 @@ activate_width_clip=False
 explore_theta_p=1.0
 explore_phi_p=1.0
 
-def grasp_collision_detection(pose_good_grasp_,point_data, visualize=False,add_floor=False):
+def grasp_collision_detection(pose_good_grasp_,point_data, visualize=False):
     pose_good_grasp=np.copy(pose_good_grasp_)
     assert np.any(np.isnan(pose_good_grasp))==False,f'{pose_good_grasp}'
     #########################################################
@@ -192,10 +193,7 @@ def adjust_distance(pose_good_grasp):
     center_point = get_center_point(pose_good_grasp)
     pose_good_grasp_2 = np.copy(pose_good_grasp)
 
-    # if center_point[-1]<0.082:
-    #     distance_inference=0.1*(0.082-center_point[-1]) if center_point[-1]<0.082 else 0.0
-    #     pose_good_grasp_2[0, -1] -=distance_inference
-    pose_good_grasp_2[0, -1] -= 0.006
+    pose_good_grasp_2[0, -1] -= dist_allowance
     pose = encode_gripper_pose(pose_good_grasp_2)
     pose_good_grasp_2 = decode_gripper_pose(pose, center_point)
 
