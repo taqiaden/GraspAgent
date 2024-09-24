@@ -1,6 +1,8 @@
 import numpy as np
 from colorama import Fore
 from torch.utils import data
+
+from Online_data_audit.sample_training_buffer import get_selection_probabilty
 from lib.depth_map import point_clouds_to_depth, get_pixel_index
 from registration import camera, transform_to_camera_frame
 from lib.dataset_utils import training_data, online_data
@@ -41,6 +43,7 @@ def load_training_buffer_kd(size):
 def load_training_buffer(size):
     file_indexes = online_data.get_indexes()
     random.shuffle(file_indexes)
+    selection_p = get_selection_probabilty(file_indexes)
 
     progress_indicator=pi(f'load {size} samples for training ',size)
     counter=0
@@ -48,6 +51,7 @@ def load_training_buffer(size):
     negative_samples=0
 
     for i,target_file_index in enumerate(file_indexes):
+        if np.random.rand() > selection_p[i]: continue
         '''get data'''
         try:
             label = online_data.label.load_as_numpy(target_file_index)

@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from Configurations.ENV_boundaries import ref_pc_center_6
 from lib.models_utils import reshape_for_layer_norm
-from models.pointnet2_backbone import PointNetbackbone
+from models.point_net_base.pointnet2_backbone import PointNetbackbone
 
 affordance_net_model_path=r'affordance_net_model'
 

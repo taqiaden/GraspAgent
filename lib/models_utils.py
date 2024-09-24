@@ -88,6 +88,7 @@ def load_dictionary(file_name):
         with smbclient.open_file(full_path, mode='rb') as file:
             buffer=io.BytesIO(file.read())
             return torch.load(buffer, map_location='cpu')
+
 def load_optimizer_state(optimizer,optimizer_state_path):
     pretrained_dict = load_dictionary(optimizer_state_path)
     if pretrained_dict:

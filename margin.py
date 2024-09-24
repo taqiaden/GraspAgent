@@ -1,32 +1,18 @@
 from tkinter import Tk, Canvas, mainloop, Label
+
+import torch
 from PIL import ImageTk, Image
-from trimesh.path.creation import rectangle
+from torch import nn
 
-from lib.optimizer import exponential_decay_lr_
+from lib.loss.D_loss import l1_with_threshold_new
 
-print(exponential_decay_lr_(0.3666666666666667,0.01,5*1e-6))
-exit()
+smooth_l1_loss=nn.SmoothL1Loss(beta=.50)
+mse=nn.MSELoss()
+l1=torch.tensor([1])
+l2=torch.tensor([0.0])
 
-def clicked(event):
-    button_number=(int(event.y/60)*9)+(1+int(event.x/60))
-    print(f'You clicked button number {button_number}')
 
-root=Tk()
-
-img=ImageTk.PhotoImage(Image.open("Frame_0.ppm"))
-panel=Label(root, image=img)
-panel.pack(side="bottom", fill="both", expand="yes")
-
-drawCanv=Canvas(width=541, height=301, bd=0)
-drawCanv.bind('<Button-1>',clicked)
-
-button_number = 1
-
-for y in range(1,300,60):
-    for x in range (1, 540,60):
-        # rectangle = drawCanv.create_oval(x,y,x+60,y+60, outline='black')
-        # drawCanv.create_text(x+25,y+30, text=button_number)
-        button_number+=1
-
-drawCanv.pack()
-mainloop()
+print(smooth_l1_loss(l1,l2))
+print(mse(l1,l2))
+print(l1_with_threshold_new(l1, l2,with_smooth=True))
+print(l1_with_threshold_new(l1, l2,with_smooth=False)**2)

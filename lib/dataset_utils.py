@@ -184,7 +184,8 @@ class data_pool():
                 time_seed = math.floor(datetime.now().timestamp())
                 np.random.seed(time_seed)
                 id=np.random.randint(0,len(pc_names))
-                pc=self.point_clouds.load_as_numpy(pc_names[id])
+                index=self.get_index(pc_names[id])
+                pc=self.point_clouds.load_as_numpy(index)
                 load_finish=True
             except Exception as e:
                 print(f'Load random pc error: {str(e)}')

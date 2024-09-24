@@ -1,8 +1,8 @@
 import os
 import subprocess
 from colorama import Fore
-import cv2
 from Configurations.config import home_dir
+from Configurations.run_config import simulation_mode
 from lib.pc_utils import refine_point_cloud, apply_mask, random_down_sampling, closest_point
 from lib.report_utils import wait_indicator as wi
 import numpy as np
@@ -76,17 +76,17 @@ def get_real_data():
 
     full_point_clouds = apply_mask(point_data)
 
-    global last_rgb
-    global last_depth
-    last_rgb = cv2.imread(rgb_path)
-    last_depth=pc_to_depth_map(full_point_clouds)
+    # global last_rgb
+    # global last_depth
+    # last_rgb = cv2.imread(rgb_path)
+    # last_depth=pc_to_depth_map(full_point_clouds)
 
-    point_data_choice=random_down_sampling(full_point_clouds,config.num_points)
+    # point_data_choice=random_down_sampling(full_point_clouds,config.num_points)
 
-    down_sampled_point_clouds = point_data_choice[:, :3]
+    # down_sampled_point_clouds = point_data_choice[:, :3]
     # view_npy_open3d(new_point_data,view_coordinate=True)
 
-    return down_sampled_point_clouds,full_point_clouds
+    return full_point_clouds
 
 
 def random_sampling_augmentation(center_point, point_data, number_of_points):

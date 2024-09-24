@@ -3,6 +3,7 @@ from colorama import Fore
 from torch.utils import data
 
 from Configurations import config
+from Online_data_audit.sample_training_buffer import get_selection_probabilty
 from lib.depth_map import point_clouds_to_depth, get_pixel_index
 from pose_object import encode_gripper_pose_npy
 from registration import camera, transform_to_camera_frame
@@ -18,12 +19,14 @@ force_balanced_data=True
 def load_training_buffer(size):
     file_indexes = online_data.get_indexes()
     random.shuffle(file_indexes)
+    selection_p = get_selection_probabilty(file_indexes)
 
     progress_indicator=pi(f'load {size} samples for training',size)
     positive_samples=0
     negative_samples=0
     counter=0
     for i,target_file_index in enumerate(file_indexes):
+        if np.random.rand() > selection_p[i]: continue
         '''get data'''
         try:
             # depth=online_data.load_depth(target_file_index)

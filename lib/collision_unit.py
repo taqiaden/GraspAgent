@@ -150,7 +150,7 @@ def resolve_collssion(pose_good_grasp,point_data,n_attempts=5,diversity_factor=1
         return False,pose_good_grasp
 
 def get_distance_step(pose_good_grasp):
-    distance_step = config.distance_bin_size *1.5 # in meter
+    distance_step = 0.00375 # in meter
     current_distance = pose_good_grasp[0, -1]
 
     if np.random.rand() > ((current_distance) / (config.distance_scope)) ** 2:

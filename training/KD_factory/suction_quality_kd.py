@@ -8,7 +8,7 @@ from lib.depth_map import depth_to_point_clouds
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
-from models.suction_D import affordance_net_model_path, affordance_net
+from models.point_net_base.suction_D import affordance_net_model_path, affordance_net
 from models.suction_quality import suction_quality_net, suction_quality_model_state_path, suction_scope_net, \
     suction_scope_model_state_path
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
@@ -16,7 +16,7 @@ from registration import camera, transform_to_camera_frame
 
 suction_quality_optimizer_path=r'suction_quality_optimizer'
 
-suction_scope_optimizer_path=r'suction_scope_optimizer'
+# suction_scope_optimizer_path=r'suction_scope_optimizer'
 
 training_data=training_data()
 training_data.main_modality=training_data.depth
@@ -46,11 +46,11 @@ def knowledge_distillation():
     generator.eval()
 
     '''optimizer'''
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(list(model.parameters())+list(scope_model.parameters()), lr=learning_rate, betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
     optimizer = load_opt(optimizer, suction_quality_optimizer_path)
-    scope_optimizer = torch.optim.Adam(scope_model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-8,
-                                       weight_decay=weight_decay)
-    scope_optimizer = load_opt(scope_optimizer, suction_scope_optimizer_path)
+    # scope_optimizer = torch.optim.Adam(scope_model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-8,
+    #                                    weight_decay=weight_decay)
+    # scope_optimizer = load_opt(scope_optimizer, suction_scope_optimizer_path)
 
     '''distillation source model'''
     source_model = initialize_model(affordance_net,affordance_net_model_path)
@@ -95,9 +95,10 @@ def knowledge_distillation():
             loss=loss/BATCH_SIZE
             print(loss.item())
 
-            '''optimizer'''
+            '''optimize'''
             loss.backward()
             optimizer.step()
+
 
             running_loss += loss.item()
             pi.step(i)
@@ -111,7 +112,7 @@ def knowledge_distillation():
         running_loss= train_one_epoch()
 
         export_optm(optimizer, suction_quality_optimizer_path)
-        export_optm(scope_optimizer, suction_scope_optimizer_path)
+        # export_optm(scope_optimizer, suction_scope_optimizer_path)
 
         pi.end()
 
@@ -135,4 +136,4 @@ def train_suction_sampler_kd(n_samples=None):
 
 
 if __name__ == "__main__":
-    train_suction_sampler_kd(10)
+    train_suction_sampler_kd(1000)

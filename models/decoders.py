@@ -26,7 +26,7 @@ class res_block(nn.Module):
         return output
 
 class res_block_mlp_LN(nn.Module):
-    def __init__(self,in_c,medium_c,out_c):
+    def __init__(self,in_c,medium_c,out_c,drop_out_ratio=0.0):
         super().__init__()
         self.ln1=nn.LayerNorm([in_c])
 
@@ -35,6 +35,7 @@ class res_block_mlp_LN(nn.Module):
         self.ln2=nn.LayerNorm([medium_c])
         self.res1 = nn.Linear(in_c, out_c)
         self.c2 = nn.Linear(medium_c, out_c)
+        self.drop_out=nn.Dropout(drop_out_ratio)
 
         self.relu = nn.ReLU()
     def forward(self, input):
@@ -45,6 +46,7 @@ class res_block_mlp_LN(nn.Module):
         x=self.c1(x)
         x=self.ln2(x)
         x=self.relu(x)
+        x=self.drop_out(x)
         x=self.c2(x)
         output=x+r
         return output
@@ -52,7 +54,7 @@ class res_block_mlp_LN(nn.Module):
 #             nn.LayerNorm([64]),
 
 class att_res_mlp_LN(nn.Module):
-    def __init__(self,in_c1,in_c2,out_c):
+    def __init__(self,in_c1,in_c2,out_c,drop_out_ratio=0.0):
         super().__init__()
         assert in_c1 >32 and out_c<32 and in_c2<16
 
@@ -88,6 +90,7 @@ class att_res_mlp_LN(nn.Module):
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
             nn.ReLU(True),
+            nn.Dropout(drop_out_ratio),
             nn.Linear(16, out_c),
         ).to('cuda')
 

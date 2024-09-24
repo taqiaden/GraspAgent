@@ -15,12 +15,15 @@ from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt, exponential_decay_lr_
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path, gripper_critic_path, critic_net
 from pose_object import  pose_7_to_pose_good_grasp
-from registration import camera, standardize_depth
+from registration import camera
 import torch.nn.functional as F
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed import init_process_group,destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
+from lib.report_utils import  progress_indicator
+from filelock import FileLock
+lock = FileLock("file.lock")
 
 gripper_critic_optimizer_path = r'gripper_critic_optimizer.pth.tar'
 gripper_sampler_optimizer_path = r'gripper_sampler_optimizer.pth.tar'
@@ -33,17 +36,13 @@ max_lr=0.01
 min_lr=1*1e-6
 weight_decay = 0.000001
 
-loss_power=2.0
+loss_power=1.0
 
 m1=1.0
 m2=1.0
 m3=1.0
 
-maximum_gpus=1
-
 activate_full_power_at_midnight=True
-
-result_queue=mp.Queue()
 
 def ddp_setup(rank,world_size):
     os.environ["MASTER_ADDR"]="localhost"
@@ -51,12 +50,12 @@ def ddp_setup(rank,world_size):
     init_process_group(backend="nccl",rank=rank,world_size=world_size)
 
 class train_config:
-    def __init__(self,batch_size,epochs,workers,world_size):
+    def __init__(self,batch_size,epochs,workers,world_size,learning_rate):
         self.batch_size=batch_size
         self.epochs=epochs
         self.workers=workers
         self.world_size=world_size
-
+        self.learning_rate=learning_rate
 
 def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
     '''Evaluate generated grasps'''
@@ -131,7 +130,10 @@ def train_critic(Critic,Generator,C_optimizer,generated_grasps,batch_size,pixel_
         firmness_state = firmness_state_list[j]
         curriculum_loss += (torch.clamp(label_ - prediction_ - m1, 0))**loss_power
         collision_loss += (torch.clamp(prediction_ - label_ + m2, 0) * bad_state_grasp)**loss_power
-        firmness_loss += (torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))**loss_power
+        generated_dist = generated_grasps[j, -2, pix_A, pix_B]
+        activate_firmness_loss=1 if generated_dist<0.2 else 0.0
+        firmness_loss += ((torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))**loss_power)*activate_firmness_loss
+
         print(f'cur_l={curriculum_loss}, col_l={collision_loss}, fir_l={firmness_loss}')
 
     C_loss = ((curriculum_loss + collision_loss + firmness_loss) / batch_size)
@@ -150,13 +152,13 @@ def train_generator(Critic,Generator,G_optimizer,depth,label_generated_grasps,ba
 
     '''critic score of reference label '''
     with torch.no_grad():
-        label_critic_score = Critic(depth, label_generated_grasps)
+        label_critic_score = Critic(depth.clone(), label_generated_grasps)
 
     '''generated grasps'''
-    generated_grasps = Generator(depth)
+    generated_grasps = Generator(depth.clone())
 
     '''Critic score of generated grasps'''
-    generated_critic_score = Critic(depth, generated_grasps)
+    generated_critic_score = Critic(depth.clone(), generated_grasps)
 
     '''accumulate loss'''
     G_loss = 0.0
@@ -192,37 +194,26 @@ def view_metrics(generated_grasps,collision_state_list,out_of_scope_list,firmnes
     print(f'Out of scope times = {sum(out_of_scope_list)}')
     print(f'good firmness times = {sum(firmness_state_list)}')
 
-def prepare_models_and_optimizers(adaptive_lr):
+def prepare_models():
 
     print(Fore.CYAN,'Import check points',Fore.RESET)
-
     '''models'''
     Critic = initialize_model(critic_net, gripper_critic_path)
     Critic.train(True)
-    # Critic.share_memory()
     Generator = initialize_model(gripper_sampler_net, gripper_sampler_path)
     Generator.train(True)
-    # Generator.share_memory()
 
-    '''optimizers'''
-    # C_optimizer = torch.optim.Adam(Critic.parameters(), lr=adaptive_lr, betas=(0.9, 0.999), eps=1e-8,weight_decay=weight_decay)
-    C_optimizer = torch.optim.SGD(Critic.parameters(), lr=adaptive_lr, weight_decay=weight_decay)
-    C_optimizer = load_opt(C_optimizer, gripper_critic_optimizer_path)
-    # G_optimizer = torch.optim.Adam(Generator.parameters(), lr=learning_rate,betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
-    G_optimizer = torch.optim.SGD(Generator.parameters(), lr=adaptive_lr, weight_decay=weight_decay)
-    # G_optimizer = torch.optim.RMSprop(Generator.parameters(),alpha=0.9, lr=learning_rate, eps=1e-8, weight_decay=weight_decay)
-    G_optimizer = load_opt(G_optimizer, gripper_sampler_optimizer_path)
+    return Critic,Generator
 
-    return Critic,Generator,C_optimizer,G_optimizer
-from lib.report_utils import  progress_indicator
 
 class TrainerDDP:
-    def __init__(self,gpu_id: int,Critic: nn.Module,Generator: nn.Module,C_optimizer,G_optimizer,training_congiurations):
+    def __init__(self,gpu_id: int,Critic: nn.Module,Generator: nn.Module,training_congiurations):
         '''set devices and model wrappers'''
         self.world_size=training_congiurations.world_size
         self.batch_size=training_congiurations.batch_size
         self.epochs=training_congiurations.epochs
         self.workers=training_congiurations.workers
+        self.learning_rate=training_congiurations.learning_rate
         torch.cuda.set_device(gpu_id)
         torch.cuda.empty_cache()
 
@@ -245,8 +236,7 @@ class TrainerDDP:
         self.data_laoder=self._prepare_dataloader(dataset)
 
         '''optimizers'''
-        self.C_optimizer=C_optimizer
-        self.G_optimizer=G_optimizer
+        self.C_optimizer,self.G_optimizer=self._prepare_optimizers()
 
     def _prepare_dataloader(self,dataset):
         dloader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, num_workers=self.workers, shuffle=False,
@@ -264,6 +254,19 @@ class TrainerDDP:
 
             print(Fore.CYAN, 'Check points exported successfully',Fore.RESET)
 
+    def _prepare_optimizers(self):
+        '''optimizers'''
+        # C_optimizer = torch.optim.Adam(self.Critic.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+        #                                weight_decay=weight_decay)
+        C_optimizer = torch.optim.SGD(self.Critic.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
+
+        # G_optimizer = torch.optim.Adam(self.Generator.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+        #                                weight_decay=weight_decay)
+        G_optimizer = torch.optim.SGD(self.Generator.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
+        with lock:
+            C_optimizer = load_opt(C_optimizer, gripper_critic_optimizer_path)
+            G_optimizer = load_opt(G_optimizer, gripper_sampler_optimizer_path)
+        return C_optimizer,G_optimizer
 
     def train(self):
 
@@ -281,10 +284,9 @@ class TrainerDDP:
                 pose_7 = pose_7.to(self.device).float().squeeze(1)  # [b,7]
                 b = depth.shape[0]
 
-
                 '''generate grasps'''
                 with torch.no_grad():
-                    generated_grasps = self.Generator(depth)
+                    generated_grasps = self.Generator(depth.clone())
 
                 '''Evaluate generated grasps'''
                 collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
@@ -337,75 +339,71 @@ class TrainerDDP:
             '''export models and optimizers'''
             self.export_check_points()
 
-def train_Grasp_GAN(n_samples=None):
+def train_Grasp_GAN(n_samples=None,BATCH_SIZE=2,epochs=1,maximum_gpus=None):
     training_data.clear()
     performance_indicator = float(get_value("performance_indicator", section='Grasp_GAN'))
-    while True:
-        '''zero records'''
-        save_key("C_running_loss", 0., section='Grasp_GAN')
-        save_key("G_running_loss", 0., section='Grasp_GAN')
-        save_key("collision_times", 0., section='Grasp_GAN')
-        save_key("out_of_scope_times", 0., section='Grasp_GAN')
-        save_key("good_firmness_times", 0., section='Grasp_GAN')
+    '''zero records'''
+    save_key("C_running_loss", 0., section='Grasp_GAN')
+    save_key("G_running_loss", 0., section='Grasp_GAN')
+    save_key("collision_times", 0., section='Grasp_GAN')
+    save_key("out_of_scope_times", 0., section='Grasp_GAN')
+    save_key("good_firmness_times", 0., section='Grasp_GAN')
 
-        '''get adaptive lr'''
-        adaptive_lr = exponential_decay_lr_(performance_indicator,max_lr,min_lr)
-        print(Fore.CYAN, f'performance_indicator = {performance_indicator}, Learning rate = {adaptive_lr}', Fore.RESET)
+    '''get adaptive lr'''
+    adaptive_lr = exponential_decay_lr_(performance_indicator,max_lr,min_lr)
+    print(Fore.CYAN, f'performance_indicator = {performance_indicator}, Learning rate = {adaptive_lr}', Fore.RESET)
 
-        '''load check points'''
-        Critic, Generator, C_optimizer, G_optimizer = prepare_models_and_optimizers(adaptive_lr)
+    '''load check points'''
+    Critic, Generator= prepare_models()
 
-        '''configure world_size'''
-        now = datetime.datetime.now()
-        if activate_full_power_at_midnight and 7>now.hour>3:
-            world_size = torch.cuda.device_count()
-        else:
-            world_size = torch.cuda.device_count() if maximum_gpus is None else maximum_gpus
+    '''configure world_size'''
+    now = datetime.datetime.now()
+    if activate_full_power_at_midnight and 7>now.hour>3:
+        world_size = torch.cuda.device_count()
+    else:
+        world_size = torch.cuda.device_count() if maximum_gpus is None else maximum_gpus
 
-        '''train configurations'''
-        BATCH_SIZE=2
-        print(Fore.YELLOW, f'Batch size per node = {BATCH_SIZE} ', Fore.RESET)
-        t_config=train_config(BATCH_SIZE,1,0,world_size)
+    '''train configurations'''
+    print(Fore.YELLOW, f'Batch size per node = {BATCH_SIZE}, epochs = {epochs}', Fore.RESET)
+    t_config=train_config(BATCH_SIZE,epochs,0,world_size,adaptive_lr)
 
-        '''prepare buffer'''
-        if len(training_data) == 0:
-            load_training_buffer(size=n_samples)
-        buffer_size=len(training_data)
-        print(Fore.YELLOW,f'Buffer size = {buffer_size} ', Fore.RESET)
+    '''prepare buffer'''
+    if len(training_data) == 0:
+        load_training_buffer(size=n_samples)
+    buffer_size=len(training_data)
+    print(Fore.YELLOW,f'Buffer size = {buffer_size} ', Fore.RESET)
 
-        '''Setup communication between process'''
+    '''Begin multi processing'''
+    mp.spawn(main_ddp,args=(t_config,Critic,Generator),nprocs=world_size)
 
-        '''Begin multi processing'''
-        mp.spawn(main_ddp,args=(t_config,Critic,Generator,C_optimizer,G_optimizer),nprocs=world_size)
+    '''Final report'''
+    print(Fore.BLUE)
+    C_running_loss_all=get_float("C_running_loss", section='Grasp_GAN')
+    G_running_loss_all=get_float("G_running_loss",  section='Grasp_GAN')
+    total_collision=get_float("collision_times",  section='Grasp_GAN')
+    total_out_of_scope=get_float("out_of_scope_times",  section='Grasp_GAN')
+    total_firm_grasp=get_float("good_firmness_times",  section='Grasp_GAN')
+    print(f'Collision ratio = {total_collision/(buffer_size*epochs)}')
+    print(f'out of scope ratio = {total_out_of_scope/(buffer_size*epochs)}')
+    print(f'firm grasp ratio = {total_firm_grasp/(buffer_size*epochs)}')
+    print(f'Average Critic loss = {C_running_loss_all/(buffer_size*epochs)}')
+    print(f'Average Generator loss = {G_running_loss_all/(buffer_size*epochs)}')
+    print(Fore.RESET)
 
-        '''Final report'''
-        print(Fore.BLUE)
-        C_running_loss_all=get_float("C_running_loss", section='Grasp_GAN')
-        G_running_loss_all=get_float("G_running_loss",  section='Grasp_GAN')
-        total_collision=get_float("collision_times",  section='Grasp_GAN')
-        total_out_of_scope=get_float("out_of_scope_times",  section='Grasp_GAN')
-        total_firm_grasp=get_float("good_firmness_times",  section='Grasp_GAN')
-        print(f'Collision ratio = {total_collision/buffer_size}')
-        print(f'out of scope ratio = {total_out_of_scope/buffer_size}')
-        print(f'firm grasp ratio = {total_firm_grasp/buffer_size}')
-        print(f'Average Critic loss = {C_running_loss_all/buffer_size}')
-        print(f'Average Generator loss = {G_running_loss_all/buffer_size}')
-        print(Fore.RESET)
+    '''update performance indicator'''
+    performance_indicator=1-max(total_collision,total_out_of_scope)/(buffer_size*epochs)
+    save_key("performance_indicator", performance_indicator, section='Grasp_GAN')
 
-        '''update performance indicator'''
-        performance_indicator=1-max(total_collision,total_out_of_scope)/buffer_size
-        save_key("performance_indicator", performance_indicator, section='Grasp_GAN')
-
-        '''clear buffer'''
-        training_data.clear()
+    '''clear buffer'''
+    training_data.clear()
 
 
-def main_ddp(rank: int, t_config,Critic,Generator,C_optimizer,G_optimizer):
+def main_ddp(rank: int, t_config,Critic,Generator):
     '''setup parallel training'''
     ddp_setup(rank,t_config.world_size)
 
     '''training'''
-    trainer=TrainerDDP(gpu_id=rank,Critic=Critic,Generator=Generator,C_optimizer=C_optimizer,G_optimizer=G_optimizer,training_congiurations=t_config)
+    trainer=TrainerDDP(gpu_id=rank,Critic=Critic,Generator=Generator,training_congiurations=t_config)
     trainer.train()
 
     '''destroy process'''
@@ -413,4 +411,5 @@ def main_ddp(rank: int, t_config,Critic,Generator,C_optimizer,G_optimizer):
 
 
 if __name__ == "__main__":
-    train_Grasp_GAN(900)
+    while True:
+        train_Grasp_GAN(900,BATCH_SIZE=2,epochs=1,maximum_gpus=None)

@@ -1,4 +1,7 @@
+import numpy as np
+
 from Configurations import ENV_boundaries
+from Configurations.run_config import score_threshold
 from lib.report_utils import save_error_log
 
 def get_spatial_mask(pc):
@@ -12,7 +15,7 @@ def get_spatial_mask(pc):
     return spatial_mask
 
 def accumulate_mask_layer(array,current_mask,maximum_size,mask_inversion=False):
-    global score_threshold
+    # global score_threshold
     m1=(array>score_threshold) & (current_mask)
     z=array[m1]
     if z.shape[0]<0 or maximum_size is None:
@@ -32,7 +35,11 @@ def initialize_masks(grasp_score_pred, suction_score_pred, data_ ,grasp_max_size
         z = data_[:, 2]
         x_mask = (x > 0.275+0.01) & (x < 0.585-0.01)
         y_mask = (y > -0.20) & (y < 0.20)
-        z_mask = (z > ENV_boundaries.z_limits[0]) & (z < ENV_boundaries.z_limits[1])
+        '''detect floor limit'''
+        z_min=np.min(z)+0.01
+        # z_mask = (z > ENV_boundaries.z_limits[0]) & (z < ENV_boundaries.z_limits[1])
+        z_mask = (z > z_min) & (z <  ENV_boundaries.z_limits[1])
+
         mask = x_mask & y_mask & z_mask
         # view_npy_open3d(data_)
         # view_npy_open3d(data_[mask])

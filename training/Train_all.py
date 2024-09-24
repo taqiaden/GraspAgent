@@ -1,41 +1,33 @@
 import math
 from datetime import datetime
 from colorama import Fore
-from GAGAN import train_generator
-from records.records_managment import clear_records
-from suction_D_training import train_suction
-from    gripper_D_training import train_gripper
 from lib.math_utils import seeds
-from training.opening_GAN_training import train_opening_GAN
+from training.Grasp_GAN_training import train_Grasp_GAN
+from training.gripper_quality_training import train_gripper_quality
+from training.suction_quality_training import train_suction_quality
 
 time_seed=math.floor(datetime.now().timestamp())
 
 if __name__ == "__main__":
     while True:
         seeds(time_seed)
-        clear_records()
-        # train_opening_GAN(n_samples=3)
-        # train_generator(n_samples=2)
-        # train_gripper(n_samples=2)
-        # train_suction(n_samples=2)
-        # exit()
-        for i in range(1000):
+
+        for i in range(0):
             try:
-                train_opening_GAN(n_samples=1000)
+                print(Fore.LIGHTMAGENTA_EX,'Train gripper sampler', Fore.RESET)
+                train_Grasp_GAN(600, BATCH_SIZE=2, epochs=1, maximum_gpus=None)
             except Exception as e:
                 print(Fore.RED, str(e), Fore.RESET)
         for i in range(1):
             try:
-                train_generator(n_samples=1000)
+                print(Fore.LIGHTMAGENTA_EX,'Train suction quality net', Fore.RESET)
+                train_suction_quality(3000, BATCH_SIZE=4, epochs=3, maximum_gpus=None,learning_rate=5*1e-5)
             except Exception as e:
                 print(Fore.RED, str(e), Fore.RESET)
         for i in range(1):
             try:
-                train_gripper(n_samples=1000)
+                print(Fore.LIGHTMAGENTA_EX,'Train gripper quality net', Fore.RESET)
+                train_gripper_quality(3000, BATCH_SIZE=4, epochs=3, maximum_gpus=None,learning_rate=5*1e-5)
             except Exception as e:
                 print(Fore.RED, str(e), Fore.RESET)
-        for i in range(1):
-            try:
-                train_suction(n_samples=1000)
-            except Exception as e:
-                print(Fore.RED, str(e), Fore.RESET)
+

@@ -43,9 +43,11 @@ def train_():
         for i, batch in enumerate(dloader, 0):
             depth= batch
             depth=depth.cuda().float()
+
+
             '''get predictions'''
             model.zero_grad()
-            predictions=model(depth)
+            predictions=model(depth.clone())
             predictions = predictions.permute(0,2, 3, 1) # inference time on local computer = 8.9e-05 s
 
             loss=0

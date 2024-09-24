@@ -43,7 +43,8 @@ def load_training_data_from_online_pool(number_of_online_samples):
 
     balance_indicator=0
     unbalance_allowance=0
-    online_pc_filenames = online_data.get_pc_names()
+    online_pc_filenames = online_data.get_indexes()
+
     # assert len(online_pc_filenames) >= number_of_online_samples
     random.shuffle(online_pc_filenames)
     selection_p=get_selection_probabilty(online_data,online_pc_filenames)

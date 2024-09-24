@@ -2,8 +2,7 @@ import numpy as np
 
 selection_prob_k=0.1
 
-def get_selection_probabilty(online_data,online_pc_filenames):
-    indexes=online_data.get_indexes(online_pc_filenames)
+def get_selection_probabilty(indexes):
     indexes=np.asarray(indexes,dtype=int)
     sort_index=np.argsort(indexes)
     if selection_prob_k is None:

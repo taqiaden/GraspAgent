@@ -14,12 +14,13 @@ grasp_data_path = config.home_dir + 'grasp_data_tmp.npy'
 pre_grasp_data_path = config.home_dir + 'pre_grasp_data_tmp.npy'
 suction_data_path = config.home_dir + 'suction_data_tmp.npy'
 pre_suction_data_path = config.home_dir + 'pre_suction_data_tmp.npy'
-def inference_dense_gripper_pose(point_data_npy,center_point,index):
-    global poses
+def inference_dense_gripper_pose(poses,center_point,index):
+    # global poses
     # point_data = torch.from_numpy(point_data_npy).to('cuda')
     # point_data = point_data[None, :, :]
     # poses=dense_gripper_net.dense_gripper_generator_net_(point_data)
-    pose=poses[:,:,index]
+    print(poses.shape)
+    pose=poses[index]
 
 
 
@@ -58,7 +59,7 @@ def get_suction_pose_( target_point, normal):
 
 def get_suction_pose(index, point_data, normal):
     return  get_suction_pose_(point_data[index],normal)
-def  gripper_processing(index,point_data,isvis):
+def  gripper_processing(index,point_data,poses,isvis):
     # view_npy_open3d(point_data,view_coordinate=True)
 
     # Get the pose_good_grasp
@@ -66,7 +67,7 @@ def  gripper_processing(index,point_data,isvis):
     # print('center------------',center_point)
     # view_npy_open3d(point_data,view_coordinate=True)
     # print(point_data.shape)
-    pose_good_grasp=inference_dense_gripper_pose(point_data, center_point, index)
+    pose_good_grasp=inference_dense_gripper_pose(poses, center_point, index)
 
     # pose_good_grasp=inference_gripper_pose(point_data,center_point,index)
     # vis_scene(pose_good_grasp[:, :].reshape(1, 14),npy=point_data)
@@ -97,9 +98,9 @@ def  gripper_processing(index,point_data,isvis):
 
     return True, pose_good_grasp,grasp_width, distance, T, center_point
 
-def suction_processing(index,point_data,isvis):
+def suction_processing(index,point_data,normals,isvis):
 
-    global normals
+
     normal=normals[index]
     normal=normal[None,:]
 
