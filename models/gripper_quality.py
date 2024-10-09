@@ -24,37 +24,7 @@ def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
         tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
         return tensor
 
-# class gripper_scope_net(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.res_block = res_block_mlp_LN(3+2,16,8,drop_out_ratio=0.5).to('cuda')
-#
-#         self.ln1 = nn.LayerNorm([8]).to('cuda')
-#         self.relu = nn.ReLU()
-#         self.d = nn.Linear(8, 1).to('cuda')
-#         # self.sig=nn.Sigmoid()
-#
-#     def forward(self, approach ):
-#         b = approach.shape[0]
-#
-#         '''get spatial information'''
-#         xymap = depth_to_mesh_grid(camera)
-#         xymap = xymap.repeat(b, 1, 1, 1)
-#
-#         '''reshape and concatenate'''
-#         xymap_2d = reshape_for_layer_norm(xymap, camera=camera, reverse=False)
-#         approach_2d = reshape_for_layer_norm(approach, camera=camera, reverse=False)
-#         features = torch.cat([xymap_2d, approach_2d], dim=1)
-#
-#         '''MLP'''
-#         x = self.res_block(features)
-#         x = self.ln1(x)
-#         x = self.relu(x)
-#         output_2d = self.d(x)
-#
-#         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
-#         # output=self.sig(output)
-#         return output
+
 
 class compact_decoder(nn.Module):
     def __init__(self):
@@ -66,7 +36,6 @@ class compact_decoder(nn.Module):
             nn.Linear(64+9, 32, bias=False),
             nn.LayerNorm([32]),
             nn.ReLU(True),
-            nn.Dropout(0.3),
             nn.Linear(32, 1),
         ).to('cuda')
 

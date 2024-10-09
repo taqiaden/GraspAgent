@@ -93,7 +93,7 @@ def train_():
     return model
 
 def train_suction_sampler(n_samples=None):
-    # training_data.clear()
+    training_data.clear()
     while True:
         if len(training_data) == 0:
             load_training_buffer(size=n_samples)
@@ -103,6 +103,6 @@ def train_suction_sampler(n_samples=None):
         training_data.clear()
 
 if __name__ == "__main__":
-    train_suction_sampler(1000)
+    train_suction_sampler(100)
 
 

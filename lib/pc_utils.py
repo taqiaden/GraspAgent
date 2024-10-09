@@ -12,8 +12,6 @@ def closest_point(point_data, center_point, radius=0.0025,warning_limit=0.005):
     min_d = distance[index]
 
     if min_d > radius:
-        # print(f'Minimum distance to nearest point= {min_d}')
-        # assert min_d<warning_limit, f'{min_d}'
         return None
     return index
 
@@ -67,7 +65,6 @@ def get_npy_norms(pc):
     return pcd
 
 def random_down_sampling(point_data,number_of_points):
-    # print(pc_current_size)
     choices = np.random.choice(point_data.shape[0], number_of_points, replace=False)
     return point_data[choices, :]
 
@@ -81,10 +78,6 @@ def random_transformation(pc):
     rotation=torch.from_numpy(rotation).to('cuda')[None,None,:,:]
     transformed_pc=rotation*transformed_pc[:,:,:,None]
     transformed_pc=transformed_pc.sum(-2).float()
-    # print(rotation.shape)
-    # print(transformed_pc.shape)
-
-    # exit()
     return transformed_pc
 def random_transition(pc):
     # random shift
@@ -103,9 +96,6 @@ def unit_sphere_pc_normalization( pc_data,constant_scale=True,constant_shift=Tru
     if constant_shift:pc_center=ref_pc_center
     pc_data_new = pc_data - pc_center
     scale,ids_ = torch.max(torch.sqrt(torch.sum(pc_data_new ** 2, dim=-1, keepdim=True)), dim=1, keepdim=True)
-
-    # if torch.any(scale>0.4) or torch.any(scale<0.3):print(Fore.RED,'Scale out range=',scale,Fore.RESET)
-
     if constant_scale: pc_data_new /=0.36
     else:
         pc_data_new /= scale

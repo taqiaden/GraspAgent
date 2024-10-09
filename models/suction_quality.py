@@ -69,7 +69,6 @@ class compact_decoder(nn.Module):
             nn.Linear(64+5, 32, bias=False),
             nn.LayerNorm([32]),
             nn.ReLU(True),
-            nn.Dropout(0.3),
             nn.Linear(32, 1),
         ).to('cuda')
 
