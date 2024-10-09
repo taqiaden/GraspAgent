@@ -15,23 +15,9 @@ pre_grasp_data_path = config.home_dir + 'pre_grasp_data_tmp.npy'
 suction_data_path = config.home_dir + 'suction_data_tmp.npy'
 pre_suction_data_path = config.home_dir + 'pre_suction_data_tmp.npy'
 def inference_dense_gripper_pose(poses,center_point,index):
-    # global poses
-    # point_data = torch.from_numpy(point_data_npy).to('cuda')
-    # point_data = point_data[None, :, :]
-    # poses=dense_gripper_net.dense_gripper_generator_net_(point_data)
-    print(poses.shape)
+
     pose=poses[index]
-
-
-
     print('prediction------------------------------------------------',pose)
-    # if np.random.random()>0.3:
-    #     pose=torch.rand_like(pose)
-    #     print('random pose=------------------------------------------------',pose)
-
-    # gripper_pose_net.gripper_net.eval()
-    # theta_phi_output_GAN=gripper_pose_net.gripper_net(depth_image,center_point_)
-    # output = theta_phi_output_GAN
 
     pose_good_grasp=decode_gripper_pose(pose,center_point)
     return pose_good_grasp

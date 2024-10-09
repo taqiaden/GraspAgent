@@ -199,10 +199,7 @@ def run_robot( point_data, candidates,grasp_score_pred,suction_score_pred,isvis)
 
         end_index = min(i + chunk_size, len(candidates))
         sub_candidates =candidates[i:end_index]
-        # print(f'average score of the top {np.asarray(sub_candidates)[:,0].mean()}')
 
-        # if np.random.rand()<shuffling_probability:
-        # random.shuffle(sub_candidates)
 
         for candidate_ in sub_candidates:
 
