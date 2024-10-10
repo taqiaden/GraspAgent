@@ -1,41 +1,46 @@
 from configparser import ConfigParser
-from filelock import FileLock
-lock = FileLock("file.lock")
+# from filelock import FileLock
+# lock = FileLock("file.lock")
 config = ConfigParser()
 
 config_file_path='Configurations/config.ini'
+counters_file_path='Configurations/counters.ini'
 
-def creat_section(section):
-    config.read(config_file_path)
+def creat_section(section,config_file=config_file_path):
+    config.read(config_file)
     config.add_section(section)
 
-    with open(config_file_path, 'w') as f:
+    with open(config_file, 'w') as f:
         config.write(f)
-def save_key(key,value,section='main'):
+def save_key(key,value,section='main',config_file=config_file_path):
     if not isinstance(value,str): value=str(value)
-    config.read(config_file_path)
+    config.read(config_file)
     config.set(section, key, value)
 
-    with open(config_file_path, 'w') as f:
+    with open(config_file, 'w') as f:
         config.write(f)
-def get_value(key,section='main'):
-    config.read(config_file_path)
+def get_value(key,section='main',config_file=config_file_path):
+    config.read(config_file)
     return config.get(section, key)
 
-def get_float(key,section='main'):
-    config.read(config_file_path)
+def get_float(key,section='main',config_file=config_file_path):
+    config.read(config_file)
     return config.getfloat(section, key)
+
+def get_int(key,section='main',config_file=config_file_path):
+    config.read(config_file)
+    return config.getint(section, key)
 
 def add_to_value_(key,delta,section='main'):
     old_value=get_float(key,section)
     new_value=str(delta+old_value)
     save_key(key,new_value,section)
 
-def add_to_value(key,delta,section='main',lock_other_process=True):
-    if lock_other_process:
-        with lock:
-            add_to_value_(key,delta,section)
-    else: add_to_value_(key,delta,section)
+# def add_to_value(key,delta,section='main',lock_other_process=True):
+#     if lock_other_process:
+#         with lock:
+#             add_to_value_(key,delta,section)
+#     else: add_to_value_(key,delta,section)
 
 
 

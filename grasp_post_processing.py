@@ -92,10 +92,9 @@ def suction_processing(index,point_data,normals,isvis):
 
     suction_xyz, pre_grasp_mat, end_effecter_mat, suction_pose, T, pred_approch_vector \
         = get_suction_pose(index, point_data, normal)
-    # suction_net_processing(point_data, index)
 
-    if pre_grasp_mat[0, 3] < ENV_boundaries.x_min_dis:
-        return False, suction_xyz,pred_approch_vector
+    # if pre_grasp_mat[0, 3] < ENV_boundaries.x_min_dis:
+    #     return False, suction_xyz,pred_approch_vector
 
     save_suction_data(end_effecter_mat, suction_data_path)
     save_suction_data(pre_grasp_mat, pre_suction_data_path)
