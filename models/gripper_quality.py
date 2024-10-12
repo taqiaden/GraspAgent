@@ -9,7 +9,6 @@ gripper_quality_model_state_path=r'gripper_quality_model_state'
 
 gripper_scope_model_state_path=r'gripper_scope_model_state'
 
-
 use_bn=False
 use_in=True
 
@@ -23,8 +22,6 @@ def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
         channels=tensor.shape[-1]
         tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
         return tensor
-
-
 
 class compact_decoder(nn.Module):
     def __init__(self):

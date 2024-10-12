@@ -1,20 +1,16 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 import math
-
 import torch
 import numpy as np
 from colorama import Fore
-
-from Configurations.config import ip_address
-from Configurations.dynamic_config import get_value, counters_file_path, get_float, get_int, save_key
+from Configurations.dynamic_config import counters_file_path, get_int, save_key
 from grasp_post_processing import grasp_data_path, pre_grasp_data_path, suction_data_path, pre_suction_data_path
 from lib.ROS_communication import wait_for_feedback, save_grasp_data, save_suction_data
 from lib.bbox import decode_gripper_pose
 from lib.dataset_utils import configure_smbclient, modality_pool
 from Configurations import config, ENV_boundaries
 import subprocess
-
 from lib.grasp_utils import get_pose_matrixes, get_homogenous_matrix, get_grasp_width
 from lib.math_utils import seeds
 
@@ -43,6 +39,31 @@ def catch_random_grasp_point():
 
     return T, grasp_width
 
+def save_scope_label(T,feasible,pool_object,pool_name):
+    index = get_int(pool_name, config_file=counters_file_path) + 1
+    transformation = T.reshape(-1).tolist()
+    label = np.array([feasible] + transformation)
+    pool_object.save_as_numpy(label, str(index).zfill(7))
+    save_key(pool_name, index, config_file=counters_file_path)
+
+def save_suction_label(T,feasible,suction_pool):
+    save_scope_label(T, feasible, suction_pool, 'suction_scope')
+
+def save_gripper_label(T,feasible,gripper_pool):
+    save_scope_label(T, feasible, gripper_pool, 'gripper_scope')
+
+def process_feedback(state_):
+    state_ = wait_for_feedback(state_)
+    if state_ == 'reachable':
+        print(Fore.GREEN, 'Feasible path plan exists for suction', Fore.RESET)
+        return 1.
+    elif state_ == 'unreachable':
+        print(Fore.RED, 'No feasible path plan was found for suction', Fore.RESET)
+        return 0.
+    else:
+        print(Fore.RED, 'undefined state', Fore.RESET)
+        return None
+
 def main():
     gripper_pool=modality_pool('gripper_label',parent_dir=scope_data_dir,is_local=True)
     suction_pool=modality_pool('suction_label',parent_dir=scope_data_dir,is_local=True)
@@ -69,27 +90,10 @@ def main():
 
             '''check gripper feasibility'''
             subprocess.run(execute_grasp_bash)
-            state_ = wait_for_feedback(state_)
-            if state_=='reachable':
-                print(Fore.GREEN,'Feasible path plan exists for gripper', Fore.RESET)
-                feasible = 1.
-
-            elif state_=='unreachable':
-                print(Fore.RED,'No feasible path plan was found for gripper', Fore.RESET)
-                feasible = 0.
-
-            else:
-                print(Fore.RED,'undefined state', Fore.RESET)
-                return
+            feasible=process_feedback(state_)
 
             '''save gripper label'''
-            index=get_int('gripper_scope',config_file=counters_file_path)+1
-            transformation = T.reshape(-1).tolist()
-            label=np.array([feasible]+transformation)
-            # path=gripper_scope_data_path+'/'+str(index).zfill(7)+'_scope_label.npy'
-            # np.save(path,label)
-            gripper_pool.save_as_numpy(label,str(index).zfill(7))
-            save_key('gripper_scope',index,config_file=counters_file_path)
+            save_gripper_label(T,feasible,gripper_pool)
 
             with open(config.home_dir + "ros_execute.txt", 'w') as f:
                 f.write('Wait')
@@ -97,27 +101,10 @@ def main():
 
             '''check suction feasibility'''
             subprocess.run(execute_suction_bash)
-            state_ = wait_for_feedback(state_)
-            if state_=='reachable':
-                print(Fore.GREEN,'Feasible path plan exists for suction', Fore.RESET)
-                feasible = 1.
-
-            elif state_ == 'unreachable':
-                print(Fore.RED,'No feasible path plan was found for suction', Fore.RESET)
-                feasible = 0.
-
-            else:
-                print(Fore.RED, 'undefined state', Fore.RESET)
-                return
+            feasible=process_feedback(state_)
 
             '''save suction label'''
-            index=get_int('suction_scope',config_file=counters_file_path)+1
-            transformation = T.reshape(-1).tolist()
-            label=np.array([feasible]+transformation)
-            # path=suction_scope_data_path+'/'+str(index).zfill(7)+'_scope_label.npy'
-            # np.save(path,label)
-            suction_pool.save_as_numpy(label,str(index).zfill(7))
-            save_key('suction_scope',index,config_file=counters_file_path)
+            save_suction_label(T,feasible,suction_pool)
 
 if __name__ == "__main__":
     time_seed = math.floor(datetime.now().timestamp())

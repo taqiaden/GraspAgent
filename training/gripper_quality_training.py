@@ -26,7 +26,6 @@ lock = FileLock("file.lock")
 
 gripper_quality_optimizer_path=r'gripper_quality_optimizer'
 
-
 training_data=training_data()
 training_data.main_modality=training_data.depth
 print=custom_print
@@ -34,8 +33,6 @@ weight_decay = 0.000001
 
 max_lr=0.01
 min_lr=1*1e-6
-
-
 
 activate_full_power_at_midnight=True
 

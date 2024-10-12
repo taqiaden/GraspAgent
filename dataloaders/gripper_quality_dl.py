@@ -94,6 +94,7 @@ def process_label_for_gripper(label):
     width = label[21] / config.width_scale
     transformation = label[5:21].copy().reshape(-1, 4)
     target_point = label[:3]
+    #TODO check the correction of the computation below
     transformation[0:3, 3] = target_point + transformation[0:3,0] * distance  # update the center point of the transformation
     rotation = transformation[0:3, 0:3]
     pose_7 = encode_gripper_pose_npy(distance, width, rotation)

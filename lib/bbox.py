@@ -90,33 +90,27 @@ def grasp_angle_to_vector(grasp_angle):
     y_ = torch.sin(grasp_angle/180*math.pi)
     z_ = torch.zeros(grasp_angle.shape[0]).to(device)
     closing_vector = torch.stack((x_, y_, z_), axis=0)
-
     return closing_vector
 
 
 def encode_gripper_pose_2(distance, width, rotation_matrix):
-
     width = torch.tensor([width]) / config.width_scope
     distance = torch.tensor([distance]) / config.distance_scope
     theta, phi, beta = rotation_matrix_to_angles(rotation_matrix)
     theta= theta / config.theta_scope
     phi= phi / config.phi_scope
     beta= beta / config.beta_scope
-
     pose=torch.tensor([theta,phi,beta,distance, width]).float()
     pose = pose[None, :]
-
     return pose
+
 def encode_gripper_pose(pose_good_grasp):
-
     distance, width, rotation_matrix, center_point = get_gripper_pose_primitives(pose_good_grasp)
-
     return encode_gripper_pose_2(distance, width, rotation_matrix)
 
 def construct_transformation(point, rotation):
     T = np.zeros((4, 4))
     T[0:3, 0:3] = rotation
-
     T[0:3, 3] = point
     T[3, 3] = 1
     return T
@@ -153,7 +147,6 @@ def decode_gripper_pose(relative_pose_5,center_point):
     T = shift_a_distance(T, distance)
     assert T[0:3, 3].shape == center_point.shape,f'{T[0:3, 3].shape},  {center_point.shape}'
     assert T[0:3, 0:3].shape == rotation_matrix.shape
-
 
     pose_good_grasp = update_pose_(T, width=width, distance=distance)
 
