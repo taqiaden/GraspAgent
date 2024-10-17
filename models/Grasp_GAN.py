@@ -56,12 +56,9 @@ class gripper_sampler_net(nn.Module):
         '''input standardization'''
         depth = standardize_depth(depth)
 
-
-
         '''backbone'''
         representation = self.back_bone(depth)
         representation_2d=reshape_for_layer_norm(representation, camera=camera, reverse=False)
-
 
         '''spatial data'''
         b=depth.shape[0]

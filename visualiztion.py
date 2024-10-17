@@ -5,13 +5,13 @@ import copy
 import random
 
 from Configurations import config
-from lib.bbox import decode_gripper_pose
 from lib.depth_map import depth_to_point_clouds, CameraInfo
+from lib.mesh_utils import construct_gripper_mesh, construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
 from masks import get_spatial_mask
-from pose_object import approach_vec_to_theta_phi, output_processing
+from pose_object import approach_vec_to_theta_phi, output_processing, pose_7_to_transformation
 
 parallel_jaw_model= 'new_gripper.ply'
 
@@ -28,7 +28,8 @@ def visualize_vox(npy):
     view_npy_open3d(points_list)
 def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask):
     # Method 1
-    pose_good_grasp_list = []
+    T_d_list = []
+    width_list = []
     for i in range(5000):
         random_index = np.random.randint(0, config.num_points)
         if target_mask[0, random_index, 0] == False: continue
@@ -42,23 +43,16 @@ def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask
         # visualize verfication
         pc_ = pc[0, :, 0:3].cpu().numpy()  # + mean
 
-        center_point = pc_[random_index]
-        target_pose = poses_7[0, :, :]
-        approach = target_pose[:, 0:3]
+        target_point = pc_[random_index]
+        target_pose_7 = poses_7[0, :, :]
+        T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
+        T_d_list.append(T_d)
+        width_list.append(width)
+    if len(width_list) == 0: return
+    T_d = np.concatenate(T_d_list, axis=0)
+    width = np.concatenate(width_list, axis=0)
 
-        theta, phi_sin, phi_cos = approach_vec_to_theta_phi(approach)
-        target_pose[:, 0:1] = theta
-        target_pose[:, 1:2] = phi_sin
-        target_pose[:, 2:3] = phi_cos
-        pose_5 = output_processing(target_pose[:, :, None]).squeeze(-1)
-
-        pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-
-        pose_good_grasp_list.append(pose_good_grasp)
-    if len(pose_good_grasp_list) == 0: return
-    pose_good_grasp = np.concatenate(pose_good_grasp_list, axis=0)
-
-    vis_scene(pose_good_grasp[:, :], npy=pc[0, :, 0:3].cpu().numpy())
+    vis_scene(T_d, width, npy=pc[0, :, 0:3].cpu().numpy())
 
     return
 
@@ -143,50 +137,25 @@ def highlight_background(npy):
     colors[~background_mask] = [0.65, 0.65, 0.65]
     pcd = numpy_to_o3d(pc=npy,color=colors)
     return pcd
-def vis_scene(grasp, npy=None):
-    # visualize
-    axis_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0])
-    axis_right_arm = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0])
 
-    # load gripper
-    mesh = o3d.io.read_triangle_mesh(parallel_jaw_model)
-    width = grasp[0, 0]
-    scale_k = width / 0.04
-    mesh.vertices = o3d.utility.Vector3dVector(mesh.vertices * np.array([8, scale_k, 1]))
+def vis_scene(T_d_stack,width_stack, npy=None):
 
-    mesh.translate([0, -0.02 * scale_k, 0.016])
-    T_ = np.eye(4)
-    T_[:3, :3] = mesh.get_rotation_matrix_from_xyz((0, -np.pi / 2, 0))
-    mesh.transform(T_)
-
-    pcd = highlight_background(npy)
-
+    '''prepare mesh for each grasp'''
     scene_list = []
-    for i in range(grasp.shape[0]):
-        # if i > 0:
-        #     break
+    if T_d_stack.ndim==2:
+        T_d_stack=T_d_stack[np.newaxis,:]
+        width_stack = np.array([[width_stack]])
 
-        T_xyz = grasp[i, [1, 2, 3]]
-        T_R = grasp[i, [4, 5, 6, 7, 8, 9, 10, 11, 12]].reshape(-1, 3, 3)
-        T_R = T_R.transpose(0, 2, 1)
-        T = np.eye(4)
-        T[:3, :3] = T_R
-        T[:3, 3] = T_xyz.T
+    for i in range(T_d_stack.shape[0]):
+        mesh=construct_gripper_mesh_2(width_stack[i], T_d_stack[i])
+        mesh.paint_uniform_color([1,0, 0])
+        scene_list.append(mesh)
 
-        mesh_ = copy.deepcopy(mesh).transform(T)
-        axis_pcd.transform(T)
-        rot = [[0, 0, 1, -0.18],
-               [-1, 0, 0, 0],
-               [0, -1, 0, 0],
-               [0, 0, 0, 1]]
-
-        end_effecter_mat = np.dot(T, rot)
-
-        axis_right_arm.transform(end_effecter_mat)
-
-        mesh_.paint_uniform_color([1,0, 0])
-        scene_list.append(mesh_)
+    '''add point cloud'''
+    pcd = highlight_background(npy)
     scene_list.append(pcd)
+
+    '''visualize'''
     o3d.visualization.draw_geometries(scene_list)
 
 def visualize_detected_objects(objectness_pred, data_, object_prediction_threshold=object_prediction_threshold):
@@ -354,16 +323,4 @@ if __name__ == '__main__':
     x=np.random.random((10000,3))
     s=np.random.random((10000))
     score_visualization(x,s)
-    # view_npy_open3d(x)
-    # view_npy_trimesh([x])
 
-
-    # draw_arrow_implementation_example()
-    # exit()
-    # pc = np.load('dataset/realtime_dataset/point_cloud/000770_pointdata.npy')
-    # print(pc.shape)
-    # pc=transform_coordinate(pc)
-    #nympy to int
-    # dp = create_depth_image_from_point_cloud(pc, CameraInfo(1032, 772, 1122.375, 1122.375, 516, 386, 1000))
-    # print(dp.shape)
-    # vis_depth_map(dp, view_as_point_cloud=True)

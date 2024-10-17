@@ -7,7 +7,7 @@ max_grasp_candidates = None # if None then no limitation to the number of candid
 max_suction_candidates = 0
 
 view_grasp_suction_points = False
-isvis= False
+isvis= True
 view_score_gradient= False
 simulation_mode = True
 
@@ -16,10 +16,9 @@ report_result=False
 view_sampled_griper=False
 view_sampled_suction=False
 
-suction_limit=0.8
-gripper_limit=0.5
+suction_limit=0.0
+gripper_limit=0.0
 suction_factor=1.0
 gripper_factor=1.0
 
 score_threshold=0.0
-

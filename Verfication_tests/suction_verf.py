@@ -13,12 +13,11 @@ def view_suction_label(depth,normal,pixel_index,batch_size):
         target_point = transform_to_camera_frame(target_point[None, :], reverse=True)
         target_normal = normal[j].cpu().numpy()
         from grasp_post_processing import get_suction_pose_
-        target_point, pre_grasp_mat, end_effecter_mat, suction_pose, T, pred_approch_vector \
-            = get_suction_pose_(target_point, target_normal)
+        target_point, pre_grasp_mat, end_effecter_mat, T, normal = get_suction_pose_(target_point, target_normal)
 
         '''get point clouds'''
         pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
         pc = transform_to_camera_frame(pc, reverse=True)
 
         '''view'''
-        visualize_suction_pose(target_point, suction_pose, T, end_effecter_mat, npy=pc)
+        visualize_suction_pose(target_point, normal.reshape(1, 3) , T, end_effecter_mat, npy=pc)

@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from Configurations.config import ref_pc_center
+from Configurations.ENV_boundaries import ref_pc_center
 from lib.models_utils import reshape_for_layer_norm
-from models.pointnet2_backbone import PointNetbackbone
+from models.point_net_base.pointnet2_backbone import PointNetbackbone
 
 opening_generator_path=r'opening_generator'
 opening_critic_path=r'opening_critic'

@@ -11,7 +11,6 @@ import smbclient
 
 from lib.report_utils import counter_progress
 from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
-from Configurations.config import  ip_address
 from Configurations import config
 from lib.report_utils import wait_indicator
 

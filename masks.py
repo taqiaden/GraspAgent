@@ -1,5 +1,4 @@
 import numpy as np
-
 from Configurations import ENV_boundaries
 from Configurations.run_config import score_threshold
 from lib.report_utils import save_error_log
@@ -41,6 +40,7 @@ def initialize_masks(grasp_score_pred, suction_score_pred, data_ ,grasp_max_size
         z_mask = (z > z_min) & (z <  ENV_boundaries.z_limits[1])
 
         mask = x_mask & y_mask & z_mask
+        # mask[mask==0]=1
         # view_npy_open3d(data_)
         # view_npy_open3d(data_[mask])
         # view_npy_open3d(data_[~mask])
@@ -49,5 +49,5 @@ def initialize_masks(grasp_score_pred, suction_score_pred, data_ ,grasp_max_size
 
         suction_score_pred_mask = accumulate_mask_layer(suction_score_pred,mask, suction_max_size,mask_inversion)
 
-
+        # suction_score_pred_mask[suction_score_pred_mask==0]=1
         return grasp_score_pred_mask, suction_score_pred_mask

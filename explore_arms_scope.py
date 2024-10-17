@@ -7,11 +7,11 @@ from colorama import Fore
 from Configurations.dynamic_config import counters_file_path, get_int, save_key
 from grasp_post_processing import grasp_data_path, pre_grasp_data_path, suction_data_path, pre_suction_data_path
 from lib.ROS_communication import wait_for_feedback, save_grasp_data, save_suction_data
-from lib.bbox import decode_gripper_pose
+from lib.bbox import convert_angles_to_transformation_form
 from lib.dataset_utils import configure_smbclient, modality_pool
 from Configurations import config, ENV_boundaries
 import subprocess
-from lib.grasp_utils import get_pose_matrixes, get_homogenous_matrix, get_grasp_width
+from lib.grasp_utils import get_pose_matrixes
 from lib.math_utils import seeds
 
 execute_suction_bash = './bash/run_robot_suction.sh'
@@ -30,14 +30,12 @@ def catch_random_grasp_point():
     x = relative_center_point[0] * (ENV_boundaries.x_limits[1] - ENV_boundaries.x_limits[0]) + ENV_boundaries.x_limits[0]
     y = relative_center_point[1] * (ENV_boundaries.y_limits[1] - ENV_boundaries.y_limits[0]) + ENV_boundaries.y_limits[0]
     z = relative_center_point[2] * (ENV_boundaries.z_limits[1] - ENV_boundaries.z_limits[0]) + ENV_boundaries.z_limits[0]
-    center_point = np.stack([x, y, z])
+    target_point = np.stack([x, y, z])
 
     '''decode'''
-    pose_good_grasp = decode_gripper_pose(relative_pose_5, center_point)
-    T = get_homogenous_matrix(pose_good_grasp)
-    grasp_width = get_grasp_width(pose_good_grasp)
+    T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
 
-    return T, grasp_width
+    return T_d, width
 
 def save_scope_label(T,feasible,pool_object,pool_name):
     index = get_int(pool_name, config_file=counters_file_path) + 1

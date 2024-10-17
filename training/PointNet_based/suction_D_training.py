@@ -10,7 +10,7 @@ from Configurations import config
 from lib.dataset_utils import training_data
 from lib.report_utils import   progress_indicator
 from lib.models_utils import  export_model_state, initialize_model_state
-from models.suction_D import affordance_net, affordance_net_model_path
+from models.point_net_base.suction_D import affordance_net, affordance_net_model_path
 
 training_data=training_data()
 
@@ -21,12 +21,7 @@ weight_decay = 0.000001
 EPOCHS = 1
 online_samples_per_round=500
 
-
-
 suction_discriminator_optimizer_path = r'suction_discriminator_optimizer.pth.tar'
-
-
-
 
 def train(EPOCHS_,model,batch_size,directory):
     dataset = suction_dataset(num_points=config.num_points, path=directory)

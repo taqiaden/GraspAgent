@@ -8,13 +8,13 @@ from Configurations.config import theta_cos_scope
 from Configurations.dynamic_config import save_key, get_value, add_to_value, get_float
 from dataloaders.Grasp_GAN_dl import Grasp_GAN_dataset, load_training_buffer
 from lib.IO_utils import   custom_print
-from lib.collision_unit import grasp_collision_detection
+from lib.collision_unit import grasp_collision_detection_new
 from lib.dataset_utils import  training_data, online_data
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
 from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt, exponential_decay_lr_
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path, gripper_critic_path, critic_net
-from pose_object import  pose_7_to_pose_good_grasp
+from pose_object import  pose_7_to_transformation
 from registration import camera
 import torch.nn.functional as F
 import torch.multiprocessing as mp
@@ -72,7 +72,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
         target_point = transform_to_camera_frame(target_point[None, :], reverse=True)[0]
 
         target_pose=generated_grasps[j, :, pix_A, pix_B]
-        pose_good_grasp = pose_7_to_pose_good_grasp(target_pose, target_point)
+        T_d, width, distance=pose_7_to_transformation(pose_7, target_point)
         if j == 0: print(f'Example _pose = {generated_grasps[j, :, pix_A, pix_B]}')
 
         '''get point clouds'''
@@ -80,7 +80,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
         pc = transform_to_camera_frame(pc, reverse=True)
 
         '''check collision'''
-        collision_intensity = grasp_collision_detection(pose_good_grasp, pc, visualize=False )
+        collision_intensity = grasp_collision_detection_new(T_d,width, pc, visualize=False )
         collision_state_=collision_intensity > 0
         collision_state_list.append(collision_state_)
 

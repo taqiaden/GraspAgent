@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import math
-import random
 import torch
 from colorama import Fore
 from Configurations.run_config import simulation_mode, skip_factor, \
@@ -10,12 +9,11 @@ from Configurations.run_config import simulation_mode, skip_factor, \
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import  wait_for_feedback
 from lib.dataset_utils import configure_smbclient
-from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, depth_to_point_clouds
-from lib.models_utils import  initialize_model
+from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, depth_to_point_clouds, depth_to_mesh_grid
+from lib.models_utils import initialize_model, initialize_model_state
 from Configurations import config
 import subprocess
 
-from lib.pc_utils import random_down_sampling
 from masks import initialize_masks
 import time
 import numpy as np
@@ -25,6 +23,7 @@ from models.gripper_quality import gripper_quality_net, gripper_quality_model_st
     gripper_scope_model_state_path
 from models.point_net_base.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
 from models.point_net_base.suction_D import affordance_net, affordance_net_model_path
+from models.scope_net import scope_net_vanilla
 from models.suction_quality import suction_quality_net, suction_quality_model_state_path, \
     suction_scope_model_state_path
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
@@ -49,42 +48,7 @@ Suction_G_model=None
 suction_scope_model=None
 gripper_scope_model=None
 
-def model_inference(pc,max_grasp_candidates_,
-                             max_suction_candidates_,view_grasp_suction=False,mask_inversion=False):
-    global normals
-    global poses
-    global gripper_D_model
-    global gripper_G_model
-    global suction_D_model
-    global Suction_G_model
-    global suction_scope_model
-    global gripper_scope_model
-
-
-    '''get depth'''
-    transformed_pc = transform_to_camera_frame(pc)
-    depth = point_clouds_to_depth(transformed_pc, camera)
-    depth_torch=torch.from_numpy(depth)[None,None,...].to('cuda').float()
-
-    '''sample suction'''
-    normals_pixels=Suction_G_model(depth_torch.clone())
-
-    '''sample gripper'''
-    poses_pixels=gripper_G_model(depth_torch.clone())
-
-    '''suction scope'''
-    # suction_scope=suction_scope_model(normals_pixels.clone())
-
-    '''gripper scope'''
-    # gripper_scope=gripper_scope_model(poses_pixels[:,0:3,...].clone())
-
-    '''suction quality'''
-    # suction_quality_score=suction_D_model(depth_torch.clone(),normals_pixels.clone())
-
-    '''gripper quality'''
-    # gripper_quality_score=gripper_D_model(depth_torch.clone(),poses_pixels.clone())
-
-
+def point_net_quality_inference(depth,normals_pixels,poses_pixels):
     '''pointnet processing'''
     voxel_pc, mask = depth_to_point_clouds(depth, camera)
     voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
@@ -102,19 +66,72 @@ def model_inference(pc,max_grasp_candidates_,
     normals = down_sampled_normals.squeeze()
     poses = down_sampled_poses.squeeze().permute(1,0)
 
+    return gripper_quality_score,suction_quality_score,normals,poses,voxel_pc
+
+
+def get_coordinates_from_pixels(batch_size=1):
+    xymap = depth_to_mesh_grid(camera)
+    xymap = xymap.repeat(batch_size, 1, 1, 1)
+    return xymap
+
+def model_inference(pc,max_grasp_candidates_,
+                             max_suction_candidates_,view_grasp_suction=False,mask_inversion=False):
+    global normals
+    global poses
+    global gripper_D_model
+    global gripper_G_model
+    global suction_D_model
+    global Suction_G_model
+    global suction_scope_model
+    global gripper_scope_model
+
+    '''get depth'''
+    transformed_pc = transform_to_camera_frame(pc)
+    depth = point_clouds_to_depth(transformed_pc, camera)
+    depth_torch=torch.from_numpy(depth)[None,None,...].to('cuda').float()
+
+    '''sample suction'''
+    normals_pixels=Suction_G_model(depth_torch.clone())
+
+    '''sample gripper'''
+    poses_pixels=gripper_G_model(depth_torch.clone())
+
+    '''suction scope'''
+    voxel_pc, mask = depth_to_point_clouds(depth, camera)
+    voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
+    positions=torch.from_numpy(voxel_pc).to('cuda').float()
+    normals = normals_pixels.squeeze().permute(1, 2, 0)[mask]
+    suction_scope=suction_scope_model(torch.cat([positions,normals],dim=-1)).squeeze().detach().cpu().numpy()
+    suction_scope=np.clip(suction_scope,0,1)
+    # suction_scope[suction_scope>=0.3]=1.
+    # suction_scope[suction_scope<0.3]=0.0
+
+    '''gripper scope'''
+    # gripper_scope=gripper_scope_model(poses_pixels[:,0:3,...].clone())
+
+    '''suction quality'''
+    suction_quality_score=suction_D_model(depth_torch.clone(),normals_pixels.clone()).squeeze()
+
+    '''gripper quality'''
+    gripper_quality_score=gripper_D_model(depth_torch.clone(),poses_pixels.clone()).squeeze()
+
+    '''res u net processing'''
+    voxel_pc, mask = depth_to_point_clouds(depth, camera)
+    voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
+    suction_quality_score=suction_quality_score[mask].detach().cpu().numpy()
+    gripper_quality_score=gripper_quality_score[mask].detach().cpu().numpy()
+    normals=normals_pixels.squeeze().permute(1,2,0)[mask]
+    poses=poses_pixels.squeeze().permute(1,2,0)[mask]
+
+    '''pointnet processing'''
+    # gripper_quality_score,suction_quality_score,normals,poses,voxel_pc=point_net_quality_inference(depth,normals_pixels,poses_pixels)
+
     '''final scores'''
-    suction_scores=suction_quality_score#*suction_scope
-    gripper_scores=gripper_quality_score#*gripper_scope
+    # suction_scores=suction_quality_score*suction_scope
+    suction_scores=suction_scope
+    gripper_scores=gripper_quality_score+1#*gripper_scope
     suction_scores=suction_scores.squeeze()
     gripper_scores=gripper_scores.squeeze()
-
-    '''final outputs'''
-    # voxel_pc, mask = depth_to_point_clouds(depth, camera)
-    # voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
-    # suction_scores=suction_scores[mask].detach().cpu().numpy()
-    # gripper_scores=gripper_scores[mask].detach().cpu().numpy()
-    # normals=normals_pixels.squeeze().permute(1,2,0)[mask]
-    # poses=poses_pixels.squeeze().permute(1,2,0)[mask]
 
 
     '''set limits'''
@@ -123,10 +140,10 @@ def model_inference(pc,max_grasp_candidates_,
     suction_scores=suction_scores*suction_factor
     gripper_scores=gripper_scores*gripper_factor
 
+
     '''post processing'''
     best_gripper_scores=gripper_scores>1.0
     suction_scores[best_gripper_scores]=-1
-    # best_suction_scores=suction_quality_score
 
     # if view_sampled_suction:
     #     target_mask = get_spatial_mask(data)
@@ -137,16 +154,8 @@ def model_inference(pc,max_grasp_candidates_,
     # grasp_score_pred[grasp_score_pred<gripper_limit]=-1
 
     poses= vectors_to_ratio_metrics(poses)
-
-    # poses=poses.detach().cpu().numpy()
     normals=normals.detach().cpu().numpy()
 
-
-
-    # grasp_score_pred=grasp_score_pred.detach().cpu().numpy().squeeze()
-    # suction_score_pred=suction_score_pred.detach().cpu().numpy().squeeze()
-
-    # data_ = data.detach().cpu().numpy().squeeze()
 
     grasp_score_pred_mask, suction_score_pred_mask = initialize_masks(gripper_scores, suction_scores, voxel_pc,
                                                                       max_grasp_candidates_,max_suction_candidates_,mask_inversion)
@@ -170,7 +179,6 @@ def model_inference(pc,max_grasp_candidates_,
 
     if len(candidates)>1:
         candidates = sorted(candidates, reverse=True)
-    # print(candidates[0:100])
 
     return candidates,gripper_scores,suction_scores,voxel_pc
 
@@ -214,7 +222,7 @@ def run_robot( point_data, candidates,grasp_score_pred,suction_score_pred,isvis)
 
                 index = int(candidate_[1])
 
-                success,pose_good_grasp,grasp_width, distance, T, center_point=\
+                success,grasp_width, distance, T, center_point=\
                     gripper_processing(index,point_data,poses,isvis)
 
                 print(f'prediction time = {time.time() - t}')
@@ -262,8 +270,6 @@ def run_robot( point_data, candidates,grasp_score_pred,suction_score_pred,isvis)
                         return actions, states, data
                     chances -= 1
                     continue
-
-
 
                 action_ = 'suction'
                 subprocess.run(execute_suction_bash)
@@ -334,15 +340,15 @@ def inititalize_modules():
     # from training.suction_D_training import affordance_net, initialize_model_state, affordance_net_model_path
     '''load architecture'''
     print(1)
-    # suction_D_model=initialize_model(suction_quality_net,suction_quality_model_state_path)
-    suction_D_model=initialize_model(affordance_net, affordance_net_model_path)
+    suction_D_model=initialize_model(suction_quality_net,suction_quality_model_state_path)
+    # suction_D_model=initialize_model(affordance_net, affordance_net_model_path)
     print(2)
 
-    # suction_scope_model=initialize_model(suction_scope_net,suction_scope_model_state_path)
-    # print(3)
+    suction_scope_model=initialize_model_state(scope_net_vanilla(in_size=6), suction_scope_model_state_path)
+    print(3)
 
-    # gripper_D_model=initialize_model(gripper_quality_net,gripper_quality_model_state_path)
-    gripper_D_model=initialize_model(gripper_discriminator, dense_gripper_discriminator_path)
+    gripper_D_model=initialize_model(gripper_quality_net,gripper_quality_model_state_path)
+    # gripper_D_model=initialize_model(gripper_discriminator, dense_gripper_discriminator_path)
     print(4)
 
     # gripper_scope_model=initialize_model(gripper_scope_net,gripper_scope_model_state_path)
@@ -354,14 +360,12 @@ def inititalize_modules():
     Suction_G_model=initialize_model(suction_sampler_net, suction_sampler_model_state_path)
     print(7)
 
-
-
     '''set evaluation mode'''
     gripper_G_model.eval()
     gripper_D_model.eval()
     suction_D_model.eval()
     Suction_G_model.eval()
-    # suction_scope_model.eval()
+    suction_scope_model.eval()
     # gripper_scope_model.eval()
 
 def empty_bin_check(state):
@@ -389,8 +393,6 @@ def process_feedback(action,state,trail_data,img_grasp_pre,img_suction_pre,full_
     img_suction_after, img_grasp_after = get_side_bins_images()
 
     if action == 'grasp' and state == 'Succeed':
-        shuffling_probability=0.0
-
         # compare img_grasp_pre and img_grasp_after
         print(action, ':')
 
@@ -400,7 +402,6 @@ def process_feedback(action,state,trail_data,img_grasp_pre,img_suction_pre,full_
         #                          0, award,state=0)
 
     elif action == 'suction' and state == 'Succeed':
-        shuffling_probability=0.0
 
         # compare img_suction_pre and img_suction_after
         print(action, ':')
@@ -411,7 +412,6 @@ def process_feedback(action,state,trail_data,img_grasp_pre,img_suction_pre,full_
         #                      trail_data[4], 0, 1, award,state=0)
 
     elif action == 'grasp and suction' and state == 'Succeed':
-        shuffling_probability=0.0
         # compare img_grasp_pre and img_grasp_after
         print('grasp:')
 
@@ -422,7 +422,6 @@ def process_feedback(action,state,trail_data,img_grasp_pre,img_suction_pre,full_
         award = check_image_similarity(img_suction_pre, img_suction_after)
 
     elif state == 'reset' or state == 'Failed':
-        shuffling_probability=1.0
         print(action)
         s=None
         if state=='Failed':s=1

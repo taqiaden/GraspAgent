@@ -10,19 +10,17 @@ from torch.utils import data
 from Configurations import config
 from dataloaders.GAGAN_dataloader import gripper_dataset, load_training_data_from_online_pool
 from lib.IO_utils import   custom_print
-from lib.bbox import   decode_gripper_pose
-from lib.collision_unit import  grasp_collision_detection
+from lib.collision_unit import grasp_collision_detection_new
 from lib.dataset_utils import  training_data, online_data
-from lib.grasp_utils import    get_homogenous_matrix
 from lib.mesh_utils import construct_gripper_mesh
 from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt
 from lib.report_utils import  progress_indicator
 from masks import get_spatial_mask
-from models.GAGAN import dense_gripper_generator_path, contrastive_discriminator_path, gripper_generator, \
+from models.point_net_base.GAGAN import dense_gripper_generator_path, contrastive_discriminator_path, gripper_generator, \
     contrastive_discriminator
-from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
-from pose_object import output_processing, approach_vec_to_theta_phi
+from models.point_net_base.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
+from pose_object import  pose_7_to_transformation
 from records.records_managment import save_record
 from visualiztion import vis_scene
 
@@ -61,54 +59,31 @@ def verify(pc_data,poses_7,idx,view=False,evaluation_metric=None):
             else:
                 print('successful grasp')
         pc_ = pc_data[i].cpu().numpy()  # + mean
-        # continue
-        # print(f'center point={center_point}')
-        # print(f'Pose value={dense_pose[i, :, idx[i]]}')
 
-        center_point = pc_[idx[i]]
-        target_pose=poses_7[i,:, :]
-        approach=target_pose[:, 0:3]
+        target_point = pc_[idx[i]]
+        target_pose_7=poses_7[i,:, :]
 
-        theta,phi_sin,phi_cos=approach_vec_to_theta_phi(approach)
-        target_pose[:,0:1]=theta
-        target_pose[:,1:2]=phi_sin
-        target_pose[:,2:3]=phi_cos
-        pose_5=output_processing(target_pose[:,:,None]).squeeze(-1)
-        # print(pose_5.shape)
-        pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-        # view_local_grasp(pose_good_grasp, pc_)
-        collision_intensity = grasp_collision_detection(pose_good_grasp, pc_[:, 0:3], visualize=view,add_floor=False)
+        T_d, width, distance=pose_7_to_transformation(target_pose_7, target_point)
+
+        collision_intensity = grasp_collision_detection_new(T_d, width, pc_[:, 0:3], visualize=view,add_floor=False)
         collision_intensity_list.append(collision_intensity)
 
     collision_intensity=torch.FloatTensor(collision_intensity_list)
     return collision_intensity
 
 def get_mesh(pc_data,poses_7,idx):
-    # print(pc_data.shape)
-    # print(poses_7.shape)
-    # print(idx.shape)
-    #
-    # exit()
+
     poses_7=poses_7[:,None,:].clone()
     # visualize verfication
     i=0
     pc_ = pc_data[i].cpu().numpy()  # + mean
 
-    center_point = pc_[idx]
-    target_pose=poses_7[i,:, :]
-    approach=target_pose[:, 0:3]
-    theta,phi_sin,phi_cos=approach_vec_to_theta_phi(approach)
-    target_pose[:,0:1]=theta
-    target_pose[:,1:2]=phi_sin
-    target_pose[:,2:3]=phi_cos
-    pose_5=output_processing(target_pose[:,:,None]).squeeze(-1)
+    target_point = pc_[idx]
+    target_pose_7 = poses_7[i,:, :]
+    T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
 
-    pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-    # view_local_grasp(pose_good_grasp, pc_)
-    T = get_homogenous_matrix(pose_good_grasp)
-    width = pose_good_grasp[0, 0]
 
-    mesh = construct_gripper_mesh(width, T)
+    mesh = construct_gripper_mesh(width, T_d)
 
     return mesh
 
@@ -252,8 +227,8 @@ def train(EPOCHS_,batch_size,directory):
                 target_mask=get_spatial_mask(pc)
                 total_mask=target_mask.squeeze() & score_mask
                 # Method 1
-                pose_good_grasp_list=[]
-
+                T_d_list=[]
+                width_list=[]
                 # print(score_mask.shape)
                 # print(generated_pose_7.shape)
                 masked_generated_pose=generated_pose_7[:,:,total_mask]
@@ -274,27 +249,20 @@ def train(EPOCHS_,batch_size,directory):
                     # visualize verfication
                     # masked_pc = masked_pc.cpu().numpy()  # + mean
 
-                    center_point = masked_pc[i]
-                    target_pose = poses_7[0, :, :]
-                    approach = target_pose[:, 0:3]
-
-                    theta, phi_sin, phi_cos = approach_vec_to_theta_phi(approach)
-                    target_pose[:, 0:1] = theta
-                    target_pose[:, 1:2] = phi_sin
-                    target_pose[:, 2:3] = phi_cos
-                    pose_5 = output_processing(target_pose[:, :, None]).squeeze(-1)
-
-                    pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-
-                    # extreme_z = center_point[-1] - poses_7[0,0, -2] * config.distance_scope
-                    # if  extreme_z < config.z_limits[0]: continue
-
-                    pose_good_grasp_list.append(pose_good_grasp)
-                if len(pose_good_grasp_list)==0: return
-                pose_good_grasp=np.concatenate(pose_good_grasp_list,axis=0)
+                    target_point = masked_pc[i]
+                    target_pose_7 = poses_7[0, :, :]
+                    T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
+                    T_d_list.append(T_d)
+                    width_list.append(width)
 
 
-                vis_scene(pose_good_grasp[:, :], npy=pc[0,:,0:3].cpu().numpy())
+
+                if len(width_list)==0: return
+                T_d=np.concatenate(T_d_list,axis=0)
+                width=np.concatenate(width_list,axis=0)
+
+
+                vis_scene(T_d,width, npy=pc[0,:,0:3].cpu().numpy())
 
                 return
             def dense_grasps_visualization(pc,generated_pose_7):
@@ -304,7 +272,8 @@ def train(EPOCHS_,batch_size,directory):
                     score,spatial_score=regular_dis(pc,generated_pose_7)
                 target_mask=get_spatial_mask(pc)
                 # Method 1
-                pose_good_grasp_list=[]
+                T_d_list = []
+                width_list = []
                 for i in range(5000):
                     random_index=np.random.randint(0,config.num_points)
                     if target_mask[0,random_index,0]==False:continue
@@ -319,32 +288,17 @@ def train(EPOCHS_,batch_size,directory):
                     # visualize verfication
                     pc_ = pc[0, :, 0:3].cpu().numpy()  # + mean
 
-                    center_point = pc_[random_index]
-                    target_pose = poses_7[0, :, :]
-                    approach = target_pose[:, 0:3]
+                    target_point = pc_[random_index]
+                    target_pose_7 = poses_7[0, :, :]
+                    T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
+                    T_d_list.append(T_d)
+                    width_list.append(width)
 
-                    theta, phi_sin, phi_cos = approach_vec_to_theta_phi(approach)
-                    target_pose[:, 0:1] = theta
-                    target_pose[:, 1:2] = phi_sin
-                    target_pose[:, 2:3] = phi_cos
-                    pose_5 = output_processing(target_pose[:, :, None]).squeeze(-1)
+                if len(width_list)==0: return
+                T_d = np.concatenate(T_d_list, axis=0)
+                width = np.concatenate(width_list, axis=0)
 
-                    pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-
-                    # extreme_z = center_point[-1] - poses_7[0,0, -2] * config.distance_scope
-                    # if  extreme_z < config.z_limits[0]: continue
-
-                    pose_good_grasp_list.append(pose_good_grasp)
-                if len(pose_good_grasp_list)==0: return
-                pose_good_grasp=np.concatenate(pose_good_grasp_list,axis=0)
-                # print(pose_good_grasp.shape)
-                # print(target_mask.squeeze().shape)
-                # print(pc.shape)
-                # masked_pc=pc[0,target_mask.squeeze(),0:3]
-                # print(masked_pc.shape)
-                # print(pc[0, :, 0:3].shape)
-
-                vis_scene(pose_good_grasp[:, :], npy=pc[0, :, 0:3].cpu().numpy())
+                vis_scene(T_d,width, npy=pc[0,:,0:3].cpu().numpy())
 
                 return
 

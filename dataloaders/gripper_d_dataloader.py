@@ -6,16 +6,16 @@ import torch
 from colorama import Fore
 from Online_data_audit.sample_training_buffer import get_selection_probabilty
 from lib.IO_utils import unbalance_check, update_balance_counter
-from lib.bbox import decode_gripper_pose
-from lib.collision_unit import grasp_collision_detection
-from lib.dataset_utils import data as d
+from lib.bbox import  convert_angles_to_transformation_form
+from lib.collision_unit import  grasp_collision_detection_new
+from lib.dataset_utils import data_pool as d
 from torch.utils import data
 from Configurations import config
 from lib.models_utils import initialize_model, initialize_model_state
 from lib.pc_utils import point_index
-from models.GAGAN import gripper_generator, dense_gripper_generator_path
-from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
-from models.suction_D import affordance_net, affordance_net_model_path
+from models.point_net_base.GAGAN import gripper_generator, dense_gripper_generator_path
+from models.point_net_base.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
+from models.point_net_base.suction_D import affordance_net, affordance_net_model_path
 from pose_object import encode_gripper_pose_npy, vectors_to_ratio_metrics
 from lib.dataset_utils import training_data, online_data
 from process_perception import random_sampling_augmentation
@@ -122,16 +122,13 @@ def load_training_data_from_online_pool(number_of_online_samples):
             # center_point = down_sampled_pc[max_score_index,0:3]
             # print(generated_poses.shape)
             generated_poses_5 = vectors_to_ratio_metrics(generated_poses)
-            pose=generated_poses_5[:,:,index]
-            pose_good_grasp = decode_gripper_pose(pose, center_point)
-            # Transformation = get_homogenous_matrix(pose_good_grasp)
-            # print(pose_good_grasp)
-            # rotation_matrix=
+            relative_pose_5=generated_poses_5[:,:,index]
+            T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, center_point)
 
 
 
-            # pose_good_grasp[0, 0] = generated_width_ratio*config.width_scope
-            collision_intensity = grasp_collision_detection(pose_good_grasp, point_data, visualize=False)
+
+            collision_intensity = grasp_collision_detection_new(T_d, width, point_data, visualize=False)
             if collision_intensity<=0. and label[3]==1:
 
                 with torch.no_grad():

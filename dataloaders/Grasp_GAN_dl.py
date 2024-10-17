@@ -4,9 +4,9 @@ from colorama import Fore
 from torch.utils import data
 
 from Configurations import config
-from lib.collision_unit import grasp_collision_detection
+from lib.collision_unit import  grasp_collision_detection_new
 from lib.depth_map import point_clouds_to_depth, get_pixel_index, depth_to_point_clouds
-from pose_object import encode_gripper_pose_npy, pose_7_to_pose_good_grasp
+from pose_object import encode_gripper_pose_npy
 from registration import camera, transform_to_camera_frame
 from lib.dataset_utils import training_data, online_data
 from lib.report_utils import progress_indicator as pi
@@ -41,12 +41,10 @@ def load_training_buffer(size):
             '''check collision'''
             pc, mask = depth_to_point_clouds(depth, camera)
             pc = transform_to_camera_frame(pc, reverse=True)
-            pose_7 = process_label_for_gripper(label)
-            target_point = label[:3]
-            pose_7=torch.from_numpy(pose_7).squeeze()
-            target_point=torch.from_numpy(target_point)
-            pose_good_grasp = pose_7_to_pose_good_grasp(pose_7, target_point)
-            collision_intensity = grasp_collision_detection(pose_good_grasp, pc, visualize=False)
+            width = label[21] / config.width_scale
+            T_d = label[5:21].copy().reshape(-1, 4)
+            collision_intensity = grasp_collision_detection_new(T_d, width, pc, visualize=False)
+
             if collision_intensity>0:
                 continue
 

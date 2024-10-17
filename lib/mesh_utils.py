@@ -1,13 +1,18 @@
+import copy
 import numpy as np
 import trimesh
+import open3d as o3d
 
+parallel_jaw_model= 'new_gripper.ply'
 
-def construct_gripper_mesh(width,T):
-    mesh = trimesh.load("new_gripper.ply")
+parallel_jaw_mesh=None
 
-    # Add limit to the distance width
+def construct_gripper_mesh(width,T_d):
+    global  parallel_jaw_mesh
+    if parallel_jaw_mesh is None:
+        parallel_jaw_mesh=trimesh.load(parallel_jaw_model)
+    mesh = copy.deepcopy(parallel_jaw_mesh)
 
-    # width = min(width * 1.1, 0.05)
     T1 = np.array([[1, 0, 0, 0],
                    [0, 1, 0, -0.02],
                    [0, 0, 1, 0.02],
@@ -35,18 +40,33 @@ def construct_gripper_mesh(width,T):
                    [1, 0, 0, 0],
                    [0, 0, 0, 1]])
 
-    # print(f'mesh vertics = {mesh.vertices[[2, 3, 18, 19], 1] }')
 
-
-    # transform from vertical to horizontal; Z+ becomes x-.
-    # The gripper closing direction is a long the Y direction in both cases
     mesh.apply_transform(T2)
 
-    # assert T[0:3, 0:3].sum()>0.0,f'{T}'
-
-    # return mesh
-    # print(Fore.RED,T,Fore.RESET)
-    mesh.apply_transform(T)
+    mesh.apply_transform(T_d)
 
 
     return mesh
+
+def construct_gripper_mesh_2(width,T_d):
+    '''get the raw gripper mesh'''
+    global parallel_jaw_mesh
+    if parallel_jaw_mesh is None:
+        parallel_jaw_mesh = o3d.io.read_triangle_mesh(parallel_jaw_model)
+    mesh = copy.deepcopy(parallel_jaw_mesh)
+
+    '''adjust the width'''
+    scale_k = width / 0.04
+    mesh.vertices = o3d.utility.Vector3dVector(mesh.vertices * np.array([8, scale_k, 1]))
+    mesh.translate([0, -0.02 * scale_k, 0.016])
+
+    '''transformation'''
+    T_ = np.eye(4)
+    T_[:3, :3] = mesh.get_rotation_matrix_from_xyz((0, -np.pi / 2, 0))
+    mesh.transform(T_)
+    mesh = mesh.transform(T_d)
+
+    return mesh
+
+if __name__ == '__main__':
+    pass

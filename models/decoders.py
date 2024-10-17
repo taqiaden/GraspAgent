@@ -26,7 +26,7 @@ class res_block(nn.Module):
         return output
 
 class res_block_mlp_LN(nn.Module):
-    def __init__(self,in_c,medium_c,out_c,drop_out_ratio=0.0):
+    def __init__(self,in_c,medium_c,out_c,drop_out_ratio=0.0,activation=nn.ReLU()):
         super().__init__()
         self.ln1=nn.LayerNorm([in_c])
 
@@ -37,15 +37,15 @@ class res_block_mlp_LN(nn.Module):
         self.c2 = nn.Linear(medium_c, out_c)
         self.drop_out=nn.Dropout(drop_out_ratio)
 
-        self.relu = nn.ReLU()
+        self.activation = activation
     def forward(self, input):
         r=self.res1(input)
 
         x=self.ln1(input)
-        x = self.relu(x)
+        x = self.activation(x)
         x=self.c1(x)
         x=self.ln2(x)
-        x=self.relu(x)
+        x=self.activation(x)
         x=self.drop_out(x)
         x=self.c2(x)
         output=x+r

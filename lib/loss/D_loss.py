@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-smooth_l1_loss=nn.SmoothL1Loss(beta=1.0)
+smooth_l1_loss=nn.SmoothL1Loss(beta=1.0,reduction='none')
 def custom_loss(prediction,label):
 
     one_label_mask=label==1
@@ -38,7 +38,6 @@ def l1_with_threshold(prediction,label,with_smooth=True):
             l1 += smooth_l1_loss(l1_N, torch.zeros_like(l1_N))
         else:
             l1 += l1_N
-
     return l1
 
 def l1_with_threshold_new(prediction,label,with_smooth=True):
@@ -47,4 +46,11 @@ def l1_with_threshold_new(prediction,label,with_smooth=True):
         loss= smooth_l1_loss(loss, torch.zeros_like(loss))
     return loss
 
+def binary_smooth_l1(prediction, label):
+    loss = torch.clamp((1 - prediction) * label - prediction * (label - 1), 0)
+    loss = smooth_l1_loss(loss, torch.zeros_like(loss))
+    return loss
 
+def binary_l1(prediction, label):
+    loss = torch.clamp((1 - prediction) * label - prediction * (label - 1), 0)
+    return loss

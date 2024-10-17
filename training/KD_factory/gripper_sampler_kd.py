@@ -8,9 +8,10 @@ from lib.depth_map import depth_to_point_clouds
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
-from models.GAGAN import gripper_generator, dense_gripper_generator_path
-from models.gripper_sampler import gripper_sampler_net, gripper_generator_model_state_path
+from models.point_net_base.GAGAN import gripper_generator, dense_gripper_generator_path
 from registration import camera, transform_to_camera_frame
+from models.Grasp_GAN import gripper_sampler_net,gripper_sampler_path
+
 
 gripper_generator_optimizer_path=r'gripper_generator_optimizer'
 
@@ -33,7 +34,7 @@ def knowledge_distillation():
     dloader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=workers, shuffle=True)
 
     '''model'''
-    model=initialize_model(gripper_sampler_net,gripper_generator_model_state_path)
+    model=initialize_model(gripper_sampler_net,gripper_sampler_path)
     model.train(True)
 
     '''optimizer'''
@@ -105,7 +106,7 @@ def train_gripper_sampler_kd(n_samples=None):
                 load_training_buffer(size=n_samples)
             new_model = knowledge_distillation()
             print(Fore.GREEN + 'Training round finished' + Fore.RESET)
-            export_model_state(new_model, gripper_generator_model_state_path)
+            export_model_state(new_model, gripper_sampler_path)
             training_data.clear()
         except Exception as e:
             print(Fore.RED, str(e), Fore.RESET)

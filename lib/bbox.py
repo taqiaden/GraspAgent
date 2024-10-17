@@ -5,7 +5,7 @@ import math
 from scipy.spatial.transform import Rotation
 
 from Configurations import config
-from lib.grasp_utils import get_gripper_pose_primitives, shift_a_distance, update_pose_
+from lib.grasp_utils import shift_a_distance,  remove_dist
 
 from lib.math_utils import asCartesian, rotation_matrix_from_vectors, asSpherical
 
@@ -100,13 +100,15 @@ def encode_gripper_pose_2(distance, width, rotation_matrix):
     theta= theta / config.theta_scope
     phi= phi / config.phi_scope
     beta= beta / config.beta_scope
-    pose=torch.tensor([theta,phi,beta,distance, width]).float()
-    pose = pose[None, :]
-    return pose
+    relative_pose_5=torch.tensor([theta,phi,beta,distance, width]).float()
+    relative_pose_5 = relative_pose_5[None, :]
+    return relative_pose_5
 
-def encode_gripper_pose(pose_good_grasp):
-    distance, width, rotation_matrix, center_point = get_gripper_pose_primitives(pose_good_grasp)
-    return encode_gripper_pose_2(distance, width, rotation_matrix)
+def transformation_to_relative_angle_form(T_d,distance,width):
+    T_0=remove_dist(T_d,distance)
+    R=T_0[ 0:3, 0:3]
+    relative_pose_5=encode_gripper_pose_2(distance, width, R)
+    return relative_pose_5
 
 def construct_transformation(point, rotation):
     T = np.zeros((4, 4))
@@ -125,7 +127,7 @@ def unit_metrics_to_real_scope(relative_pose_5):
     width=np.clip(width,0.2,1)*config.width_scope
     return theta2,phi2,beta2,distance,width
 
-def decode_gripper_pose(relative_pose_5,center_point):
+def convert_angles_to_transformation_form(relative_pose_5,center_point):
     # shape of center_point is (3,)
     # shape of relative_pose_5 is torch.Size([5])
 
@@ -141,16 +143,15 @@ def decode_gripper_pose(relative_pose_5,center_point):
     rotation_matrix=angles_to_rotation_matrix(theta2, phi2, beta2).reshape(3,3)
 
     '''transformation matrix'''
-    T=construct_transformation(center_point, rotation_matrix)
+    T_0=construct_transformation(center_point, rotation_matrix)
 
     '''adjust the penetration distance for the transformation'''
-    T = shift_a_distance(T, distance)
-    assert T[0:3, 3].shape == center_point.shape,f'{T[0:3, 3].shape},  {center_point.shape}'
-    assert T[0:3, 0:3].shape == rotation_matrix.shape
+    T_d = shift_a_distance(T_0, distance)
+    assert T_d[0:3, 3].shape == center_point.shape,f'{T_d[0:3, 3].shape},  {center_point.shape}'
+    assert T_d[0:3, 0:3].shape == rotation_matrix.shape
 
-    pose_good_grasp = update_pose_(T, width=width, distance=distance)
+    return T_d,width,distance
 
-    return pose_good_grasp
 
 if __name__ == "__main__":
     pass

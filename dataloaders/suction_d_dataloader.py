@@ -12,9 +12,9 @@ from lib.models_utils import initialize_model
 from lib.pc_utils import point_index
 from Configurations import config
 
-from lib.dataset_utils import data as d
-from models.GAGAN import dense_gripper_generator_path, gripper_generator
-from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
+from lib.dataset_utils import data_pool as d
+from models.point_net_base.GAGAN import dense_gripper_generator_path, gripper_generator
+from models.point_net_base.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
 from process_perception import random_sampling_augmentation
 from suction_sampler import estimate_suction_direction
 

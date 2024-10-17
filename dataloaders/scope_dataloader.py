@@ -17,11 +17,12 @@ class gripper_scope_dataset(data.Dataset):
         label = self.data_pool.load_as_numpy(target_index)
 
         score=label[0:1]
-        transformation=label[1:]#.reshape(-1, 4)
-        # rotation = transformation[0:3, 0:3].reshape(-1)
-        # transition=transformation[0:3, 3].reshape(-1)
-
-        return transformation,score
+        transformation=label[1:].reshape(-1, 4)
+        rotation = transformation[0:3, 0:3]
+        transition=transformation[0:3, 3].reshape(-1)
+        approach=get_approach_from_rotation(rotation)
+        input=np.concatenate([transition,approach])
+        return input,score
 
     def __len__(self):
         return len(self.files_indexes)

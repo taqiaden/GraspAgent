@@ -1,5 +1,5 @@
 import paramiko
-from scp import SCPClient
+# from scp import SCPClient
 router_ip="10.5.12.223"
 router_username="taqiaden"
 router_password="taqiaden"
@@ -56,4 +56,4 @@ if __name__ == "__main__":
     sftp.put('<Source>', '<Destination>')
 
     '''alternative scp'''
-    scp = SCPClient(ssh.get_transport())
+    # scp = SCPClient(ssh.get_transport())

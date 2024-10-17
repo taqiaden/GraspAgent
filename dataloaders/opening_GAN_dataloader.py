@@ -8,13 +8,13 @@ from torch.utils import data
 from Configurations import config
 from Online_data_audit.sample_training_buffer import get_selection_probabilty
 from lib.IO_utils import update_balance_counter
-from lib.collision_unit import grasp_collision_detection
+from lib.collision_unit import  grasp_collision_detection_new
 from lib.models_utils import initialize_model
 from lib.pc_utils import point_index
-from lib.dataset_utils import data as d
-from models.GAGAN import gripper_generator, dense_gripper_generator_path
-from models.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
-from pose_object import encode_gripper_pose_npy, label_to_pose
+from lib.dataset_utils import data_pool as d
+from models.point_net_base.GAGAN import gripper_generator, dense_gripper_generator_path
+from models.point_net_base.gripper_D import gripper_discriminator, dense_gripper_discriminator_path
+from pose_object import encode_gripper_pose_npy
 from lib.dataset_utils import  online_data, training_data
 from process_perception import random_sampling_augmentation
 
@@ -67,8 +67,10 @@ def load_training_data_from_online_pool(number_of_online_samples):
 
         label=correct_center_of_grasp(label,down_sampled_pc,index)
 
-        pose_good_grasp, label = label_to_pose(label)
-        collision_intensity = grasp_collision_detection(pose_good_grasp, point_data, visualize=False)
+        width = label[21] / config.width_scale
+        T_d = label[5:21].copy().reshape(-1, 4)
+
+        collision_intensity = grasp_collision_detection_new(T_d,width, point_data, visualize=False)
 
         if collision_intensity>0:
             print('collision is found in a success grasp case with intensity=',collision_intensity)

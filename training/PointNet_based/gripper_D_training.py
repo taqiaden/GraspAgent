@@ -8,13 +8,11 @@ from Configurations import config
 from dataloaders.gripper_d_dataloader import gripper_dataset, load_training_data_from_online_pool
 from lib.loss.D_loss import custom_loss
 from lib.optimizer import load_opt, export_optm
-from models.gripper_D import dense_gripper_discriminator_path, gripper_discriminator
-from pose_object import output_processing, approach_vec_to_theta_phi
+from models.point_net_base.gripper_D import dense_gripper_discriminator_path, gripper_discriminator
+from pose_object import output_processing, approach_vec_to_theta_phi, pose_7_to_transformation
 from lib.IO_utils import custom_print
-from lib.bbox import   decode_gripper_pose
-from lib.collision_unit import grasp_collision_detection
+from lib.collision_unit import  grasp_collision_detection_new
 from lib.dataset_utils import training_data
-from lib.grasp_utils import  update_pose_
 from lib.models_utils import export_model_state, initialize_model
 from lib.report_utils import  progress_indicator
 from visualiztion import  vis_scene
@@ -36,15 +34,10 @@ augmentation_factor =1
 def get_collision_state(center_point,new_label,point_data,visualize=False):
     label = new_label
     label[:3] = center_point
-    distance = label[22]
     width = label[21] / config.width_scale
     transformation = label[5:21].copy().reshape(-1, 4)
-    transformation[0:3, 3] = label[:3] + transformation[0:3, 0] * distance
-    label[5:21]=transformation.reshape(-1)
-    transformation = label[5:21].copy().reshape(-1, 4)
-    pose_good_grasp = update_pose_(transformation, width=width, distance=distance)
-    collision_intensity = grasp_collision_detection(pose_good_grasp, point_data, visualize=visualize)
-    # print(Fore.YELLOW,collision_intensity,Fore.RESET)
+
+    collision_intensity = grasp_collision_detection_new(transformation,width, point_data, visualize=visualize)
     label[3] = 0 if collision_intensity>0 else 1
     label[4] = 1
     label[23] = 0
@@ -63,23 +56,12 @@ def verify(pc_data,poses_7,idx,evaluation_metric=None):
             else:
                 print('successful grasp')
         pc_ = pc_data[i].cpu().numpy()  # + mean
-        # continue
-        # print(f'center point={center_point}')
-        # print(f'Pose value={dense_pose[i, :, idx[i]]}')
 
-        center_point = pc_[idx[i]]
-        target_pose=poses_7[i,:, :]
-        approach=target_pose[:, 0:3]
+        target_point = pc_[idx[i]]
+        target_pose_7=poses_7[i,:, :]
+        T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
 
-        theta,phi_sin,phi_cos=approach_vec_to_theta_phi(approach)
-        target_pose[:,0:1]=theta
-        target_pose[:,1:2]=phi_sin
-        target_pose[:,2:3]=phi_cos
-        pose_5=output_processing(target_pose[:,:,None]).squeeze(-1)
-        # print(pose_5.shape)
-        pose_good_grasp = decode_gripper_pose(pose_5, center_point[0:3])
-        # view_local_grasp(pose_good_grasp, pc_)
-        vis_scene(pose_good_grasp[:, :].reshape(1, 14), npy=pc_[:,0:3])
+        vis_scene(T_d, width, npy=pc_[:,0:3])
 
 def train(EPOCHS_,batch_size,directory):
     dataset = gripper_dataset(num_points=config.num_points, path=directory)
