@@ -3,6 +3,7 @@ from colorama import Fore
 from torch.utils import data
 
 from Online_data_audit.sample_training_buffer import get_selection_probabilty
+from label_unpack import LabelObj
 from lib.depth_map import point_clouds_to_depth, get_pixel_index
 from registration import camera, transform_to_camera_frame
 from lib.dataset_utils import training_data, online_data
@@ -55,19 +56,20 @@ def load_training_buffer(size):
         '''get data'''
         try:
             label = online_data.label.load_as_numpy(target_file_index)
+            label_obj = LabelObj(label=label)
             '''selection rules'''
-            if label[4] == 1: continue
+            if label_obj.is_gripper: continue
             if force_balanced_data:
-                if label[3] == 1 and (1+negative_samples)/(1+positive_samples)<1:
+                if label_obj.success and (1+negative_samples)/(1+positive_samples)<1:
                     continue
-                elif label[3] == 0 and (1+positive_samples)/(1+negative_samples)<1:
+                elif label_obj.failure and (1+positive_samples)/(1+negative_samples)<1:
                     continue
             # depth=online_data.load_depth(target_file_index)
 
             '''load depth map'''
             pc=online_data.point_clouds.load_as_numpy(target_file_index)
-            transformed_pc = transform_to_camera_frame(pc)
-            depth=point_clouds_to_depth(transformed_pc, camera)
+            depth=label_obj.get_depth(point_clouds=pc)
+
 
         except Exception as e:
             print(Fore.RED, str(e),Fore.RESET)
@@ -111,11 +113,11 @@ class suction_quality_dataset(data.Dataset):
         depth = self.data_pool.depth.load_as_numpy(target_index)
         label = self.data_pool.label.load_as_numpy(target_index)
         assert label[4] == 0 and label[23] == 1, f'{label[4]},   {label[23]}'
-        score = label[3]
-        normal= label[24:27]
+        label_obj = LabelObj(label=label, depth=depth)
 
-        target_point = label[:3]
-        pixel_index = get_pixel_index(depth, camera, target_point)
+        score = label_obj.success
+        normal= label_obj.normal
+        pixel_index = label_obj.get_pixel_index()
 
         return depth[np.newaxis,:,:],normal,score,pixel_index
 

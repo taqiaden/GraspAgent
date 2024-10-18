@@ -2,10 +2,9 @@ import numpy as np
 from colorama import Fore
 from torch.utils import data
 
-from Configurations import config
 from Online_data_audit.sample_training_buffer import get_selection_probabilty
-from lib.depth_map import point_clouds_to_depth, get_pixel_index
-from pose_object import encode_gripper_pose_npy
+from label_unpack import LabelObj
+from lib.depth_map import point_clouds_to_depth
 from registration import camera, transform_to_camera_frame
 from lib.dataset_utils import training_data, online_data
 from lib.report_utils import progress_indicator as pi
@@ -31,17 +30,18 @@ def load_training_buffer(size):
         try:
             # depth=online_data.load_depth(target_file_index)
             label = online_data.label.load_as_numpy(target_file_index)
+            label_obj = LabelObj(label=label)
             '''selection rules'''
-            if label[23]==1:    continue
+            if label_obj.is_suction:    continue
             if force_balanced_data:
-                if label[3] == 1 and (1+negative_samples)/(1+positive_samples)<1:
+                if label_obj.success and (1+negative_samples)/(1+positive_samples)<1:
                     continue
-                elif label[3] == 0 and (1+positive_samples)/(1+negative_samples)<1:
+                elif label_obj.failure and (1+positive_samples)/(1+negative_samples)<1:
                     continue
+
             '''load depth map'''
-            pc=online_data.point_clouds.load_as_numpy(target_file_index)
-            transformed_pc = transform_to_camera_frame(pc)
-            depth=point_clouds_to_depth(transformed_pc, camera)
+            depth=label_obj.get_depth()
+
         except Exception as e:
             print(Fore.RED, str(e),Fore.RESET)
             continue
@@ -86,19 +86,6 @@ def load_training_buffer_kd(size):
         if counter >= size: break
 
 
-def process_label_for_gripper(label):
-    assert label[4] == 1 and label[23] == 0, f'{label[4]},   {label[23]}'
-    score = label[3]
-    score = np.asarray(score, dtype=np.float32)
-    distance = label[22]
-    width = label[21] / config.width_scale
-    transformation = label[5:21].copy().reshape(-1, 4)
-    target_point = label[:3]
-    #TODO check the correction of the computation below
-    transformation[0:3, 3] = target_point + transformation[0:3,0] * distance  # update the center point of the transformation
-    rotation = transformation[0:3, 0:3]
-    pose_7 = encode_gripper_pose_npy(distance, width, rotation)
-    return pose_7, score
 
 class gripper_quality_dataset_kd(data.Dataset):
     def __init__(self, data_pool):
@@ -125,9 +112,13 @@ class gripper_quality_dataset(data.Dataset):
         depth = self.data_pool.depth.load_as_numpy(target_index)
         label = self.data_pool.label.load_as_numpy(target_index)
         assert label[4]==1 and label[23]==0,f'{label[4]},   {label[23]}'
-        pose_7, score=process_label_for_gripper(label)
-        target_point = label[:3]
-        pixel_index=get_pixel_index(depth, camera, target_point)
+
+        label_obj = LabelObj(label=label, depth=depth)
+        score=label_obj.success
+        # score = np.asarray(score, dtype=np.float32)
+        pose_7=label_obj.get_gripper_pose_7()
+        pixel_index=label_obj.get_pixel_index()
+
         return depth[np.newaxis,:,:],pose_7, score,pixel_index
 
     def __len__(self):

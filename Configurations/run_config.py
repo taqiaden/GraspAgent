@@ -1,5 +1,4 @@
 shuffling_probability=0.0
-skip_factor= 0.0 # [1,10] Bigger value will increase the chance for skipping low score candidates
 
 chances_ref = 500
 
@@ -7,7 +6,7 @@ max_grasp_candidates = None # if None then no limitation to the number of candid
 max_suction_candidates = 0
 
 view_grasp_suction_points = False
-isvis= True
+view_action= True
 view_score_gradient= False
 simulation_mode = True
 
