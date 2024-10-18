@@ -9,7 +9,7 @@ from Configurations.run_config import simulation_mode, max_grasp_candidates, max
     view_grasp_suction_points, suction_limit, gripper_limit, suction_factor, gripper_factor, view_score_gradient, \
     chances_ref, shuffling_probability, view_action, report_result
 from grasp_post_processing import gripper_processing, suction_processing
-from lib.ROS_communication import wait_for_feedback
+from lib.ROS_communication import wait_for_feedback, ROS_communication_file
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, depth_to_point_clouds
 from lib.image_utils import check_image_similarity
 from lib.models_utils import initialize_model, initialize_model_state
@@ -28,25 +28,6 @@ from visualiztion import visualize_grasp_and_suction_points, view_score
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
 
-def point_net_quality_inference(depth,normals_pixels,poses_pixels):
-    '''pointnet processing'''
-    voxel_pc, mask = depth_to_point_clouds(depth, camera)
-    voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
-    choices = np.random.choice(voxel_pc.shape[0], 50000, replace=False)
-    down_sampled_pc=voxel_pc[choices,:]
-    down_sampled_pc=torch.from_numpy(down_sampled_pc).to('cuda')[None,...].float()
-    down_sampled_normals=normals_pixels.squeeze().permute(1,2,0)[mask][choices,...][None,...]
-    down_sampled_poses=poses_pixels.squeeze().permute(1,2,0)[mask][choices,...][None,...].permute(0,2,1)
-    pc_with_normals=torch.cat([down_sampled_pc,down_sampled_normals],dim=-1).float()
-    suction_quality_score = suction_D_model(pc_with_normals.clone())
-    gripper_quality_score = gripper_D_model(down_sampled_pc.clone(),down_sampled_poses.clone())
-    suction_quality_score = suction_quality_score.detach().cpu().numpy()
-    gripper_quality_score = gripper_quality_score.detach().cpu().numpy()
-    voxel_pc=down_sampled_pc.squeeze().detach().cpu().numpy()
-    normals = down_sampled_normals.squeeze()
-    poses = down_sampled_poses.squeeze().permute(1,0)
-
-    return gripper_quality_score,suction_quality_score,normals,poses,voxel_pc
 class mode():
     def __init__(self):
         self.simulation=simulation_mode
@@ -169,9 +150,6 @@ class GraspAgent():
         normals = normals_pixels.squeeze().permute(1, 2, 0)[mask]
         poses = poses_pixels.squeeze().permute(1, 2, 0)[mask]
 
-        '''pointnet processing'''
-        # gripper_quality_score,suction_quality_score,normals,poses,voxel_pc=point_net_quality_inference(depth,normals_pixels,poses_pixels)
-
         '''final scores'''
         # suction_scores=suction_quality_score*suction_scope
         suction_scores = suction_scope
@@ -259,7 +237,7 @@ class GraspAgent():
 
                 t = time.time()
                 print(f'target candidate {candidate_}')
-                with open(config.home_dir + "ros_execute.txt", 'w') as f:
+                with open(config.home_dir + ROS_communication_file, 'w') as f:
                     f.write('Wait')
                 state_ = 'Wait'
                 action_ = ''
@@ -282,7 +260,6 @@ class GraspAgent():
                         continue
 
                     print('***********************use grasp***********************')
-                    print('Distance = ', distance, ' , width = ', grasp_width)
                     print('Score = ', self.gripper_scores[index])
 
                     if simulation_mode:

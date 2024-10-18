@@ -1,6 +1,6 @@
 shuffling_probability=0.0
 
-chances_ref = 500
+chances_ref = 5
 
 max_grasp_candidates = None # if None then no limitation to the number of candidates
 max_suction_candidates = 0

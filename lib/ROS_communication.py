@@ -3,6 +3,8 @@ import trimesh
 from Configurations.config import home_dir
 from lib.report_utils import wait_indicator as wi
 
+ROS_communication_file="ros_execute.txt"
+
 def save_suction_data(end_effecter_mat, file_path):
     wxyz = trimesh.transformations.quaternion_from_matrix(end_effecter_mat)
     xyz = end_effecter_mat[:3, 3]
@@ -22,7 +24,7 @@ def wait_for_feedback(txt):
     wait = wi('Waiting for robot feedback')
     while txt == 'Wait':
         wait.step(0.5)
-        with open(home_dir + "ros_execute.txt", 'r') as f:
+        with open(home_dir + ROS_communication_file, 'r') as f:
             txt = f.read()
     else:
 

@@ -67,7 +67,7 @@ def get_rgb():
         i += 1
     wait.end()
 
-def get_real_data():
+def get_scene_point_clouds():
     point_data = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant
 
     point_data=refine_point_cloud(point_data)
@@ -75,16 +75,6 @@ def get_real_data():
     np.save(sensory_pc_path, point_data)
 
     full_point_clouds = apply_mask(point_data)
-
-    # global last_rgb
-    # global last_depth
-    # last_rgb = cv2.imread(rgb_path)
-    # last_depth=pc_to_depth_map(full_point_clouds)
-
-    # point_data_choice=random_down_sampling(full_point_clouds,config.num_points)
-
-    # down_sampled_point_clouds = point_data_choice[:, :3]
-    # view_npy_open3d(new_point_data,view_coordinate=True)
 
     return full_point_clouds
 

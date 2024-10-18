@@ -2,7 +2,10 @@
 import torch
 from Grasp_Agent_ import GraspAgent
 from lib.bin_utils import empty_bin_check
-from process_perception import get_new_perception, get_side_bins_images, get_real_data
+from lib.dataset_utils import configure_smbclient
+from process_perception import get_new_perception, get_side_bins_images, get_scene_point_clouds
+
+configure_smbclient()
 
 grasp_agent = GraspAgent()
 grasp_agent.initialize_check_points()
@@ -11,7 +14,7 @@ while True:
     get_new_perception()
     img_suction_pre, img_grasp_pre = get_side_bins_images()
     with torch.no_grad():
-        point_clouds = get_real_data()
+        point_clouds = get_scene_point_clouds()
         grasp_agent.model_inference(point_clouds)
         actions, states, data = grasp_agent.execute()
         if grasp_agent.mode.simulation: get_new_perception()

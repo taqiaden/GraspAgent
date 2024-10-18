@@ -229,9 +229,6 @@ class online_data_local(data_pool):
     def __init__(self):
         super(online_data_local,self).__init__(dir=online_data_local_dir,is_local=True,dataset_name='online_local')
 
-# rehearsal_data=rehearsal_data()
-# training_data=training_data()
-# online_data=online_data()
 
 def export_suction_labels(from_dataset,to_dataset):
     suction_label_names = from_dataset.get_suction_labels()

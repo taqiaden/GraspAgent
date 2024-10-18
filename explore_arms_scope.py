@@ -6,7 +6,7 @@ import numpy as np
 from colorama import Fore
 from Configurations.dynamic_config import counters_file_path, get_int, save_key
 from grasp_post_processing import grasp_data_path, pre_grasp_data_path, suction_data_path, pre_suction_data_path
-from lib.ROS_communication import wait_for_feedback, save_grasp_data, save_suction_data
+from lib.ROS_communication import wait_for_feedback, save_grasp_data, save_suction_data, ROS_communication_file
 from lib.bbox import convert_angles_to_transformation_form
 from lib.dataset_utils import configure_smbclient, modality_pool
 from Configurations import config, ENV_boundaries
@@ -69,7 +69,7 @@ def main():
     with torch.no_grad():
 
         for i in range(1000):
-            with open(config.home_dir + "ros_execute.txt", 'w') as f:
+            with open(config.home_dir + ROS_communication_file, 'w') as f:
                 f.write('Wait')
             state_='Wait'
             feasible=0.
@@ -93,7 +93,7 @@ def main():
             '''save gripper label'''
             save_gripper_label(T,feasible,gripper_pool)
 
-            with open(config.home_dir + "ros_execute.txt", 'w') as f:
+            with open(config.home_dir + ROS_communication_file, 'w') as f:
                 f.write('Wait')
             state_ = 'Wait'
 

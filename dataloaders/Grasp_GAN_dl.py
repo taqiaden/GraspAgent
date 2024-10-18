@@ -1,14 +1,8 @@
 import numpy as np
-import torch
 from colorama import Fore
 from torch.utils import data
-
-from Configurations import config
 from label_unpack import LabelObj
 from lib.collision_unit import  grasp_collision_detection_new
-from lib.depth_map import point_clouds_to_depth, get_pixel_index, depth_to_point_clouds
-from pose_object import encode_gripper_pose_npy
-from registration import camera, transform_to_camera_frame
 from lib.dataset_utils import training_data, online_data
 from lib.report_utils import progress_indicator as pi
 import random
