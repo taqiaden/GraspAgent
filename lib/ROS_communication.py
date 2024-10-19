@@ -27,9 +27,6 @@ def wait_for_feedback(txt):
         with open(home_dir + ROS_communication_file, 'r') as f:
             txt = f.read()
     else:
-
-
         wait.end()
         print('Robot state: ' + txt)
-
     return txt

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from visualiztion import view_npy_open3d, view_npy_trimesh
+from visualiztion import view_npy_open3d
 
 def sphere_mask(pc,center,radius,view=False):
     dist = np.linalg.norm(pc - center, axis=1)

@@ -1,14 +1,11 @@
 import torch
 from torch import nn
-
 from lib.depth_map import depth_to_mesh_grid
 from models.decoders import res_block_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
 
 suction_quality_model_state_path=r'suction_quality_model_state'
-
-suction_scope_model_state_path=r'suction_scope_model_state'
 
 use_bn=False
 use_in=True

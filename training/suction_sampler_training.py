@@ -11,7 +11,6 @@ from lib.report_utils import progress_indicator
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
 from registration import transform_to_camera_frame, camera
 from suction_sampler import estimate_suction_direction
-from visualiztion import view_npy_open3d
 
 suction_sampler_optimizer_path = r'suction_sampler_optimizer'
 training_data=training_data()

@@ -3,13 +3,9 @@ import datetime
 import torch
 from colorama import Fore
 from torch import nn
-from Verfication_tests.suction_verf import view_suction_label
 from dataloaders.suction_quality_dl import load_training_buffer,  suction_quality_dataset
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
-from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
-from lib.loss.D_loss import l1_with_threshold_new, l1_with_threshold
-from lib.loss.regular_loss import mse_loss, l1_loss
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
@@ -22,12 +18,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from filelock import FileLock
 lock = FileLock("file.lock")
-from registration import camera
-from visualiztion import view_npy_open3d
 
 suction_quality_optimizer_path=r'suction_quality_optimizer'
 
-# suction_scope_optimizer_path=r'suction_scope_optimizer'
+l1_loss=nn.L1Loss()
 
 training_data=training_data()
 training_data.main_modality=training_data.depth

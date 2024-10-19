@@ -1,5 +1,5 @@
 from dataloaders.scope_dataloader import suction_scope_dataset
-from lib.loss.D_loss import l1_with_threshold_new, binary_l1, binary_smooth_l1
+from lib.loss.D_loss import binary_l1, binary_smooth_l1
 from lib.optimizer import export_optm, load_opt
 from lib.report_utils import progress_indicator
 from models.scope_net import scope_net_vanilla, suction_scope_model_state_path

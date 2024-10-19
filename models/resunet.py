@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-
 from lib.models_utils import number_of_parameters
 
 class batch_norm_relu(nn.Module):

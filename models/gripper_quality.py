@@ -1,13 +1,10 @@
 import torch
 from torch import nn
 from lib.depth_map import depth_to_mesh_grid
-from models.decoders import att_res_decoder_A, res_block, res_block_mlp_LN, att_res_mlp_LN
-from models.resunet import res_unet, batch_norm_relu
+from models.resunet import res_unet
 from registration import camera, standardize_depth
 
 gripper_quality_model_state_path=r'gripper_quality_model_state'
-
-gripper_scope_model_state_path=r'gripper_scope_model_state'
 
 use_bn=False
 use_in=True
@@ -61,7 +58,6 @@ class compact_decoder(nn.Module):
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
 
         return output
-
 
 class gripper_quality_net(nn.Module):
     def __init__(self):

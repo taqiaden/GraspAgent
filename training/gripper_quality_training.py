@@ -3,12 +3,9 @@ import datetime
 import torch
 from colorama import Fore
 from torch import nn
-from Verfication_tests.gripper_verf import view_gripper_label
 from dataloaders.gripper_quality_dl import  load_training_buffer, gripper_quality_dataset
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
-from lib.loss.D_loss import l1_with_threshold_new
-from lib.loss.regular_loss import mse_loss
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
@@ -20,7 +17,6 @@ from torch.distributed import init_process_group,destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from filelock import FileLock
 
-from training.suction_quality_training import train_suction_quality
 
 lock = FileLock("file.lock")
 

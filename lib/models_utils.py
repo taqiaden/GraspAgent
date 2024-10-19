@@ -3,7 +3,6 @@ import os
 import smbclient
 import torch
 from colorama import Fore
-
 from Configurations import config
 from Configurations.config import check_points_directory, check_points_extension
 from lib.IO_utils import save_data_to_server

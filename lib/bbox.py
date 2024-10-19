@@ -1,9 +1,7 @@
 import numpy as np
 import torch
 import math
-
 from scipy.spatial.transform import Rotation
-
 from Configurations import config
 from lib.grasp_utils import shift_a_distance,  remove_dist
 

@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lib.depth_map import depth_to_mesh_grid
-from models.decoders import att_res_mlp_LN, res_block_mlp_LN
+from models.decoders import att_res_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
 

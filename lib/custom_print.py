@@ -1,6 +1,5 @@
 import math
 
-
 class my_print():
     def __init__(self):
         self.rank=0

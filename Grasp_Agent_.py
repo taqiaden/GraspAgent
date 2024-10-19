@@ -17,7 +17,7 @@ from lib.report_utils import progress_indicator
 from masks import initialize_masks
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path
 from models.gripper_quality import gripper_quality_net, gripper_quality_model_state_path
-from models.scope_net import scope_net_vanilla, suction_scope_model_state_path
+from models.scope_net import scope_net_vanilla, suction_scope_model_state_path, gripper_scope_model_state_path
 from models.suction_quality import suction_quality_net, suction_quality_model_state_path
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
 from pose_object import vectors_to_ratio_metrics
@@ -28,26 +28,47 @@ from visualiztion import visualize_grasp_and_suction_points, view_score
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
 
-class mode():
+class Mode():
     def __init__(self):
         self.simulation=simulation_mode
         self.report_result=report_result
 
+class Setting():
+    def __init__(self):
         self.max_gripper_candidates=max_grasp_candidates
         self.max_suction_candidates=max_suction_candidates
-
-        self.view_grasp_points=view_grasp_suction_points
-        self.view_scores=view_score_gradient
-        self.view_action=view_action
-
         self.chances=chances_ref
         self.shuffling_probability=shuffling_probability
+
+class View():
+    def __init__(self):
+        self.grasp_points=view_grasp_suction_points
+        self.scores=view_score_gradient
+        self.action=view_action
+
+def prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask):
+    index_suction_cls = [i for i in range(len(suction_mask)) if suction_mask[i]]
+    index_grasp_cls = [j for j in range(len(gripper_mask)) if gripper_mask[j]]
+
+    score_grasp_value_ind = list((item * 1, index_grasp_cls[index], 0) for index, item in
+                                 enumerate(gripper_scores[gripper_mask]))
+    score_suction_value_ind_ = list((item * 1, index_suction_cls[index], 1) for index, item in
+                                    enumerate(suction_scores[suction_mask]))
+
+    candidates = score_grasp_value_ind + score_suction_value_ind_
+
+    if len(candidates) > 1:
+        candidates = sorted(candidates, reverse=True)
+
+    return candidates
 
 
 class GraspAgent():
     def __init__(self):
-        '''set run mode'''
-        self.mode=mode()
+        '''configurations'''
+        self.mode=Mode()
+        self.view=View()
+        self.setting=Setting()
 
         '''models'''
         self.gripper_D_model = None
@@ -81,17 +102,15 @@ class GraspAgent():
         '''load check points'''
         pi.step(1)
         self.suction_D_model = initialize_model(suction_quality_net, suction_quality_model_state_path)
-        # suction_D_model=initialize_model(affordance_net, affordance_net_model_path)
         pi.step(2)
 
         self.suction_scope_model = initialize_model_state(scope_net_vanilla(in_size=6), suction_scope_model_state_path)
         pi.step(3)
 
         self.gripper_D_model = initialize_model(gripper_quality_net, gripper_quality_model_state_path)
-        # gripper_D_model=initialize_model(gripper_discriminator, dense_gripper_discriminator_path)
         pi.step(4)
 
-        # gripper_scope_model=initialize_model(gripper_scope_net,gripper_scope_model_state_path)
+        self.gripper_scope_model=initialize_model(scope_net_vanilla(in_size=6),gripper_scope_model_state_path)
         pi.step(5)
 
         self.gripper_G_model = initialize_model(gripper_sampler_net, gripper_sampler_path)
@@ -106,7 +125,7 @@ class GraspAgent():
         self.suction_D_model.eval()
         self.Suction_G_model.eval()
         self.suction_scope_model.eval()
-
+        self.gripper_scope_model.eval()
         pi.end()
 
     def model_inference(self,point_clouds, mask_inversion=False):
@@ -134,7 +153,7 @@ class GraspAgent():
         # suction_scope[suction_scope<0.3]=0.0
 
         '''gripper scope'''
-        # gripper_scope=gripper_scope_model(poses_pixels[:,0:3,...].clone())
+        gripper_scope=self.gripper_scope_model(poses_pixels[:,0:3,...].clone())
 
         '''suction quality'''
         suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()
@@ -167,6 +186,21 @@ class GraspAgent():
         best_gripper_scores = gripper_scores > 1.0
         suction_scores[best_gripper_scores] = -1
 
+        self.gripper_poses = vectors_to_ratio_metrics(poses)
+        self.normals = normals.detach().cpu().numpy()
+
+        '''Masks'''
+        gripper_mask, suction_mask = initialize_masks(gripper_scores, suction_scores, voxel_pc,
+                                                                          self.setting.max_gripper_candidates,
+                                                                          self.setting.max_suction_candidates, mask_inversion)
+
+        '''Visualization'''
+        if self.view.grasp_points: visualize_grasp_and_suction_points(suction_mask, gripper_mask,
+                                                                  voxel_pc)
+        if self.view.scores:
+            view_score(voxel_pc, gripper_mask, gripper_scores)
+            view_score(voxel_pc, suction_mask, suction_scores)
+
         # if view_sampled_suction:
         #     target_mask = get_spatial_mask(data)
         #     estimate_suction_direction(data.cpu().numpy().squeeze(), view=True, view_mask=target_mask,score=suction_score_pred)
@@ -175,50 +209,30 @@ class GraspAgent():
         # suction_score_pred[suction_score_pred < suction_limit] = -1
         # grasp_score_pred[grasp_score_pred<gripper_limit]=-1
 
-        self.gripper_poses = vectors_to_ratio_metrics(poses)
-        self.normals = normals.detach().cpu().numpy()
 
-        grasp_score_pred_mask, suction_score_pred_mask = initialize_masks(gripper_scores, suction_scores, voxel_pc,
-                                                                          self.mode.max_gripper_candidates,
-                                                                          self.mode.max_suction_candidates, mask_inversion)
-
-        if self.mode.view_grasp_points: visualize_grasp_and_suction_points(suction_score_pred_mask, grasp_score_pred_mask,
-                                                                  voxel_pc)
-        if self.mode.view_scores:
-            view_score(voxel_pc, grasp_score_pred_mask, gripper_scores)
-            view_score(voxel_pc, suction_score_pred_mask, suction_scores)
-
-        index_suction_cls = [i for i in range(len(suction_score_pred_mask)) if suction_score_pred_mask[i]]
-        index_grasp_cls = [j for j in range(len(grasp_score_pred_mask)) if grasp_score_pred_mask[j]]
-
-        score_grasp_value_ind = list((item * 1, index_grasp_cls[index], 0) for index, item in
-                                     enumerate(gripper_scores[grasp_score_pred_mask]))
-        score_suction_value_ind_ = list((item * 1, index_suction_cls[index], 1) for index, item in
-                                        enumerate(suction_scores[suction_score_pred_mask]))
-
-        candidates = score_grasp_value_ind + score_suction_value_ind_
-
-        if len(candidates) > 1:
-            candidates = sorted(candidates, reverse=True)
-
-        self.candidates=candidates
+        '''Release candidates'''
+        self.candidates= prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask)
         self.gripper_scores=gripper_scores
         self.suction_scores=suction_scores
         self.voxel_pc=voxel_pc
 
 
-        return candidates, gripper_scores, suction_scores, voxel_pc
+        return self.candidates, gripper_scores, suction_scores, voxel_pc
 
     def execute(self):
         state_ = ''
         self.n_candidates = len(self.candidates)
+        T=np.eye(4)
+        width=0
+        distance=0
+        normal=[1,0,0]
         if self.n_candidates== 0:
             self.actions.append(state_)
             self.states.append('No Object')
-            self.data.append((0, 0, np.eye(4), [1, 0, 0], [0, 0, 0]))
+            self.data.append((width, distance, T, normal, [0, 0, 0]))
             return self.actions, self.states, self.data
         # global chances_ref
-        chances = self.mode.chances
+        chances = self.setting.chances
 
         if self.n_candidates > 100:
             if shuffling_probability == 0.0:
@@ -240,19 +254,18 @@ class GraspAgent():
                 with open(config.home_dir + ROS_communication_file, 'w') as f:
                     f.write('Wait')
                 state_ = 'Wait'
-                action_ = ''
 
+                '''Gripper grasp'''
                 if candidate_[-1] == 0:  # grasp
 
                     index = int(candidate_[1])
 
-                    success, grasp_width, distance, T, center_point = \
-                        gripper_processing(index, self.voxel_pc, self.gripper_poses, self.mode.view_action)
+                    success, width, distance, T, target_point = \
+                        gripper_processing(index, self.voxel_pc, self.gripper_poses, self.view.action)
 
                     print(f'prediction time = {time.time() - t}')
 
                     if not success:
-                        print('Candidate has collision')
                         if simulation_mode:
                             if chances == 0:
                                 return self.actions, self.states, self.data
@@ -260,7 +273,7 @@ class GraspAgent():
                         continue
 
                     print('***********************use grasp***********************')
-                    print('Score = ', self.gripper_scores[index])
+                    print('Gripper score = ', self.gripper_scores[index])
 
                     if simulation_mode:
                         if chances == 0:
@@ -274,10 +287,12 @@ class GraspAgent():
                     # os.system(execute_grasp_bash)
                     chances -= 1
 
-                else:  # suction
+
+                else:
+                    '''Suction grasp'''
                     index = int(candidate_[1])
 
-                    success, suction_xyz, pred_approch_vector = suction_processing(index, self.voxel_pc, self.normals, self.mode.view_action)
+                    success, target_point, normal = suction_processing(index, self.voxel_pc, self.normals, self.view.action)
                     if not success: continue
                     print('***********************use suction***********************')
                     print('Suction score = ', self.suction_scores[index])
@@ -290,25 +305,25 @@ class GraspAgent():
 
                     action_ = 'suction'
                     subprocess.run(execute_suction_bash)
-
                     # os.system(execute_suction_bash)
                     chances -= 1
 
+                '''get robot feedback'''
                 state_ = wait_for_feedback(state_)
                 if action_ == 'grasp':
                     self.actions.append(action_)
                     self.states.append(state_)
-                    self.data.append((grasp_width, distance, T, [1, 0, 0], center_point))
+                    self.data.append((width, distance, T, normal, target_point))
                 if action_ == 'suction':
                     self.actions.append(action_)
                     self.states.append(state_)
-                    self.data.append((0, 0, np.eye(4), pred_approch_vector, suction_xyz))
+                    self.data.append((0, 0, np.eye(4), normal, target_point))
 
                 if state_ == 'Succeed' or state_ == 'reset' or chances == 0:
                     return self.actions, self.states, self.data
 
         else:
-            print(Fore.RED, 'No feasible pose is found in the current forward output', Fore.RESET)
+            print(Fore.RED, 'No feasible pose is found in the current forward pass', Fore.RESET)
             return self.actions, self.states, self.data
 
     def process_feedback(self,action_, state_, data_, img_grasp_pre, img_suction_pre):

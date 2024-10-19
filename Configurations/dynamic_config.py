@@ -1,6 +1,6 @@
 from configparser import ConfigParser
-# from filelock import FileLock
-# lock = FileLock("file.lock")
+from filelock import FileLock
+lock = FileLock("file.lock")
 config = ConfigParser()
 
 config_file_path='Configurations/config.ini'
@@ -31,16 +31,16 @@ def get_int(key,section='main',config_file=config_file_path):
     config.read(config_file)
     return config.getint(section, key)
 
-def add_to_value(key,delta,section='main'):
+def add_to_value_(key,delta,section='main'):
     old_value=get_float(key,section)
     new_value=str(delta+old_value)
     save_key(key,new_value,section)
 
-# def add_to_value(key,delta,section='main',lock_other_process=True):
-#     if lock_other_process:
-#         with lock:
-#             add_to_value_(key,delta,section)
-#     else: add_to_value_(key,delta,section)
+def add_to_value(key,delta,section='main',lock_other_process=True):
+    if lock_other_process:
+        with lock:
+            add_to_value_(key,delta,section)
+    else: add_to_value_(key,delta,section)
 
 
 
