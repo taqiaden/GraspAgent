@@ -1,84 +1,45 @@
 import numpy as np
 from colorama import Fore
+from Configurations.dynamic_config import get_int, save_key
 from lib.dataset_utils import online_data
-from lib.IO_utils import load_file, save_to_file
-
-grasp_sample_last_index_path='dataset/last_grasp_sample.txt'
-ENV_sample_last_index_path='dataset/last_ENV_sample.txt'
-ENV_samples_dir='/dataset/ENV_samples/'
 
 online_data=online_data()
+grasp_data_counter_key='grasp_data'
 
-def verify_label_is_in_standard_form(label):
-    assert len(label)==28, f'label size is {len(label)}, the standard size is 27'
-    list_of_types = [float, float, float, int, int, float, float,
-                     float, float, float, float, float, float, float,
-                     float, float, float
-                    , float, float, float, float, np.float64,
-                     np.float64, int, int, int, int,int]
-    for i in range(len(label)):
-        if i==3:
-            # the socre can be saved in either float and int
-            assert np.float32 == type(label[i]) or int == type(label[i]), f'label[{i}] type is {type(label[i])}, expected type is {np.float32} or {int}'
-        else:
-            assert list_of_types[i]==type(label[i]), f'label[{i}] type is {type(label[i])}, expected type is {list_of_types[i]}'
-
-def standard_label_structure(width, distance, transformation, normal, center_point, grasp, suction, score,state):
-    label = center_point.tolist() + [score]
-
+def standard_label_structure(width, transformation, normal, target_point, use_gripper, use_suction, success):
+    if use_gripper:
+        arm_index=0
+    elif use_suction:
+        arm_index=1
+    else:
+        arm_index=None
     transformation = transformation.reshape(-1)
 
-    if grasp:
-        label = label + [grasp] + transformation.tolist() + [width, distance]
-        label = label + [0] * 4
-
-    if suction:
-        label = label + [0] * 19
-        label = label + [suction] + normal.tolist()
-
-    label=label+[state]
-    # verify_label_is_in_standard_form(label)
-
+    label = target_point.tolist() + [success] + arm_index+transformation.tolist() + [width] + normal.tolist()
     return np.array(label)
-def standard_label_structure2(width, distance, transformation, normal, center_point, grasp, suction):
-    label = center_point.tolist()
 
-    transformation = transformation.reshape(-1)
+def save_grasp_sample(rgb,depth,width, transformation, normal, target_point, use_gripper, use_suction, success ):
+    '''set unique identifier'''
+    index = get_int(grasp_data_counter_key) + 1
 
-    if grasp:
-        label = label + [grasp] + transformation.tolist() + [width, distance]
-        label = label + [0] * 4
+    '''set label'''
+    label = standard_label_structure(width, transformation, normal, target_point, use_gripper, use_suction, success)
 
-    if suction:
-        label = label + [0] * 19
-        label = label + [suction] + normal.tolist()
+    '''save labeled sample'''
+    online_data.rgb.save_as_image(rgb,idx=index)
+    online_data.depth.save(depth,idx=depth)
+    online_data.label.save(label,idx=index)
 
-    label=label
+    if success==1:print(Fore.GREEN,'Report successful grasp attempt', Fore.RESET)
+    else: print(Fore.YELLOW,'Report failed grasp attempt',Fore.RESET)
 
-    return np.array(label)
-def save_ENV_sample(width, distance, transformation, normal, center_point, grasp, suction):
-    index = load_file(ENV_sample_last_index_path)+1
-    label = standard_label_structure2(width, distance, transformation, normal, center_point, grasp, suction)
-    np.save(ENV_samples_dir+str(index).zfill(7),label)
-    save_to_file(index, ENV_sample_last_index_path)
-
-def save_grasp_sample(RGB,Depth,width, distance, transformation, normal, center_point, grasp, suction, score ,state,dataset=online_data):
-
-    index = load_file(grasp_sample_last_index_path)+1
-    label = standard_label_structure(width, distance, transformation, normal, center_point, grasp, suction, score,state)
-    dataset.save_labeled_data(RGB,Depth,np.asarray(label),str(index).zfill(7))
-
-    if score==1:print(Fore.GREEN,'Save new data, award =', score, Fore.RESET)
-    else: print(Fore.YELLOW,'Save new data, award =', score,Fore.RESET)
-
-    save_to_file(index, grasp_sample_last_index_path)
+    '''update index'''
+    save_key(grasp_data_counter_key, index)
 
     # tabulated data:
-    # [0:3]: center_point
-    # [3]: score
-    # [4]: grasp
-    # [5:21]: rotation_matrix
+    # [0:3]: target_point
+    # [3]: success
+    # [4]: arm_index
+    # [5:21]: transformation
     # [21]: width
-    # [22]: distance
-    # [23]: suction
-    # [24:27]: pred_normal
+    # [21:24]: normal

@@ -19,7 +19,7 @@ def depth_map_to_pc(depth):
     pc = transform_to_camera_frame(pc,reverse=True)
     return pc
 
-def get_rgb_heap(rgb_full):
+def crop_scene_image(rgb_full):
     rgb = cv2.rotate(rgb_full, cv2.ROTATE_180)
     heap_rgb = rgb[229:709, 295:1007, :]
     return heap_rgb
@@ -38,7 +38,10 @@ def view_colored_point_cloud(RGB,Depth):
 if __name__ == "__main__":
     rgb = cv2.imread('Frame_0.ppm')  # [1200,1920,3]
 
-    heap_rgb=get_rgb_heap(rgb)
+    assert rgb.shape==(1200,1920,3), f'{rgb.shape}'
+    print(rgb.shape)
+
+    heap_rgb=crop_scene_image(rgb)
 
     pc = np.load('pc_tmp_data.npy')
     pc = refine_point_cloud(pc)

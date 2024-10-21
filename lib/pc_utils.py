@@ -49,7 +49,7 @@ def numpy_to_o3d( pc,normals=None,color=None):
     if normals is not None: pcd.normals = o3d.utility.Vector3dVector(normals)
     return pcd
 
-def apply_mask(point_data):
+def scene_point_clouds_mask(point_data):
     xy_mask= np.logical_and(abs(point_data[:, 1] - 0.0025) < 0.30, abs(point_data[:, 0] - 0.43) < 0.20)
     z_mask = np.logical_and(point_data[:, 2] < 0.20, point_data[:, 2] > 0.04)
     mask = xy_mask & z_mask

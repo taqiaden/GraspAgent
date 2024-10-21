@@ -8,6 +8,8 @@ from Configurations import config
 from Configurations.run_config import simulation_mode, max_grasp_candidates, max_suction_candidates, \
     view_grasp_suction_points, suction_limit, gripper_limit, suction_factor, gripper_factor, view_score_gradient, \
     chances_ref, shuffling_probability, view_action, report_result
+from Online_data_audit.process_feedback import save_grasp_sample
+from Run import depth
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import wait_for_feedback, ROS_communication_file
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, depth_to_point_clouds
@@ -81,6 +83,7 @@ class GraspAgent():
         '''modalities'''
         self.point_clouds = None
         self.depth=None
+        self.rgb=None
 
         '''dense candidates'''
         self.gripper_poses=None
@@ -128,12 +131,9 @@ class GraspAgent():
         self.gripper_scope_model.eval()
         pi.end()
 
-    def model_inference(self,point_clouds, mask_inversion=False):
-        self.point_clouds=point_clouds
-
-        '''get depth'''
-        transformed_pc = transform_to_camera_frame(self.point_clouds)
-        self.depth = point_clouds_to_depth(transformed_pc, camera)
+    def model_inference(self,depth,rgb, mask_inversion=False):
+        self.depth=depth
+        self.rgb=rgb
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
 
         '''sample suction'''
@@ -224,12 +224,11 @@ class GraspAgent():
         self.n_candidates = len(self.candidates)
         T=np.eye(4)
         width=0
-        distance=0
         normal=[1,0,0]
         if self.n_candidates== 0:
             self.actions.append(state_)
             self.states.append('No Object')
-            self.data.append((width, distance, T, normal, [0, 0, 0]))
+            self.data.append((width, T, normal, [0, 0, 0]))
             return self.actions, self.states, self.data
         # global chances_ref
         chances = self.setting.chances
@@ -313,11 +312,11 @@ class GraspAgent():
                 if action_ == 'grasp':
                     self.actions.append(action_)
                     self.states.append(state_)
-                    self.data.append((width, distance, T, normal, target_point))
+                    self.data.append((width, T, normal, target_point))
                 if action_ == 'suction':
                     self.actions.append(action_)
                     self.states.append(state_)
-                    self.data.append((0, 0, np.eye(4), normal, target_point))
+                    self.data.append((0, np.eye(4), normal, target_point))
 
                 if state_ == 'Succeed' or state_ == 'reset' or chances == 0:
                     return self.actions, self.states, self.data
@@ -327,46 +326,26 @@ class GraspAgent():
             return self.actions, self.states, self.data
 
     def process_feedback(self,action_, state_, data_, img_grasp_pre, img_suction_pre):
-        # states
-        # 0 grasp action is executed
-        # 1 failed to find a planning path
-        # 2 reset
-        # 3 collision
         if state_ == 'Succeed' or state_ == 'reset': get_new_perception()
-        if not self.mode.report_result: return None
+        if not self.mode.report_result: return
 
         img_suction_after, img_grasp_after = get_side_bins_images()
 
         if action_ == 'grasp' and state_ == 'Succeed':
-            # compare img_grasp_pre and img_grasp_after
-            print(action_, ':')
-
             award = check_image_similarity(img_grasp_pre, img_grasp_after)
-            # if award is not None:
-            #     save_new_data_sample(full_pc,trail_data[0], trail_data[1], trail_data[2], trail_data[3], trail_data[4], 1,
-            #                          0, award,state=0)
+            if award is not None:
+                save_grasp_sample(rgb=self.rgb,depth=self.depth,width=data_[0],transformation=data_[1],normal=data_[2],target_point=data_[3]
+                                  ,use_gripper=True,use_suction=False,success=award)
 
         elif action_ == 'suction' and state_ == 'Succeed':
-
-            # compare img_suction_pre and img_suction_after
-            print(action_, ':')
-
             award = check_image_similarity(img_suction_pre, img_suction_after)
-            # if award is not None:
-            #     save_new_data_sample(full_pc,trail_data[0], trail_data[1], trail_data[2], trail_data[3],
-            #                      trail_data[4], 0, 1, award,state=0)
+            if award is not None:
+                save_grasp_sample(rgb=self.rgb, depth=self.depth, width=data_[0], transformation=data_[1],
+                                  normal=data_[2], target_point=data_[3]
+                                  , use_gripper=False, use_suction=True, success=award)
 
         elif state_ == 'reset' or state_ == 'Failed':
             print(action_)
-            s = None
-            if state_ == 'Failed': s = 1
-            if state_ == 'reset': s = 2
-            # if action == 'grasp':
-            #     save_new_data_sample(full_pc,trail_data[0], trail_data[1], trail_data[2], trail_data[3], trail_data[4], 1,
-            #                          0, 0,state=s)
-            # if action == 'suction':
-            #     save_new_data_sample(full_pc,trail_data[0], trail_data[1], trail_data[2], trail_data[3],
-            #                          trail_data[4], 0, 1, 0,state=s)
 
         else:
             print('No movement is executed, State: ', state_, ' ， Action： ', action_)
