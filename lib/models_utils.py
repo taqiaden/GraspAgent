@@ -127,14 +127,5 @@ def model_on_cuda_check(model):
     result=(next(model.parameters()).is_cuda)
     return result
 
-def try_initialize_model(model,path):
-    net = model()
-    try:
-        pass
-        net = initialize_model_state(net, path)
-    except Exception as e:
-        print(Fore.RED, 'Load state dictionary exception,  ', str(e), Fore.RESET)
-    return net
-
 def check_model_device(model):
     print(next(model.parameters()).device)

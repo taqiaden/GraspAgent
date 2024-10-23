@@ -76,7 +76,6 @@ def train():
 
         print(f'Number of labels with zero loss = {labels_with_zero_loss_counter}, total data size= {len(dataset)}')
 
-
         '''export models'''
         export_model_state(model, gripper_scope_model_state_path)
         '''export optimizers'''

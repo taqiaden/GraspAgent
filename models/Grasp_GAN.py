@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+
+from lib.custom_activations import GripperGraspRegressor
 from lib.depth_map import depth_to_mesh_grid
 from models.decoders import att_res_mlp_LN
 from models.resunet import res_unet
@@ -11,27 +13,6 @@ gripper_critic_path=r'gripper_critic_model_state'
 
 use_bn=False
 use_in=True
-
-def gripper_output_normalization(output):
-    '''approach normalization'''
-    approach=output[:, 0:3, :]
-    approach=F.tanh(approach)
-
-    approach=F.normalize(approach, dim=1)
-
-    '''beta normalization'''
-    beta=output[:, 3:5, :]
-    beta=F.tanh(beta)
-
-    beta=F.normalize(beta, dim=1)
-
-    dist=output[:, 5:6, :]
-    dist=F.sigmoid(dist)
-    width=output[:, 6:7, :]
-    width=F.sigmoid(width)
-
-    normalized_output=torch.cat([approach,beta,dist,width],dim=1)
-    return normalized_output
 
 def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
     if reverse==False:
@@ -51,6 +32,8 @@ class gripper_sampler_net(nn.Module):
         self.get_approach=att_res_mlp_LN(in_c1=64, in_c2=2, out_c=3).to('cuda')
         self.get_beta_dist=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=3).to('cuda')
         self.get_width=att_res_mlp_LN(in_c1=64, in_c2=8, out_c=1).to('cuda')
+
+        self.gripper_regressor_layer=GripperGraspRegressor()
 
     def forward(self, depth):
         '''input standardization'''
@@ -81,7 +64,7 @@ class gripper_sampler_net(nn.Module):
 
         output=reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
 
-        output=gripper_output_normalization(output)
+        output=self.gripper_regressor_layer(output)
         return output
 
 class critic_net(nn.Module):

@@ -5,13 +5,14 @@ import open3d as o3d
 
 parallel_jaw_model= 'new_gripper.ply'
 
-parallel_jaw_mesh=None
+parallel_jaw_mesh_trimesh=None
+parallel_jaw_mesh_o3d=None
 
 def construct_gripper_mesh(width,T_d):
-    global  parallel_jaw_mesh
-    if parallel_jaw_mesh is None:
-        parallel_jaw_mesh=trimesh.load(parallel_jaw_model)
-    mesh = copy.deepcopy(parallel_jaw_mesh)
+    global  parallel_jaw_mesh_trimesh
+    if parallel_jaw_mesh_trimesh is None:
+        parallel_jaw_mesh_trimesh=trimesh.load(parallel_jaw_model)
+    mesh = copy.deepcopy(parallel_jaw_mesh_trimesh)
 
     T1 = np.array([[1, 0, 0, 0],
                    [0, 1, 0, -0.02],
@@ -50,10 +51,10 @@ def construct_gripper_mesh(width,T_d):
 
 def construct_gripper_mesh_2(width,T_d):
     '''get the raw gripper mesh'''
-    global parallel_jaw_mesh
-    if parallel_jaw_mesh is None:
-        parallel_jaw_mesh = o3d.io.read_triangle_mesh(parallel_jaw_model)
-    mesh = copy.deepcopy(parallel_jaw_mesh)
+    global parallel_jaw_mesh_o3d
+    if parallel_jaw_mesh_o3d is None:
+        parallel_jaw_mesh_o3d = o3d.io.read_triangle_mesh(parallel_jaw_model)
+    mesh = copy.deepcopy(parallel_jaw_mesh_o3d)
 
     '''adjust the width'''
     scale_k = width / 0.04

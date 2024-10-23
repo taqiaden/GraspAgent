@@ -43,7 +43,7 @@ class LabelObj():
     def get_point_clouds_from_depth(self,depth=None):
         if depth is not None:
             self.depth=depth
-        point_clouds, mask = depth_to_point_clouds(depth, camera)
+        point_clouds, mask = depth_to_point_clouds(self.depth, camera)
         point_clouds = transform_to_camera_frame(point_clouds, reverse=True)
         return point_clouds
 

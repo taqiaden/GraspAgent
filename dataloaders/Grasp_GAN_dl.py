@@ -7,7 +7,6 @@ from lib.dataset_utils import training_data, online_data
 from lib.report_utils import progress_indicator as pi
 import random
 
-
 training_data=training_data()
 online_data=online_data()
 
@@ -35,7 +34,7 @@ def load_training_buffer(size):
             depth=label_obj.get_depth(point_clouds=pc)
 
             '''check collision'''
-            pc=label_obj.get_point_clouds_from_depth()
+            pc=label_obj.get_point_clouds_from_depth(depth=depth)
             collision_intensity = grasp_collision_detection_new(label_obj.T_d, label_obj.width, pc, visualize=False)
 
             if collision_intensity>0:

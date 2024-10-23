@@ -33,7 +33,6 @@ def view_suction_direction(point_data,npy_norms,view_mask=None,score=None):
 
     rest_pcd = numpy_to_o3d(npy=rest_pc, color=rest_colors)
 
-
     scene_list = []
 
     scene_list.append(masked_pcd1)

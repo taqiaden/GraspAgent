@@ -42,7 +42,7 @@ m1=1.0
 m2=1.0
 m3=1.0
 
-activate_full_power_at_midnight=True
+activate_full_power_at_midnight=False
 
 def ddp_setup(rank,world_size):
     os.environ["MASTER_ADDR"]="localhost"
@@ -72,7 +72,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
         target_point = transform_to_camera_frame(target_point[None, :], reverse=True)[0]
 
         target_pose=generated_grasps[j, :, pix_A, pix_B]
-        T_d, width, distance=pose_7_to_transformation(pose_7, target_point)
+        T_d, width, distance=pose_7_to_transformation(target_pose, target_point)
         if j == 0: print(f'Example _pose = {generated_grasps[j, :, pix_A, pix_B]}')
 
         '''get point clouds'''
@@ -370,6 +370,8 @@ def train_Grasp_GAN(n_samples=None,BATCH_SIZE=2,epochs=1,maximum_gpus=None):
     '''prepare buffer'''
     if len(training_data) == 0:
         load_training_buffer(size=n_samples)
+
+    print(Fore.CYAN, f'Buffer size = {len(training_data)}')
     buffer_size=len(training_data)
     print(Fore.YELLOW,f'Buffer size = {buffer_size} ', Fore.RESET)
 
@@ -412,4 +414,4 @@ def main_ddp(rank: int, t_config,Critic,Generator):
 
 if __name__ == "__main__":
     while True:
-        train_Grasp_GAN(900,BATCH_SIZE=2,epochs=1,maximum_gpus=None)
+        train_Grasp_GAN(100,BATCH_SIZE=1,epochs=1,maximum_gpus=1)

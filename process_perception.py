@@ -1,5 +1,7 @@
 import os
 import subprocess
+
+import cv2
 from colorama import Fore
 from Configurations.config import home_dir
 from Configurations.run_config import simulation_mode
@@ -73,7 +75,7 @@ def get_scene_point_clouds():
 
 def get_scene_RGB():
     '''load and crop'''
-    full_RGB=np.load(rgb_path)
+    full_RGB=cv2.imread(rgb_path)
     assert full_RGB.shape == (1200, 1920, 3), f'{full_RGB.shape}'
     scene_RGB = crop_scene_image(full_RGB)
 

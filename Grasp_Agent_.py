@@ -9,12 +9,11 @@ from Configurations.run_config import simulation_mode, max_grasp_candidates, max
     view_grasp_suction_points, suction_limit, gripper_limit, suction_factor, gripper_factor, view_score_gradient, \
     chances_ref, shuffling_probability, view_action, report_result
 from Online_data_audit.process_feedback import save_grasp_sample
-from Run import depth
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import wait_for_feedback, ROS_communication_file
-from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, depth_to_point_clouds
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import check_image_similarity
-from lib.models_utils import initialize_model, initialize_model_state
+from lib.models_utils import  initialize_model_state
 from lib.report_utils import progress_indicator
 from masks import initialize_masks
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path
@@ -104,22 +103,22 @@ class GraspAgent():
         pi = progress_indicator('Loading check points  ', max_limit=7)
         '''load check points'''
         pi.step(1)
-        self.suction_D_model = initialize_model(suction_quality_net, suction_quality_model_state_path)
+        self.suction_D_model = initialize_model_state(suction_quality_net(), suction_quality_model_state_path)
         pi.step(2)
 
         self.suction_scope_model = initialize_model_state(scope_net_vanilla(in_size=6), suction_scope_model_state_path)
         pi.step(3)
 
-        self.gripper_D_model = initialize_model(gripper_quality_net, gripper_quality_model_state_path)
+        self.gripper_D_model = initialize_model_state(gripper_quality_net(), gripper_quality_model_state_path)
         pi.step(4)
 
-        self.gripper_scope_model=initialize_model(scope_net_vanilla(in_size=6),gripper_scope_model_state_path)
+        self.gripper_scope_model=initialize_model_state(scope_net_vanilla(in_size=6),gripper_scope_model_state_path)
         pi.step(5)
 
-        self.gripper_G_model = initialize_model(gripper_sampler_net, gripper_sampler_path)
+        self.gripper_G_model = initialize_model_state(gripper_sampler_net(), gripper_sampler_path)
         pi.step(6)
 
-        self.Suction_G_model = initialize_model(suction_sampler_net, suction_sampler_model_state_path)
+        self.Suction_G_model = initialize_model_state(suction_sampler_net(), suction_sampler_model_state_path)
         pi.step(7)
 
         '''set evaluation mode'''
@@ -153,7 +152,7 @@ class GraspAgent():
         # suction_scope[suction_scope<0.3]=0.0
 
         '''gripper scope'''
-        gripper_scope=self.gripper_scope_model(poses_pixels[:,0:3,...].clone())
+        # gripper_scope=self.gripper_scope_model(poses_pixels[:,0:3,...].clone())
 
         '''suction quality'''
         suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()

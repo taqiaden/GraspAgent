@@ -3,6 +3,8 @@ import datetime
 import torch
 from colorama import Fore
 from torch import nn
+
+from Verfication_tests.gripper_verf import view_gripper_label
 from dataloaders.gripper_quality_dl import  load_training_buffer, gripper_quality_dataset
 from lib.IO_utils import   custom_print
 from lib.dataset_utils import  training_data
@@ -161,7 +163,7 @@ class TrainerDDP:
                 print(loss.item())
 
                 '''Verification'''
-                #view_gripper_label(depth, pose_7, pixel_index, b)
+                view_gripper_label(depth, pose_7, pixel_index, b)
 
                 '''optimizer step'''
                 loss.backward()
@@ -198,7 +200,7 @@ def main_ddp(rank: int, t_config,model,generator):
     destroy_process_group()
 
 def train_gripper_quality(n_samples=None,BATCH_SIZE = 1,epochs=1,maximum_gpus=None,learning_rate=5*1e-3):
-    training_data.clear()
+    # training_data.clear()
 
 
     '''load check points'''

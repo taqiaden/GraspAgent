@@ -1,5 +1,5 @@
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
-from pose_object import approach_vec_to_theta_phi, output_processing, pose_7_to_transformation
+from pose_object import pose_7_to_transformation
 from registration import camera
 from visualiztion import vis_scene
 

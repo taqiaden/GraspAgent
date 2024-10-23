@@ -39,7 +39,8 @@ def load_training_buffer(size):
                     continue
 
             '''load depth map'''
-            depth=label_obj.get_depth()
+            pc = online_data.point_clouds.load_as_numpy(target_file_index)
+            depth=label_obj.get_depth(point_clouds=pc)
 
         except Exception as e:
             print(Fore.RED, str(e),Fore.RESET)

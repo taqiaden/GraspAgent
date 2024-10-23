@@ -130,7 +130,7 @@ def convert_angles_to_transformation_form(relative_pose_5,center_point):
     # shape of relative_pose_5 is torch.Size([5])
 
     '''clip and reshape'''
-    assert relative_pose_5.shape==(1,5) or relative_pose_5.shape==(5,)
+    assert relative_pose_5.shape==(1,5) or relative_pose_5.shape==(5,), f'{relative_pose_5.shape}'
     relative_pose_5=torch.clip(relative_pose_5,0.,1.)
     relative_pose_5=relative_pose_5.squeeze().detach().cpu().numpy()
 
