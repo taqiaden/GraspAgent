@@ -35,6 +35,7 @@ class scope_net_vanilla(nn.Module):
             nn.Linear(64, 16, bias=False),
             nn.LayerNorm(16),
             nn.SiLU(True),
+            nn.Dropout(0.5),
             nn.Linear(16, 1),
         ).to('cuda')
 

@@ -8,7 +8,6 @@ gripper_collision_net_path=r'gripper_collision_model_state'
 use_bn=False
 use_in=True
 
-
 def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
     if reverse==False:
         channels=tensor.shape[1]

@@ -29,3 +29,11 @@ def entropy(labels,bin_size=2):
     labels = labels.astype(int)
     ps = np.bincount(labels) / len(labels)
     return -np.sum([p * np.log2(p) for p in ps if p > 0])
+
+def moving_mean(old_mean,new_value,window_size=100):
+    new_mean=( (old_mean*window_size)+new_value ) / (window_size+1)
+    return new_mean
+
+def moving_momentum(old_momentum,new_value,decay_rate,exponent=2):
+    new_momentum=decay_rate*old_momentum+(1-decay_rate)*(new_value**exponent)
+    return new_momentum

@@ -4,20 +4,24 @@ import os
 import re
 import sys
 from datetime import datetime
-
 import cv2
 import numpy as np
 import smbclient
-
 from lib.report_utils import counter_progress
 from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
 from Configurations import config
 from lib.report_utils import wait_indicator
 
 training_data_dir='dataset/training_data/'
-# online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
-# online_data_dir=r'/home/taqiaden/online_data/'
-online_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
+where_am_i = os.popen('hostname').read()
+where_am_i = re.sub(r"[\n\t\s]*", "", where_am_i)
+
+if where_am_i=='chaoyun-server':
+    online_data_dir = r'/home/taqiaden/online_data/'
+else:
+    # online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
+    # online_data_dir=r'/home/taqiaden/online_data/'
+    online_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
 
 online_data_local_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
 
@@ -45,6 +49,10 @@ class modality_pool():
         self.os=os if self.is_local else smbclient
         self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
         self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+
+        '''set directory'''
+        if not os.path.exists(self.dir): os.mkdir(self.dir)
+
     def make_dir(self):
         if not self.os.path.exists(self.dir):
             self.os.mkdir(self.dir)
@@ -110,6 +118,14 @@ class data_pool():
         else:
             self.is_local=False
 
+        '''set local/server functions'''
+        self.os=os if self.is_local else smbclient
+        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
+        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+
+        '''set directory'''
+        if not os.path.exists(self.dir): os.mkdir(self.dir)
+
         '''define modalities pool'''
         self.point_clouds=modality_pool('point_clouds',self.dir,'npy',self.is_local)
         self.label=modality_pool('label',self.dir,'npy',self.is_local)
@@ -118,11 +134,6 @@ class data_pool():
 
         '''set main modality'''
         self.main_modality=self.label
-
-        '''set local/server functions'''
-        self.os=os if self.is_local else smbclient
-        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
-        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
 
     def load_numpy(self,file_full_path):
         # check if data and label exist
@@ -219,7 +230,7 @@ class data_pool():
 
 class training_data(data_pool):
     def __init__(self):
-        super(training_data,self).__init__(dir=training_data_dir,dataset_name='traning')
+        super(training_data,self).__init__(dir=training_data_dir,dataset_name='training')
 
 class online_data(data_pool):
     def __init__(self):

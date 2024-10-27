@@ -41,7 +41,6 @@ class suction_quality_net(nn.Module):
             nn.Linear(16, 1),
         ).to('cuda')
 
-
     def forward(self, depth,pose ):
         '''input standardization'''
         depth = standardize_depth(depth)

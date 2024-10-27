@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from lib.depth_map import depth_to_mesh_grid
+from models.decoders import res_block_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
 
@@ -20,58 +20,40 @@ def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
         tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
         return tensor
 
-class compact_decoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        # self.att_block = att_res_mlp_LN(in_c1=64, in_c2=5, out_c=1,drop_out_ratio=0.35).to('cuda')
-        # self.decoder = res_block_mlp_LN(64+5,32,1,drop_out_ratio=0.5).to('cuda')
-        # self.tanh=nn.Tanh()
-        self.decoder= nn.Sequential(
-            nn.Linear(64+9, 32, bias=False),
-            nn.LayerNorm([32]),
-            nn.ReLU(True),
-            nn.Linear(32, 1),
-        ).to('cuda')
-
-
-    def forward(self, features,pose ):
-        b = pose.shape[0]
-
-        '''get spatial information'''
-        xymap = depth_to_mesh_grid(camera)
-        xymap = xymap.repeat(b, 1, 1, 1)
-
-        '''reshape and concatenate'''
-        xymap_2d = reshape_for_layer_norm(xymap, camera=camera, reverse=False)
-        features_2d = reshape_for_layer_norm(features, camera=camera, reverse=False)
-
-        '''backbone'''
-        pose_2d = reshape_for_layer_norm(pose, camera=camera, reverse=False)
-        pose_2d = torch.cat([pose_2d, xymap_2d], dim=1)
-
-        '''decode'''
-        # output_2d = self.att_block(features_2d, pose_2d)
-        f = torch.cat([pose_2d, features_2d], dim=1)
-        output_2d = self.decoder(f)
-        # output_2d=self.tanh(output_2d)
-
-        output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
-
-        return output
-
 class gripper_quality_net(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
-        self.decoder=compact_decoder().to('cuda')
+        self.pose_transform = nn.Linear(7, 16).to('cuda')
+
+        self.res_block = res_block_mlp_LN(in_c=64 + 16, medium_c=32, out_c=16, activation=nn.SiLU(True)).to('cuda')
+
+        self.decoder = nn.Sequential(
+            nn.LayerNorm(16),
+            nn.SiLU(True),
+            nn.Linear(16, 1),
+        ).to('cuda')
 
     def forward(self, depth,pose ):
         '''input standardization'''
         depth = standardize_depth(depth)
 
-        '''backbone'''
-        features = self.back_bone(depth)
+        '''depth backbone'''
+        depth_features = self.back_bone(depth)
+
+        '''flatten'''
+        depth_features_2d = reshape_for_layer_norm(depth_features, camera=camera, reverse=False)
+        pose_2d = reshape_for_layer_norm(pose, camera=camera, reverse=False)
+
+        '''pose encoder'''
+        pose_features_2d = self.pose_transform(pose_2d)
+
+        '''concatenate'''
+        features_2d = torch.cat([pose_features_2d, depth_features_2d], dim=1)
 
         '''decode'''
-        output = self.decoder(features, pose)
+        output_2d = self.decoder(self.res_block(features_2d))
+
+        '''unflatten'''
+        output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
         return output

@@ -22,7 +22,7 @@ class gripper_scope_dataset(data.Dataset):
         transition=transformation[0:3, 3].reshape(-1)
         approach=get_approach_from_rotation(rotation)
         input=np.concatenate([transition,approach])
-        return input,score
+        return input,score,target_index
 
     def __len__(self):
         return len(self.files_indexes)
@@ -44,7 +44,7 @@ class suction_scope_dataset(data.Dataset):
         transition=transformation[0:3, 3].reshape(-1)
         approach=get_approach_from_rotation(rotation)
         input=np.concatenate([transition,approach])
-        return input,score
+        return input,score,target_index
 
     def __len__(self):
         return len(self.files_indexes)

@@ -9,6 +9,8 @@ from lib.IO_utils import   custom_print
 from lib.models_utils import initialize_model_state, export_model_state
 from torch.utils.data.distributed import DistributedSampler
 
+from records.training_satatistics import TrainingTracker
+
 gripper_scope_optimizer_path=r'gripper_scope_optimizer'
 print=custom_print
 weight_decay = 0.000001
@@ -18,12 +20,17 @@ batch_size=64
 workers=2
 epochs=10000
 
+
+sigmoid = nn.Sigmoid()
+bce_loss=nn.BCELoss(reduction='none')
+
 def train():
     model = initialize_model_state(scope_net_vanilla(in_size=6), gripper_scope_model_state_path)
     model.train(True)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
-                                 betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
+    #                              betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     optimizer = load_opt(optimizer, gripper_scope_optimizer_path)
 
     dataset=gripper_scope_dataset()
@@ -31,16 +38,10 @@ def train():
 
     for epoch in range(epochs):
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1), max_limit=len(data_loader))
-        running_loss=0.0
-        TP = 0
-        FP = 0
-        FN = 0
-        TN = 0
-
-        labels_with_zero_loss_counter=0
+        statistics=TrainingTracker(name='',iterations_per_epoch=len(data_loader),samples_size=len(dataset))
 
         for i, batch in enumerate(data_loader, 0):
-            transformation,label=batch
+            transformation,label,target_index=batch
             transformation=transformation.to('cuda').float()
             label=label.to('cuda').float()
 
@@ -52,29 +53,25 @@ def train():
             #     print(f'l={label[0].item()},  p={predictions[0].item()}')
 
             '''update confession matrix'''
-            TP += ((label > 0.5) & (predictions > 0.5)).sum()
-            FP += ((label < 0.5) & (predictions > 0.5)).sum()
-            FN += ((label > 0.5) & (predictions <= 0.5)).sum()
-            TN += ((label < 0.5) & (predictions <= 0.5)).sum()
+            statistics.update_confession_matrix(label,predictions)
 
-            positive_mask=label>0.5
-            positive_loss = (binary_l1(predictions[positive_mask], label[positive_mask]) ** 2) * 0.5
-            negative_loss = binary_smooth_l1(predictions[~positive_mask], label[~positive_mask])
-            loss=torch.cat([positive_loss,negative_loss])
-            labels_with_zero_loss_counter+=loss.shape[0]-(loss==0).sum()
+            # positive_mask=label>0.5
+            # positive_loss = (binary_l1(predictions[positive_mask], label[positive_mask]) ** 2) * 0.5
+            # negative_loss = binary_smooth_l1(predictions[~positive_mask], label[~positive_mask])
+            # loss=torch.cat([positive_loss,negative_loss])
+
+            loss = bce_loss(sigmoid(predictions), label)
+
+            statistics.labels_with_zero_loss+=(loss<=0.1).sum()
             loss=loss.mean()
 
             loss.backward()
             optimizer.step()
 
-            running_loss+=binary_l1(predictions[positive_mask], label[positive_mask]).mean().item()
+            statistics.running_loss+=binary_l1(predictions, label).mean().item()
 
             pi.step(i)
-        print(f'Average loss = {running_loss/len(data_loader)}')
-        print(f'TP={TP}, FP={FP}')
-        print(f'FN={FN}, TN={TN}')
-
-        print(f'Number of labels with zero loss = {labels_with_zero_loss_counter}, total data size= {len(dataset)}')
+        statistics.print()
 
         '''export models'''
         export_model_state(model, gripper_scope_model_state_path)

@@ -43,20 +43,6 @@ def load_training_buffer(size,load_label=False):
         if counter >= size: break
 
 
-class gripper_sampler_dataset_kd(data.Dataset):
-    def __init__(self, data_pool):
-        super().__init__()
-        self.data_pool = data_pool
-        self.files_indexes = self.data_pool.depth.get_indexes()
-
-    def __getitem__(self, idx):
-        target_index = self.files_indexes[idx]
-        depth = self.data_pool.depth.load_as_numpy(target_index)
-        return depth[np.newaxis,:,:]
-
-    def __len__(self):
-        return len(self.files_indexes)
-
 class gripper_sampler_dataset(data.Dataset):
     def __init__(self, data_pool):
         super().__init__()
