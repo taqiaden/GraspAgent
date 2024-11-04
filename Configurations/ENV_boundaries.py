@@ -13,4 +13,4 @@ depth_lower_bound=1100.
 depth_mean=1180.
 depth_std=85.
 
-dist_allowance=0.006
+dist_allowance=0.005

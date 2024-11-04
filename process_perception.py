@@ -1,6 +1,5 @@
 import os
 import subprocess
-
 import cv2
 from colorama import Fore
 from Configurations.config import home_dir

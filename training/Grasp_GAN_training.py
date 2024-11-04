@@ -8,7 +8,7 @@ from Configurations.config import theta_cos_scope
 from Configurations.dynamic_config import save_key, get_value, add_to_value, get_float
 from dataloaders.Grasp_GAN_dl import Grasp_GAN_dataset, load_training_buffer
 from lib.IO_utils import   custom_print
-from lib.collision_unit import grasp_collision_detection_new
+from lib.collision_unit import grasp_collision_detection
 from lib.dataset_utils import  training_data, online_data
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
 from lib.models_utils import export_model_state, initialize_model
@@ -80,7 +80,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7):
         pc = transform_to_camera_frame(pc, reverse=True)
 
         '''check collision'''
-        collision_intensity = grasp_collision_detection_new(T_d,width, pc, visualize=False )
+        collision_intensity = grasp_collision_detection(T_d,width, pc, visualize=False )
         collision_state_=collision_intensity > 0
         collision_state_list.append(collision_state_)
 

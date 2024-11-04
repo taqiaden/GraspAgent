@@ -34,6 +34,11 @@ class ModelWrapper():
         self.optimizer = load_opt(self.optimizer, file_name)
         return self.optimizer
 
+    def ini_sgd_optimizer(self,learning_rate=None):
+        if learning_rate is not None: self.learning_rate=learning_rate
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        return self.optimizer
+
     def export_optimizer(self,file_index=None):
         file_name = self.optimizer_name if file_index is None else str(file_index) + self.optimizer_name
         export_optm(self.optimizer, file_name)

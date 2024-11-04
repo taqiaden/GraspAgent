@@ -15,18 +15,6 @@ pre_grasp_data_path = config.home_dir + 'pre_grasp_data_tmp.npy'
 suction_data_path = config.home_dir + 'suction_data_tmp.npy'
 pre_suction_data_path = config.home_dir + 'pre_suction_data_tmp.npy'
 
-
-def get_suction_pose_( target_point, normal):
-    v0 = np.array([1, 0, 0])
-    a = trimesh.transformations.angle_between_vectors(v0, -normal)
-    b = trimesh.transformations.vector_product(v0, -normal)
-    matrix_ori = trimesh.transformations.rotation_matrix(a, b)
-    matrix_ori[:3, 3] = target_point.T
-    T = matrix_ori
-    pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
-    return target_point, pre_grasp_mat, end_effecter_mat, T, normal
-
-
 def  gripper_processing(index,point_clouds,poses,isvis):
     target_point = point_clouds[index]
     relative_pose_5=poses[index]
@@ -47,9 +35,15 @@ def  gripper_processing(index,point_clouds,poses,isvis):
 
 def suction_processing(index,point_data,normals,isvis):
     normal=normals[index]
-    normal=normal[None,:]
+    target_point=point_data[index]
 
-    target_point, pre_grasp_mat, end_effecter_mat, T, normal = get_suction_pose_(point_data[index], normal)
+    v0 = np.array([1, 0, 0])
+    a = trimesh.transformations.angle_between_vectors(v0, -normal)
+    b = trimesh.transformations.vector_product(v0, -normal)
+    T = trimesh.transformations.rotation_matrix(a, b)
+    T[:3, 3] = target_point.T
+
+    pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
 
     save_suction_data(end_effecter_mat, suction_data_path)
     save_suction_data(pre_grasp_mat, pre_suction_data_path)

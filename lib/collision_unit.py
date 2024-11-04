@@ -7,7 +7,7 @@ from Configurations.ENV_boundaries import dist_allowance
 from lib.grasp_utils import   shift_a_distance
 from lib.mesh_utils import construct_gripper_mesh
 
-def grasp_collision_detection_new(T_d_,width,point_data, visualize=False):
+def grasp_collision_detection(T_d_,width,point_data, visualize=False):
     T_d=np.copy(T_d_)
     assert np.any(np.isnan(T_d))==False,f'{T_d}'
     #########################################################
@@ -55,7 +55,7 @@ def clip_width(T_d,width_, width_step,point_data,min_width=0.005):
         new_width += width_step
         if not  new_width >= min_width:
             break
-        collision_intensity_tmp=grasp_collision_detection_new(T_d,new_width,point_data, visualize=False)
+        collision_intensity_tmp=grasp_collision_detection(T_d,new_width,point_data, visualize=False)
         if collision_intensity_tmp>0:
             break
         else:

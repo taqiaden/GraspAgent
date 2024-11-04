@@ -18,55 +18,54 @@ online_data=online_data()
 
 force_balanced_data=True
 
-
-def load_training_buffer(size):
-    training_buffer = SQBuffer()
-
-    file_indexes = online_data.get_indexes()
-    random.shuffle(file_indexes)
-    selection_p = get_selection_probabilty(file_indexes)
-
-    progress_indicator=pi(f'load {size} samples for training ',size)
-    counter=0
-    positive_samples=0
-    negative_samples=0
-
-    for i,target_file_index in enumerate(file_indexes):
-        if np.random.rand() > selection_p[i]: continue
-        '''get data'''
-        try:
-            label = online_data.label.load_as_numpy(target_file_index)
-            label_obj = LabelObj(label=label)
-            '''selection rules'''
-            if label_obj.is_gripper: continue
-            if force_balanced_data:
-                if label_obj.success and (1+negative_samples)/(1+positive_samples)<1:
-                    continue
-                elif label_obj.failure and (1+positive_samples)/(1+negative_samples)<1:
-                    continue
-            # depth=online_data.load_depth(target_file_index)
-
-            '''load depth map'''
-            pc=online_data.point_clouds.load_as_numpy(target_file_index)
-            depth=label_obj.get_depth(point_clouds=pc)
-
-
-        except Exception as e:
-            print(Fore.RED, str(e),Fore.RESET)
-            continue
-
-        '''save to buffer'''
-        training_buffer.depth.save_as_numpy(depth,target_file_index)
-        training_buffer.label.save_as_numpy(label,target_file_index)
-
-        '''update counters'''
-        if label[3]==1:positive_samples+=1
-        else: negative_samples+=1
-        counter+=1
-        progress_indicator.step(counter)
-        if counter >= size:
-            print(f'Sampled buffer contains {positive_samples} positive samples and {negative_samples} negative samples')
-            break
+# def load_training_buffer(size):
+#     training_buffer = SQBuffer()
+#
+#     file_indexes = online_data.get_indexes()
+#     random.shuffle(file_indexes)
+#     selection_p = get_selection_probabilty(file_indexes)
+#
+#     progress_indicator=pi(f'load {size} samples for training ',size)
+#     counter=0
+#     positive_samples=0
+#     negative_samples=0
+#
+#     for i,target_file_index in enumerate(file_indexes):
+#         if np.random.rand() > selection_p[i]: continue
+#         '''get data'''
+#         try:
+#             label = online_data.label.load_as_numpy(target_file_index)
+#             label_obj = LabelObj(label=label)
+#             '''selection rules'''
+#             if label_obj.is_gripper: continue
+#             if force_balanced_data:
+#                 if label_obj.success and (1+negative_samples)/(1+positive_samples)<1:
+#                     continue
+#                 elif label_obj.failure and (1+positive_samples)/(1+negative_samples)<1:
+#                     continue
+#             # depth=online_data.load_depth(target_file_index)
+#
+#             '''load depth map'''
+#             pc=online_data.point_clouds.load_as_numpy(target_file_index)
+#             depth=label_obj.get_depth(point_clouds=pc)
+#
+#
+#         except Exception as e:
+#             print(Fore.RED, str(e),Fore.RESET)
+#             continue
+#
+#         '''save to buffer'''
+#         training_buffer.depth.save_as_numpy(depth,target_file_index)
+#         training_buffer.label.save_as_numpy(label,target_file_index)
+#
+#         '''update counters'''
+#         if label[3]==1:positive_samples+=1
+#         else: negative_samples+=1
+#         counter+=1
+#         progress_indicator.step(counter)
+#         if counter >= size:
+#             print(f'Sampled buffer contains {positive_samples} positive samples and {negative_samples} negative samples')
+#             break
 
 
 class suction_quality_dataset(data.Dataset):

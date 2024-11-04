@@ -5,30 +5,31 @@ from registration import camera
 
 
 class LabelObj():
-    def __init__(self,label,point_clouds=None,depth=None,RGB=None):
-        '''general info'''
-        self.is_suction=label[23]
-        self.is_gripper=label[4]
-        self.success=label[3]
-        self.failure = label[3]==0
+    def __init__(self,label=None,point_clouds=None,depth=None,RGB=None):
+
 
         '''modalities'''
         self.point_clouds=point_clouds
         self.depth=depth
         self.RGB=RGB
 
-        '''target point'''
-        self.target_point=label[:3]
+        '''label data'''
+        if label is not None:
+            self.is_suction = label[23]
+            self.is_gripper = label[4]
+            self.success = label[3]
+            self.failure = label[3] == 0
+            self.target_point=label[:3]
 
-        '''gripper parameters'''
-        if self.is_gripper:
-            self.T_d=label[5:21].copy().reshape(-1, 4)
-            self.width=label[21] / config.width_scale
-            self.distance=label[22]
+            '''gripper parameters'''
+            if self.is_gripper :
+                self.T_d=label[5:21].copy().reshape(-1, 4)
+                self.width=label[21] / config.width_scale
+                self.distance=label[22]
 
-        '''suction parameters'''
-        if self.is_suction:
-            self.normal = label[24:27]
+            '''suction parameters'''
+            if self.is_suction:
+                self.normal = label[24:27]
 
 
     def get_depth(self,point_clouds=None):

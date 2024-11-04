@@ -15,11 +15,10 @@ gripper_scope_optimizer_path=r'gripper_scope_optimizer'
 print=custom_print
 weight_decay = 0.000001
 mes_loss=nn.MSELoss()
-learning_rate=1*1e-5
-batch_size=64
+learning_rate=5*1e-4
+batch_size=4
 workers=2
 epochs=10000
-
 
 sigmoid = nn.Sigmoid()
 bce_loss=nn.BCELoss(reduction='none')
@@ -60,9 +59,9 @@ def train():
             # negative_loss = binary_smooth_l1(predictions[~positive_mask], label[~positive_mask])
             # loss=torch.cat([positive_loss,negative_loss])
 
-            loss = bce_loss(sigmoid(predictions), label)
+            loss = binary_smooth_l1(predictions, label)
 
-            statistics.labels_with_zero_loss+=(loss<=0.1).sum()
+            statistics.labels_with_zero_loss+=(loss<=0.0).sum()
             loss=loss.mean()
 
             loss.backward()

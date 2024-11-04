@@ -32,10 +32,12 @@ def view_colored_point_cloud(RGB,Depth):
     heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255
     colored_pc,mask = depth_to_point_clouds(Depth.squeeze(), camera,rgb=heap_rgb)
     colored_pc[:,0:3] = transform_to_camera_frame(colored_pc[:,0:3], reverse=True)
+
     view_npy_open3d(colored_pc[:,0:3] , color=colored_pc[:,3:])
 
 if __name__ == "__main__":
     rgb = cv2.imread('Frame_0.ppm')  # [1200,1920,3]
+
 
     assert rgb.shape==(1200,1920,3), f'{rgb.shape}'
     print(rgb.shape)

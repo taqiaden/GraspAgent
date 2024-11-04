@@ -22,8 +22,7 @@ while True:
         if grasp_agent.mode.simulation: get_new_perception()
         for action_, state_, data_ in zip(actions, states, data):
             if empty_bin_check(state_):
-                grasp_agent.initialize_check_points()
+                # grasp_agent.initialize_check_points()
                 break
             '''report result'''
             grasp_agent.process_feedback(action_, state_, data_, img_grasp_pre, img_suction_pre)
-

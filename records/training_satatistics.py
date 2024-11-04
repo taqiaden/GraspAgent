@@ -16,11 +16,11 @@ class TrainingTracker():
 
         self.labels_with_zero_loss = 0
 
-    def update_confession_matrix(self,label,prediction_):
-        self.TP += ((label > 0.5) & (prediction_ > 0.5)).sum()
-        self.FP += ((label < 0.5) & (prediction_ > 0.5)).sum()
-        self.FN += ((label > 0.5) & (prediction_ <= 0.5)).sum()
-        self.TN += ((label < 0.5) & (prediction_ <= 0.5)).sum()
+    def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
+        self.TP += ((label > pivot_value) & (prediction_ > pivot_value)).sum()
+        self.FP += ((label < pivot_value) & (prediction_ > pivot_value)).sum()
+        self.FN += ((label > pivot_value) & (prediction_ <= pivot_value)).sum()
+        self.TN += ((label < pivot_value) & (prediction_ <= pivot_value)).sum()
 
     def print(self):
         print(Fore.LIGHTBLUE_EX)
@@ -29,9 +29,12 @@ class TrainingTracker():
         else:
             print(f'Running loss = {self.running_loss}')
 
-        print(f'TP={self.TP}, FP={self.FP}')
-        print(f'FN={self.FN}, TN={self.TN}')
-        print(f'Number of labels with zero loss = {self.labels_with_zero_loss}')
+        if self.TP+self.FP+self.FN+self.TN>0:
+            print(f'TP={self.TP}, FP={self.FP}')
+            print(f'FN={self.FN}, TN={self.TN}')
+
+        if self.labels_with_zero_loss>0:
+            print(f'Number of labels with zero loss = {self.labels_with_zero_loss}')
 
         if self.samples_size is not None:
             print(f'Total number of samples= {self.samples_size}')

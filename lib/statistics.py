@@ -37,3 +37,11 @@ def moving_mean(old_mean,new_value,window_size=100):
 def moving_momentum(old_momentum,new_value,decay_rate,exponent=2):
     new_momentum=decay_rate*old_momentum+(1-decay_rate)*(new_value**exponent)
     return new_momentum
+
+def random_with_exponent_decay(decay_factor=2):
+    # PDF function is (a/1-exp(-a)) exp(-ax), where a is the decay factor
+    # The integral of the PDF over hte period of [0,1] is one
+    uniform_random=np.random.rand()-1.139544
+    exponent_random=(-1/decay_factor)*np.log(uniform_random*(np.exp(-decay_factor)-1))
+    exponent_random=np.clip(exponent_random,0,1)
+    return exponent_random

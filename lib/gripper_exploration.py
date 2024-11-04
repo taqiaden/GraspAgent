@@ -4,7 +4,7 @@ import torch
 from colorama import Fore
 from Configurations import config
 from lib.bbox import transformation_to_relative_angle_form, convert_angles_to_transformation_form
-from lib.collision_unit import get_distance_step, grasp_collision_detection_new
+from lib.collision_unit import get_distance_step, grasp_collision_detection
 from lib.grasp_utils import get_target_point_2, shift_a_distance
 
 explore_theta_p=1.0
@@ -49,7 +49,7 @@ def get_noncollisonal_width(T_d,width_, point_data,n_attempts=50):
         if not max_width >= width >= min_width:
             return False,original_width
 
-        collision_intensity=grasp_collision_detection_new(T_d,width,point_data, visualize=False)
+        collision_intensity=grasp_collision_detection(T_d,width,point_data, visualize=False)
         if collision_intensity==0:
             return True,width
     else:
@@ -66,7 +66,7 @@ def get_noncollisonal_rotation(T_d,distance,width,point_data, n_attempts=20, div
         relative_pose_5=update_orientation(relative_pose_5,update_range=diversity_factor)
         T_d,width,distance=convert_angles_to_transformation_form(relative_pose_5, target_point)
 
-        collision_intensity =grasp_collision_detection_new(T_d,width, point_data,visualize=False)
+        collision_intensity =grasp_collision_detection(T_d,width, point_data,visualize=False)
         if  collision_intensity==0:
             return True,T_d
     else:
@@ -110,7 +110,7 @@ def local_exploration(T_d, width, distance ,point_data, exploration_attempts=5,e
     for i in range(exploration_attempts):
         if explore:print('- Exploration attempt ', i + 1)
         '''initial collision check'''
-        collision_intensity =grasp_collision_detection_new(T_d,width ,point_data,visualize=False)
+        collision_intensity =grasp_collision_detection(T_d,width ,point_data,visualize=False)
         if i==0:evaluation_metric=collision_intensity
         if collision_intensity>0:
             if not explore: break
@@ -155,13 +155,13 @@ def local_exploration(T_d, width, distance ,point_data, exploration_attempts=5,e
 
     '''view result'''
     if view_if_sucess and evaluation_metric==0:
-        grasp_collision_detection_new(best_T_d,best_width, point_data, visualize=True)
+        grasp_collision_detection(best_T_d,best_width, point_data, visualize=True)
 
     '''Report and final check'''
     if evaluation_metric==0 and prediction_has_collision: print('Grasp pose has been modified after exploration')
     if depth_is_altered:print('Approach distance has been altered')
     if evaluation_metric==0:
-        collision_intensity = grasp_collision_detection_new(best_T_d,best_width, point_data, visualize=False)
+        collision_intensity = grasp_collision_detection(best_T_d,best_width, point_data, visualize=False)
         if evaluation_metric==0 and collision_intensity>0:print(Fore.RED,f'Conflict in the collision detection unit, type B, recorded metric={evaluation_metric}, actual metric={collision_intensity}',Fore.RESET)
         evaluation_metric=collision_intensity
     print(Fore.RESET)

@@ -4,7 +4,7 @@ from torch import nn
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.gripper_collision_dl import GripperCollisionDataset, load_training_buffer
 from lib.IO_utils import custom_print
-from lib.collision_unit import grasp_collision_detection_new
+from lib.collision_unit import grasp_collision_detection
 from lib.dataset_utils import training_data
 from lib.depth_map import depth_to_point_clouds, pixel_to_point
 from lib.loss.D_loss import binary_l1
@@ -58,7 +58,7 @@ def cumulative_collision_loss(depth,collision_scores,generated_grasps,statistics
             '''check collision'''
             # if collision_scores[j,0,pix_A,pix_B]>0.5:
             #     vis_scene(T_d, width, npy=pc)
-            collision_intensity = grasp_collision_detection_new(T_d, width, pc, visualize=False)
+            collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=False)
             # print(f'collision result= {collision_intensity}')
 
             '''target prediction and label score'''
@@ -86,7 +86,7 @@ def train_():
     generator = initialize_model(gripper_sampler_net, gripper_sampler_path).eval()
 
     '''optimizer'''
-    gripper_collision.ini_adam_optimizer(learning_rate=learning_rate)
+    gripper_collision.ini_sgd_optimizer(learning_rate=learning_rate)
 
     for epoch in range(EPOCHS):
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1), max_limit=len(data_loader))
@@ -123,7 +123,7 @@ def train_():
 
 if __name__ == "__main__":
     while True:
-        # training_data.clear()
+        training_data.clear()
         if len(training_data) == 0:
             load_training_buffer(size=100)
         train_()

@@ -31,10 +31,9 @@ l1_loss=nn.L1Loss()
 print=custom_print
 weight_decay = 0.000001
 max_lr=0.01
-min_lr=1*1e-6
+min_lr=5*1e-4
 
 activate_full_power_at_midnight=False
-
 
 def ddp_setup(rank,world_size):
     os.environ["MASTER_ADDR"]="localhost"
@@ -229,4 +228,4 @@ def train_suction_quality(n_samples=None,BATCH_SIZE=4,epochs=1,maximum_gpus=None
 
 if __name__ == "__main__":
     while True:
-        train_suction_quality(1200,BATCH_SIZE=4,epochs=3,maximum_gpus=1,clean_last_buffer=False)
+        train_suction_quality(1200,BATCH_SIZE=1,epochs=3,maximum_gpus=1,clean_last_buffer=False)

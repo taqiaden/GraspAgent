@@ -3,7 +3,6 @@ import numpy as np
 
 use_xyz= True
 
-
 home_dir = '/home/shenxiaofei/'
 solution_name='Never_stop_learning'
 ip_address=r'\\10.5.12.167'
@@ -29,18 +28,10 @@ beta_scope_rad=(beta_scope/180)*np.pi
 distance_scope=0.05
 width_scope= 0.05
 
-
 #dataset and dataloader
 num_points= 50000*1 #16384
-
-
 
 hide_smbclient_log=True
 
 # robot constants
 width_scale=550
-
-
-
-
-

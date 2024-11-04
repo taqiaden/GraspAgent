@@ -13,6 +13,7 @@ from Configurations import config, ENV_boundaries
 import subprocess
 from lib.grasp_utils import get_pose_matrixes
 from lib.math_utils import seeds
+from lib.statistics import random_with_exponent_decay
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
@@ -25,6 +26,7 @@ def catch_random_grasp_point():
     '''pick random point'''
     relative_center_point = np.random.rand(3)
     relative_pose_5 = torch.rand(5)
+    relative_pose_5[0]=random_with_exponent_decay(2) # more randoms closer to zero
 
     '''get the real coordinate'''
     x = relative_center_point[0] * (ENV_boundaries.x_limits[1] - ENV_boundaries.x_limits[0]) + ENV_boundaries.x_limits[0]
@@ -53,10 +55,10 @@ def save_gripper_label(T,feasible,gripper_pool):
 def process_feedback(state_):
     state_ = wait_for_feedback(state_)
     if state_ == 'reachable':
-        print(Fore.GREEN, 'Feasible path plan exists for suction', Fore.RESET)
+        print(Fore.GREEN, 'Feasible path plan exists', Fore.RESET)
         return 1.
     elif state_ == 'unreachable':
-        print(Fore.RED, 'No feasible path plan was found for suction', Fore.RESET)
+        print(Fore.RED, 'No feasible path plan was found', Fore.RESET)
         return 0.
     else:
         print(Fore.RED, 'undefined state', Fore.RESET)
@@ -72,22 +74,24 @@ def main():
             with open(config.home_dir + ROS_communication_file, 'w') as f:
                 f.write('Wait')
             state_='Wait'
-            feasible=0.
 
             '''get matrices'''
             T, grasp_width = catch_random_grasp_point()
-            pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.169, k_pre_grasp=0.23)
+
 
             '''publish gripper pose'''
+            pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.169, k_pre_grasp=0.23)
             save_grasp_data(end_effecter_mat, grasp_width, grasp_data_path)
             save_grasp_data(pre_grasp_mat, grasp_width, pre_grasp_data_path)
 
             '''publish suction pose'''
+            pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
             save_suction_data(end_effecter_mat, suction_data_path)
             save_suction_data(pre_grasp_mat, pre_suction_data_path)
 
             '''check gripper feasibility'''
             subprocess.run(execute_grasp_bash)
+            print(Fore.CYAN, '         Gripper planning', Fore.RESET)
             feasible=process_feedback(state_)
 
             '''save gripper label'''
@@ -99,6 +103,7 @@ def main():
 
             '''check suction feasibility'''
             subprocess.run(execute_suction_bash)
+            print(Fore.CYAN, '         Suction planning', Fore.RESET)
             feasible=process_feedback(state_)
 
             '''save suction label'''

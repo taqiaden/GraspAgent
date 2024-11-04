@@ -102,6 +102,10 @@ class modality_pool():
                 print('Failed to delete %s. Reason: %s' % (file_path, e))
                 return False
         return True
+    def exist(self,idx):
+        full_path = self.dir + idx + self.sufix
+        result=self.os.path.exists(full_path)
+        return result
     def __len__(self):
         return len(self.os.listdir(self.dir))
 
