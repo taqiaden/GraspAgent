@@ -68,10 +68,11 @@ def set_gripper_dictionary():
 def set_suction_dictionary():
     set_arm_dictionary(suction_grasp_tracker,suction=True)
 
-def set_arm_dictionary(name,gripper=False,suction=False):
+def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True):
     indexes = online_data.get_indexes()
 
     data_tracker = DataTracker(name=name, list_size=4)
+    if clean_old_records:data_tracker.dict.clear()
     progress_indicator = pi(f'total samples size = {len(indexes)}, progress:  ', len(indexes))
 
     for i in range(len(indexes)):
@@ -109,8 +110,8 @@ def sample_random_buffer(dict_name,size=None):
     return buffer_list
 
 if __name__ == '__main__':
-    # set_suction_dictionary()
-    # set_gripper_dictionary()
+    set_suction_dictionary()
+    set_gripper_dictionary()
 
     balanced_list=sample_random_buffer(dict_name=suction_grasp_tracker)
 

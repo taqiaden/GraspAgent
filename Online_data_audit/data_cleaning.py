@@ -1,5 +1,4 @@
 import os
-
 import numpy as np
 import torch
 from label_unpack import LabelObj
@@ -99,6 +98,7 @@ def rename_files():
         idx=online_data.get_index(filename)
         os.rename(os.path.join(path,filename),os.path.join(path,idx+online_data.point_clouds.sufix))
 
+rename_files()
 print('Clean redundancy')
 clean_old_data_redundancy()
 print('convert point clouds to depth')

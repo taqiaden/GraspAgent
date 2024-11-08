@@ -3,21 +3,21 @@ import os
 import smbclient
 import torch
 from colorama import Fore
-from Configurations import config
 from Configurations.config import check_points_directory, check_points_extension
 from lib.IO_utils import save_data_to_server
+from registration import camera
 
-
-def reshape_for_layer_norm(tensor,reverse=False,n_points=config.num_points):
+def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
     if reverse==False:
         channels=tensor.shape[1]
-        tensor=tensor.transpose(1,2).reshape(-1,channels)
+        tensor=tensor.permute(0,2,3,1).reshape(-1,channels)
         return tensor
     else:
-        batch_size=int(tensor.shape[0]/n_points)
+        batch_size=int(tensor.shape[0]/(camera.width*camera.height))
         channels=tensor.shape[-1]
-        tensor=tensor.reshape(batch_size,-1,channels).transpose(1,2)
+        tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
         return tensor
+
 def view_parameters_value(model,iterations=None):
     print('Model parameters value:')
     i=0

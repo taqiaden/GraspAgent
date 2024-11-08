@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from lib.custom_activations import GripperGraspRegressor
 from lib.depth_map import depth_to_mesh_grid
+from lib.models_utils import reshape_for_layer_norm
 from models.decoders import att_res_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
@@ -13,17 +14,6 @@ gripper_critic_path=r'gripper_critic_model_state'
 
 use_bn=False
 use_in=True
-
-def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
-    if reverse==False:
-        channels=tensor.shape[1]
-        tensor=tensor.permute(0,2,3,1).reshape(-1,channels)
-        return tensor
-    else:
-        batch_size=int(tensor.shape[0]/(camera.width*camera.height))
-        channels=tensor.shape[-1]
-        tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
-        return tensor
 
 class gripper_sampler_net(nn.Module):
     def __init__(self):
@@ -35,7 +25,7 @@ class gripper_sampler_net(nn.Module):
 
         self.gripper_regressor_layer=GripperGraspRegressor()
 
-    def forward(self, depth):
+    def forward(self, depth,sampled_approach=None):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -51,7 +41,7 @@ class gripper_sampler_net(nn.Module):
         params1=xymap.repeat(b,1,1,1)
         params1=reshape_for_layer_norm(params1, camera=camera, reverse=False)
 
-        approach=self.get_approach(representation_2d,params1)
+        approach=self.get_approach(representation_2d,params1) if sampled_approach is None else sampled_approach
 
         params2=torch.cat([approach,params1],dim=1)
         beta_dist=self.get_beta_dist(representation_2d,params2)

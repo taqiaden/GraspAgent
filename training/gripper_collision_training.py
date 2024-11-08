@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 from check_points.check_point_conventions import ModelWrapper
-from dataloaders.gripper_collision_dl import GripperCollisionDataset, load_training_buffer
+from dataloaders.gripper_collision_dl import GripperCollisionDataset
 from lib.IO_utils import custom_print
 from lib.collision_unit import grasp_collision_detection
 from lib.dataset_utils import training_data

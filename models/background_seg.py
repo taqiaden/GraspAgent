@@ -1,5 +1,6 @@
 from torch import nn
 
+from lib.models_utils import reshape_for_layer_norm
 from models.decoders import res_block_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
@@ -9,16 +10,7 @@ background_seg_model_state_path=r'background_seg_model_state'
 use_bn=False
 use_in=True
 
-def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
-    if reverse==False:
-        channels=tensor.shape[1]
-        tensor=tensor.permute(0,2,3,1).reshape(-1,channels)
-        return tensor
-    else:
-        batch_size=int(tensor.shape[0]/(camera.width*camera.height))
-        channels=tensor.shape[-1]
-        tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
-        return tensor
+
 
 class BackgroundSegNet(nn.Module):
     def __init__(self):

@@ -80,9 +80,7 @@ def get_scene_RGB():
 
     '''save'''
     np.save(sensory_RGB_path, scene_RGB)
-
     return scene_RGB
-
 
 def get_scene_depth():
     '''load transform, and convert'''
@@ -93,9 +91,7 @@ def get_scene_depth():
 
     '''save'''
     np.save(sensory_depth_path, depth)
-
     return depth
-
 
 def random_sampling_augmentation(center_point, point_data, number_of_points):
     i=0
@@ -108,4 +104,3 @@ def random_sampling_augmentation(center_point, point_data, number_of_points):
         index = closest_point(point_data_, center_point)
         if index:
             return point_data_, index
-
