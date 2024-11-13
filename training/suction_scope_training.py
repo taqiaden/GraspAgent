@@ -69,7 +69,7 @@ def train():
             loss=binary_smooth_l1(predictions,label)
 
             '''update dictionary'''
-            data_tracker.update_record(file_ids,loss)
+            data_tracker.update_loss_record(file_ids,loss)
 
             statistics.labels_with_zero_loss+=(loss<=0.0).sum()
             loss = loss.mean()

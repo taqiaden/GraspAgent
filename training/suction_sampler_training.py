@@ -1,7 +1,6 @@
 import torch
 from colorama import Fore
 from torch import nn
-
 from Online_data_audit.data_tracker import sample_random_buffer, suction_grasp_tracker
 from dataloaders.suction_sampler_dl import suction_sampler_dataset
 from lib.IO_utils import custom_print
@@ -92,7 +91,6 @@ def train_(file_ids):
 def train_suction_sampler(n_samples=None):
     while True:
         file_ids = sample_random_buffer(size=n_samples, dict_name=suction_grasp_tracker)
-
         new_model = train_(file_ids)
         print(Fore.GREEN + 'Training round finished' + Fore.RESET)
         export_model_state(new_model, suction_sampler_model_state_path)

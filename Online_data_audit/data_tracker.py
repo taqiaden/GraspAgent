@@ -36,7 +36,7 @@ class DataTracker():
         new_record[list_index]=ground_truth
         self.dict[file_id] = new_record
 
-    def update_loss_record(self,file_ids,losses,start_index):
+    def update_loss_record(self,file_ids,losses,start_index=0):
         for j in range(len(file_ids)):
             '''old record'''
             old_record=self.get_value(file_ids[j])

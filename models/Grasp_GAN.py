@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-
 from lib.custom_activations import GripperGraspRegressor
 from lib.depth_map import depth_to_mesh_grid
 from lib.models_utils import reshape_for_layer_norm

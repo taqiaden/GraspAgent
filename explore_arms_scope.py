@@ -13,7 +13,9 @@ from Configurations import config, ENV_boundaries
 import subprocess
 from lib.grasp_utils import get_pose_matrixes
 from lib.math_utils import seeds
+from lib.models_utils import initialize_model_state
 from lib.statistics import random_with_exponent_decay
+from models.scope_net import scope_net_vanilla, gripper_scope_model_state_path, suction_scope_model_state_path
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
@@ -21,6 +23,9 @@ gripper_scope_data_path='./dataset/scope_data/gripper/'
 suction_scope_data_path='./dataset/scope_data/suction/'
 scope_data_dir='./dataset/scope_data/'
 configure_smbclient()
+
+maximum_scope_samples=10000
+pivot_point=0.5
 
 def catch_random_grasp_point():
     '''pick random point'''
@@ -41,6 +46,8 @@ def catch_random_grasp_point():
 
 def save_scope_label(T,feasible,pool_object,pool_name):
     index = get_int(pool_name, config_file=counters_file_path) + 1
+    if index>maximum_scope_samples:index=1
+
     transformation = T.reshape(-1).tolist()
     label = np.array([feasible] + transformation)
     pool_object.save_as_numpy(label, str(index).zfill(7))
@@ -64,52 +71,94 @@ def process_feedback(state_):
         print(Fore.RED, 'undefined state', Fore.RESET)
         return None
 
+def sample_pose(model):
+    while True:
+        '''get matrices'''
+        T, grasp_width = catch_random_grasp_point()
+
+        '''check sample score on scope net'''
+        transition = T[0:3, 3].reshape(-1)
+        approach = T[0:3, 0]
+        pose = np.concatenate([transition, approach])
+        pose=torch.from_numpy(pose).to('cuda')[None,:].float()
+        score=model(pose)
+        selection_p=1-abs(pivot_point-score.item())
+        if np.random.rand()<selection_p:
+            break
+    return T,grasp_width
+
+def generate_gripper_sample(gripper_pool,model):
+    with open(config.home_dir + ROS_communication_file, 'w') as f:
+        f.write('Wait')
+    state_ = 'Wait'
+
+    '''sample'''
+    T,grasp_width=sample_pose(model)
+
+
+    '''publish gripper pose'''
+    pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.169, k_pre_grasp=0.23)
+    save_grasp_data(end_effecter_mat, grasp_width, grasp_data_path)
+    save_grasp_data(pre_grasp_mat, grasp_width, pre_grasp_data_path)
+
+    '''check gripper feasibility'''
+    subprocess.run(execute_grasp_bash)
+    print(Fore.CYAN, '         Gripper planning', Fore.RESET)
+    feasible = process_feedback(state_)
+
+    '''save gripper label'''
+    save_gripper_label(T, feasible, gripper_pool)
+
+def generate_suction_sample(suction_pool,model):
+    with open(config.home_dir + ROS_communication_file, 'w') as f:
+        f.write('Wait')
+    state_ = 'Wait'
+
+    '''sample'''
+    T,grasp_width=sample_pose(model)
+
+    '''publish suction pose'''
+    pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
+    save_suction_data(end_effecter_mat, suction_data_path)
+    save_suction_data(pre_grasp_mat, pre_suction_data_path)
+
+    '''check suction feasibility'''
+    subprocess.run(execute_suction_bash)
+    print(Fore.CYAN, '         Suction planning', Fore.RESET)
+    feasible = process_feedback(state_)
+
+    '''save suction label'''
+    save_suction_label(T, feasible, suction_pool)
+
 def main():
+    gripper_scope_model = initialize_model_state(scope_net_vanilla(in_size=6), gripper_scope_model_state_path)
+    gripper_scope_model.train(False)
+    suction_scope_model = initialize_model_state(scope_net_vanilla(in_size=6), suction_scope_model_state_path)
+    suction_scope_model.train(False)
+
     gripper_pool=modality_pool('gripper_label',parent_dir=scope_data_dir,is_local=True)
     suction_pool=modality_pool('suction_label',parent_dir=scope_data_dir,is_local=True)
 
     with torch.no_grad():
 
-        for i in range(1000):
-            with open(config.home_dir + ROS_communication_file, 'w') as f:
-                f.write('Wait')
-            state_='Wait'
+        for i in range(10000):
+            generate_gripper_sample(gripper_pool,gripper_scope_model)
+            generate_suction_sample(suction_pool,suction_scope_model)
 
-            '''get matrices'''
-            T, grasp_width = catch_random_grasp_point()
+            if i%100: # regularly update checkpoints
+                try:
+                    gripper_scope_model = initialize_model_state(scope_net_vanilla(in_size=6),
+                                                                 gripper_scope_model_state_path)
+                    gripper_scope_model.train(False)
+                    suction_scope_model = initialize_model_state(scope_net_vanilla(in_size=6),
+                                                                 suction_scope_model_state_path)
+                    suction_scope_model.train(False)
+                except:
+                    pass
 
-
-            '''publish gripper pose'''
-            pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.169, k_pre_grasp=0.23)
-            save_grasp_data(end_effecter_mat, grasp_width, grasp_data_path)
-            save_grasp_data(pre_grasp_mat, grasp_width, pre_grasp_data_path)
-
-            '''publish suction pose'''
-            pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.184, k_pre_grasp=0.25)
-            save_suction_data(end_effecter_mat, suction_data_path)
-            save_suction_data(pre_grasp_mat, pre_suction_data_path)
-
-            '''check gripper feasibility'''
-            subprocess.run(execute_grasp_bash)
-            print(Fore.CYAN, '         Gripper planning', Fore.RESET)
-            feasible=process_feedback(state_)
-
-            '''save gripper label'''
-            save_gripper_label(T,feasible,gripper_pool)
-
-            with open(config.home_dir + ROS_communication_file, 'w') as f:
-                f.write('Wait')
-            state_ = 'Wait'
-
-            '''check suction feasibility'''
-            subprocess.run(execute_suction_bash)
-            print(Fore.CYAN, '         Suction planning', Fore.RESET)
-            feasible=process_feedback(state_)
-
-            '''save suction label'''
-            save_suction_label(T,feasible,suction_pool)
 
 if __name__ == "__main__":
+
     time_seed = math.floor(datetime.now().timestamp())
     seeds(time_seed)
     main()

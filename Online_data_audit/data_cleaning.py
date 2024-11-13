@@ -101,5 +101,5 @@ def rename_files():
 rename_files()
 print('Clean redundancy')
 clean_old_data_redundancy()
-print('convert point clouds to depth')
+print('Convert point clouds to depth')
 convert_all_point_clouds_to_depth()
