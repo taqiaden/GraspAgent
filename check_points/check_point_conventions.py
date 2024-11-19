@@ -3,12 +3,12 @@ from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import export_optm, load_opt
 
 class ModelWrapper():
-    def __init__(self,model=None,optimizer=None,model_name='',optimizer_name=''):
+    def __init__(self,model=None,optimizer=None,module_key=''):
         self.model=model
         self.optimizer=optimizer
 
-        self.model_name=model_name
-        self.optimizer_name=optimizer_name
+        self.model_name=module_key+'model'
+        self.optimizer_name=module_key+'optimizer'
 
         self.weight_decay = 0.000001
         self.learning_rate=1*1e-5

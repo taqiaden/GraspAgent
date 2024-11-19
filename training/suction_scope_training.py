@@ -9,6 +9,9 @@ from torch import nn
 from lib.IO_utils import   custom_print
 from lib.models_utils import initialize_model_state, export_model_state
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.tensorboard import SummaryWriter
+
+writer=SummaryWriter('runs/scope_training/suction')
 
 from records.training_satatistics import TrainingTracker
 
@@ -45,12 +48,16 @@ def train():
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1), max_limit=len(data_loader))
         statistics=TrainingTracker(name='',iterations_per_epoch=len(data_loader),samples_size=len(dataset))
 
+
         for i, batch in enumerate(data_loader, 0):
             input,label,file_ids=batch
             input=input.to('cuda').float()
             label=label.to('cuda').float()
-            # print(input[0])
 
+            # writer.add_graph(model, input)
+
+            # print(input[0])
+            # exit()
             model.zero_grad()
 
             predictions=model(input)
@@ -73,6 +80,8 @@ def train():
 
             statistics.labels_with_zero_loss+=(loss<=0.0).sum()
             loss = loss.mean()
+
+            # writer.add_scalar('training loss',loss.item(),i+1)
 
             loss.backward()
             optimizer.step()

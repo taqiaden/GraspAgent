@@ -6,10 +6,11 @@ from torch import nn
 from torch.utils import data
 from Configurations.config import theta_cos_scope
 from Configurations.dynamic_config import save_key, get_value, add_to_value, get_float
-from dataloaders.Grasp_GAN_dl import Grasp_GAN_dataset, load_training_buffer
+from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
+from dataloaders.Grasp_GAN_dl import Grasp_GAN_dataset
 from lib.IO_utils import   custom_print
 from lib.collision_unit import grasp_collision_detection
-from lib.dataset_utils import  training_data, online_data
+from lib.dataset_utils import online_data
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
 from lib.models_utils import export_model_state, initialize_model
 from lib.optimizer import export_optm, load_opt, exponential_decay_lr_
@@ -28,8 +29,9 @@ lock = FileLock("file.lock")
 gripper_critic_optimizer_path = r'gripper_critic_optimizer.pth.tar'
 gripper_sampler_optimizer_path = r'gripper_sampler_optimizer.pth.tar'
 
-training_data=training_data()
-online_data=online_data()
+training_buffer = online_data()
+
+training_buffer.main_modality=training_buffer.depth
 
 print=custom_print
 max_lr=0.01
@@ -114,7 +116,7 @@ def train_critic(Critic,Generator,C_optimizer,generated_grasps,batch_size,pixel_
     critic_score = Critic(depth_cat, generated_grasps_cat)
 
     '''accumulate loss'''
-    curriculum_loss = 0.
+    # curriculum_loss = 0.
     collision_loss = 0.
     firmness_loss = 0.
     for j in range(batch_size):
@@ -128,15 +130,15 @@ def train_critic(Critic,Generator,C_optimizer,generated_grasps,batch_size,pixel_
         out_of_scope = out_of_scope_list[j]
         bad_state_grasp = collision_state_ or out_of_scope
         firmness_state = firmness_state_list[j]
-        curriculum_loss += (torch.clamp(label_ - prediction_ - m1, 0))**loss_power
+        # curriculum_loss += (torch.clamp(label_ - prediction_ - m1, 0))**loss_power
         collision_loss += (torch.clamp(prediction_ - label_ + m2, 0) * bad_state_grasp)**loss_power
         generated_dist = generated_grasps[j, -2, pix_A, pix_B]
         activate_firmness_loss=1 if generated_dist<0.2 else 0.0
         firmness_loss += ((torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))**loss_power)*activate_firmness_loss
 
-        print(f'cur_l={curriculum_loss}, col_l={collision_loss}, fir_l={firmness_loss}')
+        print(f'col_l={collision_loss}, fir_l={firmness_loss}')
 
-    C_loss = ((curriculum_loss + collision_loss + firmness_loss) / batch_size)
+    C_loss = (( collision_loss + firmness_loss) / batch_size)
 
     '''optimizer step'''
     C_loss.backward()
@@ -207,13 +209,14 @@ def prepare_models():
 
 
 class TrainerDDP:
-    def __init__(self,gpu_id: int,Critic: nn.Module,Generator: nn.Module,training_congiurations):
+    def __init__(self,gpu_id: int,Critic: nn.Module,Generator: nn.Module,training_congiurations,file_ids):
         '''set devices and model wrappers'''
         self.world_size=training_congiurations.world_size
         self.batch_size=training_congiurations.batch_size
         self.epochs=training_congiurations.epochs
         self.workers=training_congiurations.workers
         self.learning_rate=training_congiurations.learning_rate
+        self.file_ids=file_ids
         torch.cuda.set_device(gpu_id)
         torch.cuda.empty_cache()
 
@@ -232,7 +235,7 @@ class TrainerDDP:
         self.gpu_id=gpu_id
 
         '''dataloader'''
-        dataset = Grasp_GAN_dataset(data_pool=training_data)
+        dataset = Grasp_GAN_dataset(data_pool=training_buffer,file_ids=self.file_ids)
         self.data_laoder=self._prepare_dataloader(dataset)
 
         '''optimizers'''
@@ -256,13 +259,13 @@ class TrainerDDP:
 
     def _prepare_optimizers(self):
         '''optimizers'''
-        # C_optimizer = torch.optim.Adam(self.Critic.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
-        #                                weight_decay=weight_decay)
-        C_optimizer = torch.optim.SGD(self.Critic.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
+        C_optimizer = torch.optim.Adam(self.Critic.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+                                       weight_decay=weight_decay)
+        # C_optimizer = torch.optim.SGD(self.Critic.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
 
-        # G_optimizer = torch.optim.Adam(self.Generator.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
-        #                                weight_decay=weight_decay)
-        G_optimizer = torch.optim.SGD(self.Generator.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
+        G_optimizer = torch.optim.Adam(self.Generator.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+                                       weight_decay=weight_decay)
+        # G_optimizer = torch.optim.SGD(self.Generator.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
         with lock:
             C_optimizer = load_opt(C_optimizer, gripper_critic_optimizer_path)
             G_optimizer = load_opt(G_optimizer, gripper_sampler_optimizer_path)
@@ -340,7 +343,7 @@ class TrainerDDP:
             self.export_check_points()
 
 def train_Grasp_GAN(n_samples=None,BATCH_SIZE=2,epochs=1,maximum_gpus=None):
-    training_data.clear()
+    # training_data.clear()
     performance_indicator = float(get_value("performance_indicator", section='Grasp_GAN'))
     '''zero records'''
     save_key("C_running_loss", 0., section='Grasp_GAN')
@@ -368,15 +371,14 @@ def train_Grasp_GAN(n_samples=None,BATCH_SIZE=2,epochs=1,maximum_gpus=None):
     t_config=train_config(BATCH_SIZE,epochs,0,world_size,adaptive_lr)
 
     '''prepare buffer'''
-    if len(training_data) == 0:
-        load_training_buffer(size=n_samples)
+    file_ids = sample_positive_buffer(size=n_samples, dict_name=gripper_grasp_tracker)
 
-    print(Fore.CYAN, f'Buffer size = {len(training_data)}')
-    buffer_size=len(training_data)
+    print(Fore.CYAN, f'Buffer size = {len(file_ids)}')
+    buffer_size=len(file_ids)
     print(Fore.YELLOW,f'Buffer size = {buffer_size} ', Fore.RESET)
 
     '''Begin multi processing'''
-    mp.spawn(main_ddp,args=(t_config,Critic,Generator),nprocs=world_size)
+    mp.spawn(main_ddp,args=(t_config,Critic,Generator,file_ids),nprocs=world_size)
 
     '''Final report'''
     print(Fore.BLUE)
@@ -397,15 +399,15 @@ def train_Grasp_GAN(n_samples=None,BATCH_SIZE=2,epochs=1,maximum_gpus=None):
     save_key("performance_indicator", performance_indicator, section='Grasp_GAN')
 
     '''clear buffer'''
-    training_data.clear()
+    # training_data.clear()
 
 
-def main_ddp(rank: int, t_config,Critic,Generator):
+def main_ddp(rank: int, t_config,Critic,Generator,file_ids):
     '''setup parallel training'''
     ddp_setup(rank,t_config.world_size)
 
     '''training'''
-    trainer=TrainerDDP(gpu_id=rank,Critic=Critic,Generator=Generator,training_congiurations=t_config)
+    trainer=TrainerDDP(gpu_id=rank,Critic=Critic,Generator=Generator,training_congiurations=t_config,file_ids=file_ids)
     trainer.train()
 
     '''destroy process'''

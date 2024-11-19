@@ -1,17 +1,5 @@
 import numpy as np
 from torch.utils import data
-from lib.dataset_utils import  online_data, data_pool
-
-
-training_buffer_dir='dataset/BS_training_buffer/'
-
-class BSBuffer(data_pool):
-    def __init__(self):
-        super(BSBuffer,self).__init__(dir=training_buffer_dir,dataset_name='training')
-        self.main_modality=self.depth
-
-online_data=online_data()
-
 
 class BackgroundSegDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):

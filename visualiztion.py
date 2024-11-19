@@ -1,16 +1,16 @@
 import math
 import torch
 import trimesh
-import copy
 import random
 
 from Configurations import config
+from Configurations.ENV_boundaries import bin_center
 from lib.depth_map import depth_to_point_clouds, CameraInfo
-from lib.mesh_utils import construct_gripper_mesh, construct_gripper_mesh_2
+from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
-from masks import get_spatial_mask
+from masks import  static_spatial_mask
 from pose_object import approach_vec_to_theta_phi, output_processing, pose_7_to_transformation
 
 parallel_jaw_model= 'new_gripper.ply'
@@ -97,6 +97,42 @@ def view_npy_trimesh(npy_list,color_list=[],pick_random_colors=False):
         scene_ = trimesh.Scene(pc_)
         scene_.show()
 
+def o3d_line(start, end, colors_=None):
+    points = [[start[0], start[1], start[2]],
+              [end[0], end[1],
+               end[2]]]
+    lines = [[0, 1]]
+
+    points = o3d.utility.Vector3dVector(points)
+    lines = o3d.utility.Vector2iVector(lines)
+
+    if colors_ is None: colors_=[0, 0.5, 0]
+    colors = [colors_ for i in range(len(lines))]
+    line_set = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(points),
+        lines=o3d.utility.Vector2iVector(lines),
+    )
+    line_set.colors = o3d.utility.Vector3dVector(colors)
+
+    return line_set
+
+def view_shift_pose(start,end,pc,pc_colors=None):
+    start=np.copy(start)
+    end=np.copy(end)
+    start2=np.copy(start)
+    start2[2]+=0.1
+    vertical_line=o3d_line(start,start2,colors_=[0,0.5,0])
+    start[2] += 0.001
+    end[2] += 0.001
+    move_direction_line=o3d_line(start,end,colors_=[0,0.5,0])
+    start[2] += 0.1
+    end[2] += 0.1
+    p_direction_line=o3d_line(start,end,colors_=[0,0.5,0])
+
+    pcd = numpy_to_o3d(pc,  color=pc_colors)
+
+    o3d.visualization.draw_geometries([pcd, vertical_line,move_direction_line,p_direction_line])
+
 def visualize_suction_pose(suction_xyz, suction_pose, T, end_effecter_mat,  npy):
     suction_xyz = suction_xyz.squeeze()
     suction_pose = suction_pose.squeeze()
@@ -122,9 +158,9 @@ def visualize_suction_pose(suction_xyz, suction_pose, T, end_effecter_mat,  npy)
         lines=o3d.utility.Vector2iVector(lines),
     )
     line_set.colors = o3d.utility.Vector3dVector(colors)
-    scene_suction = list()
-    scene_suction.append(line_set)
-    scene_suction.append(pcd)
+    # scene_suction = list()
+    # scene_suction.append(line_set)
+    # scene_suction.append(pcd)
 
     axis_pcd.transform(T)
     axis_left_arm.transform(end_effecter_mat)
@@ -132,7 +168,7 @@ def visualize_suction_pose(suction_xyz, suction_pose, T, end_effecter_mat,  npy)
 
 def highlight_background(npy):
     colors=np.zeros_like(npy)
-    background_mask=get_spatial_mask(npy[np.newaxis,...]).squeeze()
+    background_mask=static_spatial_mask(npy)
     colors[background_mask]=[0.,0.,0.24]
     colors[~background_mask] = [0.65, 0.65, 0.65]
     pcd = numpy_to_o3d(pc=npy,color=colors)
@@ -286,7 +322,7 @@ def score_to_color(score, RGB_variant=0):
     for i in range(score.shape[0]):
         if score.shape[0]==1:color_intensity=0
         else:
-            assert max_score-min_score!=0
+            if max_score==min_score: min_score=min_score-0.00001
             color_intensity=math.floor((1-(score[i]-min_score)/(max_score-min_score))*255)
             color_intensity=min(color_intensity,255)
             color_intensity=max(color_intensity,0)

@@ -1,11 +1,7 @@
 import numpy as np
 from torch.utils import data
 from label_unpack import LabelObj
-from lib.dataset_utils import training_data, online_data
 
-
-training_data=training_data()
-online_data=online_data()
 
 class Grasp_GAN_dataset(data.Dataset):
     def __init__(self, data_pool,file_ids):

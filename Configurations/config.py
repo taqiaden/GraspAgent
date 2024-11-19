@@ -35,3 +35,5 @@ hide_smbclient_log=True
 
 # robot constants
 width_scale=550
+
+shift_length=0.1

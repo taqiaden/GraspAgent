@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 # x_min_dis = 0.27  # limit to prevent collision with the tray edge
 x_limits=[0.28,0.582]
@@ -14,3 +15,8 @@ depth_mean=1180.
 depth_std=85.
 
 dist_allowance=0.005
+
+def median_(pair):
+    return pair[0]+(pair[1]-pair[0])/2
+
+bin_center=np.array([median_(x_limits),median_(y_limits),median_(z_limits)])

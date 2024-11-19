@@ -333,6 +333,24 @@ def tanh_to_unity(data):
     data=(data+1.)/2
     return data
 
+def line_distance(points,start,end):
+    if np.all(start==end):
+        return np.linalg.norm(points-start,axis=1)
+
+    vec=end-start
+    cross=np.cross(vec,start-points)
+    return np.divide(abs(cross),np.linalg.norm(vec))
+
+
+def distance_point_clouds_to_vector(point_clouds,vector):
+    normalized_vector=vector/np.linalg.norm(vector)
+    # return np.dot(point_clouds,normalized_vector)
+    projections=np.dot(point_clouds,normalized_vector)*normalized_vector
+    return projections
+    distance=np.linalg.norm(point_clouds-projections,axis=1)
+
+    return distance
+
 if __name__ == "__main__":
     l=[1,2,3]
     print(max_normalization(l,10))

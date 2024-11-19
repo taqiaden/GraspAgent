@@ -5,9 +5,9 @@ import numpy as np
 import torch
 from colorama import Fore
 from Configurations import config
-from Configurations.run_config import simulation_mode, max_grasp_candidates, max_suction_candidates, \
-    view_grasp_suction_points, suction_limit, gripper_limit, suction_factor, gripper_factor, view_score_gradient, \
-    chances_ref, shuffling_probability, view_action, report_result
+from Configurations.run_config import simulation_mode, view_grasp_suction_points, suction_limit, gripper_limit, \
+    suction_factor, gripper_factor, view_score_gradient, \
+    chances_ref, shuffling_probability, view_action, report_result, scope_threshold, use_gripper, use_suction
 from Online_data_audit.process_feedback import save_grasp_sample
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import wait_for_feedback, ROS_communication_file
@@ -15,7 +15,7 @@ from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import check_image_similarity
 from lib.models_utils import  initialize_model_state
 from lib.report_utils import progress_indicator
-from masks import initialize_masks
+from masks import  static_spatial_mask
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path
 from models.gripper_quality import gripper_quality_net, gripper_quality_model_state_path
 from models.scope_net import scope_net_vanilla, suction_scope_model_state_path, gripper_scope_model_state_path
@@ -36,8 +36,8 @@ class Mode():
 
 class Setting():
     def __init__(self):
-        self.max_gripper_candidates=max_grasp_candidates
-        self.max_suction_candidates=max_suction_candidates
+        self.use_gripper=use_gripper
+        self.use_suction=use_suction
         self.chances=chances_ref
         self.shuffling_probability=shuffling_probability
 
@@ -62,7 +62,6 @@ def prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_
         candidates = sorted(candidates, reverse=True)
 
     return candidates
-
 
 class GraspAgent():
     def __init__(self):
@@ -137,7 +136,7 @@ class GraspAgent():
         pi.end()
 
 
-    def model_inference(self,depth,rgb, mask_inversion=False):
+    def model_inference(self,depth,rgb):
         self.depth=depth
         self.rgb=rgb
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
@@ -156,17 +155,21 @@ class GraspAgent():
 
         '''suction scope'''
         positions = torch.from_numpy(voxel_pc).to('cuda').float()
-        suction_scope = self.suction_scope_model(torch.cat([positions, normals], dim=-1)).squeeze().detach().cpu().numpy()
+        approach=normals.clone()
+        approach[:,2]*=-1
+        suction_scope = self.suction_scope_model(torch.cat([positions, approach], dim=-1)).squeeze().detach().cpu().numpy()
         suction_scope = np.clip(suction_scope, 0, 1)
-        suction_scope[suction_scope>=0.3]=1.
-        suction_scope[suction_scope<0.3]=0.0
+        suction_scope[suction_scope>=scope_threshold]=1.
+        suction_scope[suction_scope<scope_threshold]=0.0
 
         '''gripper scope'''
         gripper_approach=poses[:,0:3]
-        gripper_scope=self.suction_scope_model(torch.cat([positions, gripper_approach], dim=-1)).squeeze().detach().cpu().numpy()
+        distance=poses[:,-2:-1]*config.distance_scope
+        transition=positions+distance*gripper_approach
+        gripper_scope=self.suction_scope_model(torch.cat([transition, gripper_approach], dim=-1)).squeeze().detach().cpu().numpy()
         gripper_scope = np.clip(gripper_scope, 0, 1)
-        gripper_scope[gripper_scope >= 0.3] = 1.
-        gripper_scope[gripper_scope < 0.3] = 0.0
+        gripper_scope[gripper_scope >= scope_threshold] = 1.
+        gripper_scope[gripper_scope < scope_threshold] = 0.0
 
         '''suction quality'''
         suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()
@@ -179,24 +182,25 @@ class GraspAgent():
         gripper_quality_score = gripper_quality_score[mask].detach().cpu().numpy()
 
         '''final scores'''
-        suction_scores=suction_quality_score #* suction_scope
-        gripper_scores = gripper_quality_score #* gripper_scope
+        # suction_scores=suction_quality_score * suction_scope
+        suction_scores= suction_quality_score
+        # gripper_scores = gripper_quality_score #* gripper_scope
+        gripper_scores = gripper_scope
+
         suction_scores = suction_scores.squeeze()
         gripper_scores = gripper_scores.squeeze()
 
         '''set limits'''
-        suction_scores[suction_scores < suction_limit] = -1
-        gripper_scores[gripper_scores < gripper_limit] = -1
-        suction_scores = suction_scores * suction_factor
-        gripper_scores = gripper_scores * gripper_factor
+        suction_scores = suction_scores * suction_factor * int(self.setting.use_suction)
+        gripper_scores = gripper_scores * gripper_factor * int(self.setting.use_gripper)
 
         self.gripper_poses = vectors_to_ratio_metrics(poses)
         self.normals = normals.detach().cpu().numpy()
 
         '''Masks'''
-        gripper_mask, suction_mask = initialize_masks(gripper_scores, suction_scores, voxel_pc,
-                                                                          self.setting.max_gripper_candidates,
-                                                                          self.setting.max_suction_candidates, mask_inversion)
+        spatial_mask=static_spatial_mask(voxel_pc)
+        gripper_mask=spatial_mask & (gripper_scores>gripper_limit)
+        suction_mask=spatial_mask & (suction_scores>suction_limit)
 
         '''Visualization'''
         if self.view.grasp_points: visualize_grasp_and_suction_points(suction_mask, gripper_mask,voxel_pc)
@@ -212,13 +216,11 @@ class GraspAgent():
         # suction_score_pred[suction_score_pred < suction_limit] = -1
         # grasp_score_pred[grasp_score_pred<gripper_limit]=-1
 
-
         '''Release candidates'''
         self.candidates= prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask)
         self.gripper_scores=gripper_scores
         self.suction_scores=suction_scores
         self.voxel_pc=voxel_pc
-
 
         return self.candidates, gripper_scores, suction_scores, voxel_pc
 
@@ -264,7 +266,6 @@ class GraspAgent():
 
                     success, width, distance, T, target_point = \
                         gripper_processing(index, self.voxel_pc, self.gripper_poses, self.view.action)
-
 
                     print(f'prediction time = {time.time() - t}')
 

@@ -12,6 +12,13 @@ def creat_section(section,config_file=config_file_path):
 
     with open(config_file, 'w') as f:
         config.write(f)
+
+def check(section,key,config_file,default='0'):
+    if not config.has_section(section):
+        config.add_section(section)
+    if not config.has_option(section,key):
+        save_key(key,default,section,config_file)
+
 def save_key(key,value,section='main',config_file=config_file_path):
     if not isinstance(value,str): value=str(value)
     config.read(config_file)
@@ -21,10 +28,12 @@ def save_key(key,value,section='main',config_file=config_file_path):
         config.write(f)
 def get_value(key,section='main',config_file=config_file_path):
     config.read(config_file)
+    check(section,key,config_file)
     return config.get(section, key)
 
 def get_float(key,section='main',config_file=config_file_path):
     config.read(config_file)
+    check(section,key,config_file)
     return config.getfloat(section, key)
 
 def get_int(key,section='main',config_file=config_file_path):
@@ -41,8 +50,6 @@ def add_to_value(key,delta,section='main',lock_other_process=True):
         with lock:
             add_to_value_(key,delta,section)
     else: add_to_value_(key,delta,section)
-
-
 
 if __name__ == "__main__":
     save_key("collision_times", 0.0, section='Grasp_GAN')

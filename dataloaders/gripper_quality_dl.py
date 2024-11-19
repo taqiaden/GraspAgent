@@ -1,12 +1,9 @@
 import numpy as np
 from torch.utils import data
 from label_unpack import LabelObj
-from lib.dataset_utils import  online_data, data_pool
-
 
 training_buffer_dir='dataset/GQ_training_buffer/'
 
-online_data=online_data()
 
 class gripper_quality_dataset(data.Dataset):
     def __init__(self, data_pool,file_ids):

@@ -2,23 +2,27 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
+
+from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
-from dataloaders.background_seg_dl import BackgroundSegDataset, BSBuffer, load_training_buffer
+from dataloaders.background_seg_dl import BackgroundSegDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
+from lib.dataset_utils import online_data
 from lib.depth_map import depth_to_point_clouds
 from lib.loss.D_loss import binary_smooth_l1, binary_l1
 from lib.report_utils import progress_indicator
-from models.background_seg import BackgroundSegNet, background_seg_model_state_path
+from models.background_seg import BackgroundSegNet
 from records.training_satatistics import TrainingTracker
 from registration import transform_to_camera_frame, camera
 from visualiztion import view_npy_open3d
 
 instances_per_sample=16
-background_seg_optimizer_path = r'background_seg_optimizer'
 
-training_buffer = BSBuffer()
+module_key='background_seg'
+training_buffer = online_data()
 
+training_buffer.main_modality=training_buffer.depth
 print=custom_print
 BATCH_SIZE=2
 learning_rate=5*1e-5
@@ -56,13 +60,13 @@ def manual_labeling(j,target_indexes,label,prediction,pc):
                 label[label <= threshold] = 0.
                 training_buffer.label.save(label, target_index)
                 print(Fore.CYAN, f'Manual labeling of file with id {target_index}', Fore.RESET)
-def train_():
+def train_(file_ids):
     '''dataloader'''
-    dataset = BackgroundSegDataset(data_pool=training_buffer)
+    dataset = BackgroundSegDataset(data_pool=training_buffer,file_ids=file_ids)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=workers, shuffle=True)
 
     '''model'''
-    background_seg=ModelWrapper(model=BackgroundSegNet,model_name=background_seg_model_state_path,optimizer_name=background_seg_optimizer_path)
+    background_seg=ModelWrapper(model=BackgroundSegNet,module_key=module_key)
     background_seg.ini_model()
 
     '''optimizer'''
@@ -117,9 +121,10 @@ def train_():
 if __name__ == "__main__":
     while True:
         # training_buffer.clear()
-        if len(training_buffer) == 0:
-            load_training_buffer(size=10000)
-        train_()
-        training_buffer.clear()
+        # if len(training_buffer) == 0:
+        #     load_training_buffer(size=10000)
+        file_ids = sample_positive_buffer(size=100, dict_name=gripper_grasp_tracker)
+        train_(file_ids)
+        # training_buffer.clear()
 
 

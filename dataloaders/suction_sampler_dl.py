@@ -1,9 +1,5 @@
 import numpy as np
 from torch.utils import data
-from lib.dataset_utils import  online_data
-
-online_data=online_data()
-
 
 class suction_sampler_dataset(data.Dataset):
     def __init__(self, data_pool,file_ids):

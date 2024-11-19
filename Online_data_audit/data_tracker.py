@@ -84,6 +84,26 @@ def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True):
 
     data_tracker.save()
 
+def sample_positive_buffer(dict_name,size=None):
+    positive_labels=[]
+    data_tracker = DataTracker(name=dict_name, list_size=4)
+
+    for key in data_tracker.dict:
+        record=data_tracker.dict[key]
+        # print(record)
+
+        ground_truth=record[0]
+
+        if int(ground_truth)==1:
+            positive_labels.append(key)
+        else:
+            continue
+
+    random.shuffle(positive_labels)
+    if size is not None and len(positive_labels) >= size: positive_labels=positive_labels[0:size]
+
+    return positive_labels
+
 def sample_random_buffer(dict_name,size=None):
     positive_labels=[]
     negative_labels=[]

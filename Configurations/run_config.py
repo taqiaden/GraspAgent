@@ -2,8 +2,8 @@ shuffling_probability=0.0
 
 chances_ref = 5
 
-max_grasp_candidates =None# if None then no limitation to the number of candidates
-max_suction_candidates = 0
+use_gripper =False
+use_suction = True
 
 view_grasp_suction_points = False
 view_action= True
@@ -21,3 +21,5 @@ suction_factor=1.0
 gripper_factor=1.0
 
 score_threshold=0.0
+
+scope_threshold=1.

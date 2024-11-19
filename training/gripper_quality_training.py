@@ -3,7 +3,6 @@ import datetime
 import torch
 from colorama import Fore
 from torch import nn
-
 from Online_data_audit.data_tracker import sample_random_buffer, gripper_grasp_tracker
 from Verfication_tests.gripper_verf import view_single_gripper_grasp, view_gripper_batch
 from dataloaders.gripper_quality_dl import  gripper_quality_dataset
@@ -181,8 +180,6 @@ class TrainerDDP:
             '''export models and optimizers'''
             self.export_check_points()
 
-
-
 def main_ddp(rank: int, t_config,model,generator,file_ids):
     '''setup parallel training'''
     ddp_setup(rank,t_config.world_size)
@@ -195,8 +192,8 @@ def main_ddp(rank: int, t_config,model,generator,file_ids):
     destroy_process_group()
 
 def train_gripper_quality(n_samples=None,BATCH_SIZE = 1,epochs=1,maximum_gpus=None,learning_rate=5*1e-3,clean_last_buffer=True):
-    if clean_last_buffer:
-        training_buffer.clear()
+    # if clean_last_buffer:
+    #     training_buffer.clear()
 
     '''load check points'''
     model = prepare_models()
@@ -223,7 +220,7 @@ def train_gripper_quality(n_samples=None,BATCH_SIZE = 1,epochs=1,maximum_gpus=No
     mp.spawn(main_ddp, args=(t_config, model,generator,file_ids), nprocs=world_size)
 
     '''clear buffer'''
-    training_buffer.clear()
+    # training_buffer.clear()
 
 if __name__ == "__main__":
     while True:

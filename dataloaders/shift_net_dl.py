@@ -1,7 +1,7 @@
 import numpy as np
 from torch.utils import data
 
-class GripperCollisionDataset(data.Dataset):
+class ShiftNetDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):
         super().__init__()
         self.data_pool = data_pool
