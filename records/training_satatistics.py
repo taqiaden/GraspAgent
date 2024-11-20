@@ -1,6 +1,6 @@
 from colorama import Fore
-
 from Configurations.dynamic_config import save_key, add_to_value, get_value, get_float
+from lib.loss.D_loss import binary_l1
 
 class ConfessionMatrix():
     def __init__(self,TP=0,FP=0,FN=0,TN=0):
@@ -49,6 +49,7 @@ class MovingMetrics():
         '''load latest'''
         self.upload()
 
+
     def update(self,label,prediction_,pivot_value=0.5):
         confession_matrix = ConfessionMatrix()
         confession_matrix.update_confession_matrix(label, prediction_, pivot_value)
@@ -88,6 +89,14 @@ class TrainingTracker():
 
         self.labels_with_zero_loss = 0
 
+        '''track_discrimination_loss'''
+        self.positive_loss=0.0
+        self.negative_loss=0.0
+
+    def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
+        if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent
+        else:self.negative_loss+=binary_l1(prediction, label).item()**exponent
+
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
         self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
 
@@ -107,5 +116,9 @@ class TrainingTracker():
 
         if self.samples_size is not None:
             print(f'Total number of samples= {self.samples_size}')
+
+        if self.positive_loss+self.negative_loss>0.0:
+            print(f'Running positive loss = {self.positive_loss}')
+            print(f'Running negative loss = {self.negative_loss}')
 
         print(Fore.RESET)

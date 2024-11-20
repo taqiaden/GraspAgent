@@ -10,18 +10,17 @@ suction_quality_model_state_path=r'suction_quality_model_state'
 use_bn=False
 use_in=True
 
-
 class suction_quality_net(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
         self.pose_transform = nn.Linear(3, 16).to('cuda')
 
-        self.res_block= res_block_mlp_LN(in_c=64+16,medium_c=32,out_c=16,activation=nn.Relu(True)).to('cuda')
+        self.res_block= res_block_mlp_LN(in_c=64+16,medium_c=32,out_c=16,activation=nn.ReLU(True)).to('cuda')
 
         self.decoder= nn.Sequential(
             nn.LayerNorm(16),
-            nn.Relu(True),
+            nn.ReLU(True),
             nn.Linear(16, 1),
         ).to('cuda')
 
@@ -47,5 +46,4 @@ class suction_quality_net(nn.Module):
 
         '''unflatten'''
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
-
         return output

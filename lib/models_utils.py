@@ -77,6 +77,21 @@ def export_model_state(model,path):
     else:
         save_data_to_server(checkpoint_dict,full_path)
 
+def delete_check_point(path):
+    full_path = check_points_directory + path + check_points_extension
+    # print('save check point to {}'.format(path))
+    if os.path.isdir(check_points_directory):
+        os.remove(full_path)
+    else:
+        smbclient.remove(full_path)
+
+def model_exist_check(path):
+    full_path = check_points_directory + path + check_points_extension
+    if os.path.exists(full_path):
+        return True
+    else:
+        return smbclient.path.exists(full_path)
+
 def load_dictionary(file_name):
     full_path=check_points_directory+file_name
     if os.path.exists(full_path):

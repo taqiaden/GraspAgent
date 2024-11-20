@@ -10,6 +10,11 @@ dictionary_directory=r'Online_data_audit/'
 gripper_grasp_tracker=r'gripper_grasp_dict'
 suction_grasp_tracker=r'suction_grasp_dict'
 
+# [0] 1 for success
+# [1] 1 for test data
+gripper_container_size=10
+suction_container_size=10
+
 online_data = online_data()
 
 
@@ -34,6 +39,12 @@ class DataTracker():
         old_record = self.get_value(file_id)
         new_record = old_record
         new_record[list_index]=ground_truth
+        self.dict[file_id] = new_record
+
+    def set_test_sample(self,file_id,list_index,data=1):
+        old_record = self.get_value(file_id)
+        new_record = old_record
+        new_record[list_index] = data
         self.dict[file_id] = new_record
 
     def update_loss_record(self,file_ids,losses,start_index=0):
@@ -63,15 +74,15 @@ class DataTracker():
         return len(self.dict)
 
 def set_gripper_dictionary():
-    set_arm_dictionary(gripper_grasp_tracker,gripper=True)
+    set_arm_dictionary(gripper_grasp_tracker,gripper=True,list_size=gripper_container_size)
 
 def set_suction_dictionary():
-    set_arm_dictionary(suction_grasp_tracker,suction=True)
+    set_arm_dictionary(suction_grasp_tracker,suction=True,list_size=suction_container_size)
 
-def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True):
+def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True,list_size=10):
     indexes = online_data.get_indexes()
 
-    data_tracker = DataTracker(name=name, list_size=4)
+    data_tracker = DataTracker(name=name, list_size=list_size)
     if clean_old_records:data_tracker.dict.clear()
     progress_indicator = pi(f'total samples size = {len(indexes)}, progress:  ', len(indexes))
 
@@ -102,18 +113,40 @@ def sample_positive_buffer(dict_name,size=None):
     random.shuffle(positive_labels)
     if size is not None and len(positive_labels) >= size: positive_labels=positive_labels[0:size]
 
-    return positive_labels
+    return positive_labels\
 
-def sample_random_buffer(dict_name,size=None):
+def sample_all_positive_and_negatives(dict_name,list_size,shuffle=True):
     positive_labels=[]
     negative_labels=[]
-    data_tracker = DataTracker(name=dict_name, list_size=4)
+    data_tracker = DataTracker(name=dict_name, list_size=list_size)
+    for key in data_tracker.dict:
+        record=data_tracker.dict[key]
+        # print(record)
+
+        ground_truth=record[0]
+        if int(ground_truth)==1:
+            positive_labels.append(key)
+        else:
+            negative_labels.append(key)
+    if shuffle:
+        random.shuffle(positive_labels)
+        random.shuffle(negative_labels)
+
+    return positive_labels,negative_labels
+
+def sample_random_buffer(dict_name,size=None,list_size=10,load_test_samples=1):
+    positive_labels=[]
+    negative_labels=[]
+    data_tracker = DataTracker(name=dict_name, list_size=list_size)
 
     for key in data_tracker.dict:
         record=data_tracker.dict[key]
         # print(record)
 
         ground_truth=record[0]
+        if load_test_samples is not None:
+            if record[1]!=load_test_samples:continue
+
         if int(ground_truth)==1:
             positive_labels.append(key)
         else:
@@ -129,9 +162,35 @@ def sample_random_buffer(dict_name,size=None):
 
     return buffer_list
 
+def split_test_set(tracker_name,list_size=10,test_size_ratio=0.2,index=1):
+    '''get number of test samples'''
+    positive_labels,negative_labels=sample_all_positive_and_negatives(tracker_name, list_size, shuffle=True)
+    minimum_balanced_size=min(len(positive_labels),len(negative_labels))
+    test_data_size=int(test_size_ratio*minimum_balanced_size)
+
+    '''split test and train labels'''
+    test_labels=positive_labels[0:test_data_size]+negative_labels[0:test_data_size]
+    train_labels=positive_labels[test_data_size:]+negative_labels[test_data_size:]
+
+
+    '''mark as test sample'''
+    data_tracker = DataTracker(name=tracker_name, list_size=list_size)
+    for i in range(len(test_labels)):
+        data_tracker.set_test_sample( test_labels[i], index, data=1)
+
+    '''mark as train sample'''
+    for i in range(len(train_labels)):
+        data_tracker.set_test_sample( train_labels[i], index, data=0)
+
+def split_gripper_data():
+    split_test_set(gripper_grasp_tracker, list_size=gripper_container_size, test_size_ratio=0.2, index=1)
+def split_suction_data():
+    split_test_set(suction_grasp_tracker, list_size=suction_container_size, test_size_ratio=0.2, index=1)
 if __name__ == '__main__':
-    set_suction_dictionary()
-    set_gripper_dictionary()
+    # set_suction_dictionary()
+    # set_gripper_dictionary()
+    split_gripper_data()
+    split_suction_data()
 
     balanced_list=sample_random_buffer(dict_name=suction_grasp_tracker)
 

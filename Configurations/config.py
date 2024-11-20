@@ -7,6 +7,8 @@ home_dir = '/home/shenxiaofei/'
 solution_name='Never_stop_learning'
 ip_address=r'\\10.5.12.167'
 
+untested_model_stamp= 'untested'
+
 check_points_extension='.pth.tar'
 
 check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
@@ -37,3 +39,5 @@ hide_smbclient_log=True
 width_scale=550
 
 shift_length=0.1
+shift_elevation_threshold = 0.001
+shift_contact_margin = 0.01

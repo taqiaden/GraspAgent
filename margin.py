@@ -19,9 +19,4 @@ def say_baa():
         i += 1
 
 if __name__ == "__main__":
-    l=np.array([1,0])
-    dict={}
-    dict['a']=l
-    x=l.copy()
-    x[0]=0
-    print(dict['a'])
+    x=[1,2,3,4,5,6]

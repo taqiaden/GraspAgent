@@ -355,6 +355,13 @@ def view_score(data_,mask,score):
 
     scene.show()
 
+def view_score2(data_,score):
+    colors = score_to_color(score, RGB_variant=0)
+    p_data = trimesh.PointCloud(data_, colors=colors)
+    scene = trimesh.Scene()
+    scene.add_geometry(p_data)
+    scene.show()
+
 if __name__ == '__main__':
     x=np.random.random((10000,3))
     s=np.random.random((10000))

@@ -67,6 +67,7 @@ def depth_to_ordered_cloud(depth,camera):
     cloud = np.stack([points_x, points_y, points_z], axis=-1)
     return cloud
 
+
 def get_pixel_index(depth, camera,target_point,radius=0.0025):
     cloud = depth_to_ordered_cloud(depth, camera)
     transformed_target_point = transform_to_camera_frame(target_point[None,:])

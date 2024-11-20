@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+l1_loss=nn.L1Loss()
 
 smooth_l1_loss=nn.SmoothL1Loss(beta=1.0,reduction='none')
 def custom_loss(prediction,label):
@@ -54,3 +55,9 @@ def binary_smooth_l1(prediction, label):
 def binary_l1(prediction, label):
     loss = torch.clamp((1 - prediction) * label - prediction * (label - 1), 0)
     return loss
+
+def decayed_step_loss(predictions, decay_step=0.1):
+    decayed_label = predictions.detach().clone()
+    decayed_label[decayed_label - decay_step > 0.0] -= decay_step
+    decay_loss = l1_loss(predictions, decayed_label)
+    return decay_loss
