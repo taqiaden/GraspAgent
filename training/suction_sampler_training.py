@@ -20,7 +20,7 @@ training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 print=custom_print
 BATCH_SIZE=1
-learning_rate=5*1e-6
+learning_rate=5*1e-4
 EPOCHS = 1
 weight_decay = 0.000001
 workers=2
@@ -38,7 +38,6 @@ def train_(file_ids):
     '''optimizer'''
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-8, weight_decay=weight_decay)
     optimizer = load_opt(optimizer, suction_sampler_optimizer_path)
-
 
     for epoch in range(EPOCHS):
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1),max_limit=len(dloader))

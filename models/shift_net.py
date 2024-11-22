@@ -39,5 +39,4 @@ class ShiftNet(nn.Module):
 
         '''unflatten'''
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
-
         return output

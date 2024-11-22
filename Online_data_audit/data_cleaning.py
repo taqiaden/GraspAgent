@@ -98,8 +98,10 @@ def rename_files():
         idx=online_data.get_index(filename)
         os.rename(os.path.join(path,filename),os.path.join(path,idx+online_data.point_clouds.sufix))
 
-rename_files()
-print('Clean redundancy')
-clean_old_data_redundancy()
-print('Convert point clouds to depth')
-convert_all_point_clouds_to_depth()
+# rename_files()
+# print('Clean redundancy')
+# clean_old_data_redundancy()
+# print('Convert point clouds to depth')
+# convert_all_point_clouds_to_depth()
+
+

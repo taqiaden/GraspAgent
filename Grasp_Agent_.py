@@ -135,7 +135,6 @@ class GraspAgent():
         self.gripper_scope_model.eval()
         pi.end()
 
-
     def model_inference(self,depth,rgb):
         self.depth=depth
         self.rgb=rgb

@@ -3,7 +3,6 @@ import datetime
 import torch
 from colorama import Fore
 from torch import nn
-
 from Configurations.config import  untested_model_stamp
 from Online_data_audit.data_tracker import sample_random_buffer, suction_grasp_tracker
 from dataloaders.suction_quality_dl import  suction_quality_dataset
@@ -77,7 +76,9 @@ def accumulate_loss(batch_size,pixel_index,predictions,score,statistics,moving_r
         lambda1=max(moving_rates.tnr-moving_rates.tpr,0)
 
         # print(f'lambda  = {lambda1}')
-        main_loss=binary_l1(prediction_, label_).mean()*(1+lambda1) if label_>0.5 else binary_l1(prediction_, label_).mean()**2
+        main_loss = binary_l1(prediction_, label_).mean()**2
+        if label_>0.5:main_loss*=(1+lambda1)
+        # main_loss=binary_l1(prediction_, label_).mean()*(1+lambda1) if label_>0.5 else binary_l1(prediction_, label_).mean()**2
 
         # global counter
         # counter+=1
@@ -260,7 +261,6 @@ def testing_loss(model,depth,generated_normals,batch_size,pixel_index,score,stat
         statistics.update_cumulative_discrimination_loss(prediction_,label_)
         statistics.update_confession_matrix(label_,prediction_)
 
-
 def model_test():
     print('--- Begin evaluation ---')
     '''load models'''
@@ -310,31 +310,29 @@ def model_test():
     pi.end()
 
     '''Decision'''
-    accept_upgrade=(regular_model_statistics.positive_loss+regular_model_statistics.negative_loss>
-                    untested_model_statistics.positive_loss+untested_model_statistics.negative_loss)
+    accept_upgrade=((untested_model_statistics.confession_matrix.precision()>regular_model_statistics.confession_matrix.precision())
+                    or untested_model_statistics.confession_matrix.fpr()<regular_model_statistics.confession_matrix.fpr())
 
     print('Regular model test result: ')
     regular_model_statistics.print()
-
+    print('New model test result: ')
+    untested_model_statistics.print()
     '''upgrade'''
     if accept_upgrade:
         export_model_state(untested_model, suction_quality_model_state_path)
         print(Fore.GREEN,'Model upgrade accepted')
-        print('New model test result: ')
-        untested_model_statistics.print()
+
         print(Fore.RESET)
     else:
         print(Fore.RED,'Model update declined;')
-        print('New model test result: ')
-        untested_model_statistics.print()
+
         print(Fore.RESET)
 
     '''delete untested model'''
     delete_check_point(suction_quality_model_state_path+untested_model_stamp)
 
-
 if __name__ == "__main__":
-    for i in range(5):
+    for i in range(100):
         if model_exist_check(suction_quality_model_state_path+untested_model_stamp):
             with torch.no_grad():
                 model_test()

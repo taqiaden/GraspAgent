@@ -197,16 +197,13 @@ def view_metrics(generated_grasps,collision_state_list,out_of_scope_list,firmnes
     print(f'good firmness times = {sum(firmness_state_list)}')
 
 def prepare_models():
-
     print(Fore.CYAN,'Import check points',Fore.RESET)
     '''models'''
     Critic = initialize_model(critic_net, gripper_critic_path)
     Critic.train(True)
     Generator = initialize_model(gripper_sampler_net, gripper_sampler_path)
     Generator.train(True)
-
     return Critic,Generator
-
 
 class TrainerDDP:
     def __init__(self,gpu_id: int,Critic: nn.Module,Generator: nn.Module,training_congiurations,file_ids):

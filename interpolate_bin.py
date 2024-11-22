@@ -3,7 +3,7 @@ from lib.dataset_utils import online_data
 from visualiztion import view_npy_open3d
 alpha=np.pi/4
 beta=np.pi/6.8
-margin=0.01
+margin=0.005
 
 def estimate_object_mask(pc):
     '''X limits - the small edge'''

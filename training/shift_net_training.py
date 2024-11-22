@@ -33,8 +33,9 @@ weight_decay = 0.000001
 workers=2
 
 max_lr=0.01
-min_lr=1*1e-6
+min_lr=5*1e-5
 
+mes_loss=nn.MSELoss()
 
 
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
@@ -61,28 +62,51 @@ def get_shift_parameteres(depth,pix_A, pix_B,j):
     target = np.copy(bin_center)
     target[2] = start_point[2]
     end_point = start_point + ((target - start_point) * shift_length) / np.linalg.norm(target - start_point)
+    shifted_start_point=start_point + ((target - start_point) * shift_contact_margin) / np.linalg.norm(target - start_point)
 
     direction = end_point - start_point
 
-    return direction,start_point,end_point
+    return direction,start_point,end_point,shifted_start_point
 
-
-def get_shift_mask(pc,direction,start_point,end_point,spatial_mask):
+def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
     '''signed distance'''
     d = direction / np.linalg.norm(direction)
-    s = np.dot(start_point - pc, d)
+    s = np.dot(shifted_start_point - pc, d)
     t = np.dot(pc - end_point, d)
 
     '''distance to the line segment'''
     flatten_pc = np.copy(pc)
-    flatten_pc[:, 2] = start_point[2]
-    distances = np.cross(end_point - start_point, start_point - flatten_pc) / np.linalg.norm(
-        end_point - start_point)
+    flatten_pc[:, 2] = shifted_start_point[2]
+    distances = np.cross(end_point - shifted_start_point, shifted_start_point - flatten_pc) / np.linalg.norm(
+        end_point - shifted_start_point)
     distances = np.linalg.norm(distances, axis=1)
 
     '''isolate the bin'''
-    shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > start_point[2] + shift_elevation_threshold) & spatial_mask
+    shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
     return shift_mask
+
+def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j):
+    '''get collided points'''
+    direct_collision_points = pc[shift_mask]
+    if direct_collision_points.shape[0] > 0:
+        '''get score of collided points'''
+        collision_score = shift_scores[j, 0][mask][shift_mask]
+        collision_score = torch.clip(collision_score, 0, 1.0)
+
+        '''distance weighting'''
+        dist_weight = (shift_length - np.linalg.norm(shifted_start_point[np.newaxis] - direct_collision_points,
+                                                     axis=-1)) / shift_length
+        assert np.all(dist_weight < 1),f'{dist_weight}'
+
+        dist_weight = dist_weight ** 2
+        dist_weight=torch.from_numpy(dist_weight).to(collision_score.device)
+
+        '''estimate shift score'''
+        shift_label_score = 0.5+0.5*((dist_weight * collision_score).sum() / dist_weight.sum())
+
+        return shift_label_score.float()
+    else:
+        return torch.tensor(0,device=shift_scores.device).float()
 
 def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
     loss = 0
@@ -94,7 +118,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
         spatial_mask = estimate_object_mask(pc)
 
         '''view scores'''
-        view_scores(pc, shift_scores[j, 0][mask])
+        # view_scores(pc, shift_scores[j, 0][mask])
 
         for k in range(instances_per_sample):
 
@@ -108,29 +132,34 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
 
                 if mask[pix_A, pix_B] == 1: break
 
-            direction,start_point,end_point=get_shift_parameteres(depth, pix_A, pix_B, j)
-            shift_mask=get_shift_mask(pc, direction, start_point, end_point,spatial_mask)
+            direction,start_point,end_point,shifted_start_point=get_shift_parameteres(depth, pix_A, pix_B, j)
+            shift_mask=get_shift_mask(pc, direction, shifted_start_point, end_point,spatial_mask)
+
+            label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j)
 
             '''view shift action'''
             # view_shift(pc,spatial_mask,shift_mask,start_point, end_point)
 
             '''target prediction and label score'''
             prediction_ = shift_scores[j, 0, pix_A, pix_B]
-            label = torch.ones_like(prediction_) if np.any(shift_mask==True)  else torch.zeros_like(prediction_)
+            # label = torch.ones_like(prediction_) if np.any(shift_mask==True)  else torch.zeros_like(prediction_)
 
             '''update confession matrix'''
             statistics.update_confession_matrix(label, prediction_)
 
             '''instance loss'''
             lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)
-            loss_ = binary_l1(prediction_, label)**2
-            if label>0.5: loss_*=(1+lambda1)
+
+            loss_ = mes_loss(prediction_, label)
+            if (label.item()<=0.0) and (prediction_<=0.): loss_*=0
+
+            if label>0.0: loss_*=(1+lambda1)
             decayed_loss=binary_l1(shift_scores[j, 0][mask],torch.zeros_like(shift_scores[j, 0][mask])).mean()
             moving_rates.update(label, prediction_)
             # moving_rates.view()
             if loss_ == 0.0:
                 statistics.labels_with_zero_loss += 1
-            loss += loss_+decayed_loss*0.1
+            loss += loss_+decayed_loss*(1-lambda1)
     return loss
 
 def train_(file_ids,learning_rate):
@@ -155,7 +184,6 @@ def train_(file_ids,learning_rate):
         for i, batch in enumerate(data_loader, 0):
             depth= batch
             depth=depth.cuda().float()
-
 
             '''get predictions'''
             model_wrapper.model.zero_grad()
@@ -182,16 +210,11 @@ def train_(file_ids,learning_rate):
     moving_rates.view()
     return statistics
 
-
 if __name__ == "__main__":
     while True:
-        # training_data.clear()
         file_ids = sample_positive_buffer(size=100, dict_name=gripper_grasp_tracker)
         statistics=train_(file_ids,learning_rate)
 
         '''update learning rate'''
-        performance_indicator=statistics.confession_matrix.TP/statistics.confession_matrix.total_classification()
+        performance_indicator=statistics.confession_matrix.accuracy()
         learning_rate=exponential_decay_lr_(performance_indicator, max_lr, min_lr)
-        # training_data.clear()
-
-

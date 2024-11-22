@@ -31,9 +31,9 @@ def get_value(key,section='main',config_file=config_file_path):
     check(section,key,config_file)
     return config.get(section, key)
 
-def get_float(key,section='main',config_file=config_file_path):
+def get_float(key,section='main',config_file=config_file_path,default='0'):
     config.read(config_file)
-    check(section,key,config_file)
+    check(section,key,config_file,default=default)
     return config.getfloat(section, key)
 
 def get_int(key,section='main',config_file=config_file_path):
