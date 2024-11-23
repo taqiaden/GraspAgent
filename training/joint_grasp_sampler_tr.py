@@ -91,7 +91,7 @@ def train_critic(gan,generated_grasps,batch_size,pixel_index,label_generated_gra
     '''accumulate loss'''
     # curriculum_loss = 0.
     collision_loss = 0.
-    firmness_loss = 0.
+    # firmness_loss = 0.
     for j in range(batch_size):
         pix_A = pixel_index[j, 0]
         pix_B = pixel_index[j, 1]
@@ -107,11 +107,11 @@ def train_critic(gan,generated_grasps,batch_size,pixel_index,label_generated_gra
         collision_loss += (torch.clamp(prediction_ - label_ + 1, 0) * bad_state_grasp)
         generated_dist = generated_grasps[j, -2, pix_A, pix_B]
         activate_firmness_loss=1 if generated_dist<0.2 else 0.0
-        firmness_loss += (torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))*activate_firmness_loss
+        # firmness_loss += (torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))*activate_firmness_loss
 
-        print(f'col_l={collision_loss}, fir_l={firmness_loss}')
+        print(f'col_l={collision_loss}')
 
-    C_loss = (( collision_loss + firmness_loss) / batch_size)
+    C_loss = (collision_loss / batch_size)
 
     print(Fore.GREEN, 'C_loss=', C_loss.item(), Fore.RESET)
 
@@ -171,7 +171,6 @@ def train_generator(gan,depth,label_generated_grasps,batch_size,pixel_index,coll
         G_loss+=suction_loss*balance_weight
         print(Fore.GREEN, f'Gripper sampler loss = {gripper_loss.item()}, Suction sampler loss = {suction_loss.item()}, balance weight = {balance_weight}', Fore.RESET)
     G_loss = (G_loss / batch_size)/2
-
 
     '''optimizer step'''
     G_loss.backward()

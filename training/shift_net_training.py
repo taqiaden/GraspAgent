@@ -85,7 +85,7 @@ def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
     shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
     return shift_mask
 
-def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j):
+def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,lambda1):
     '''get collided points'''
     direct_collision_points = pc[shift_mask]
     if direct_collision_points.shape[0] > 0:
@@ -102,8 +102,9 @@ def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j):
         dist_weight=torch.from_numpy(dist_weight).to(collision_score.device)
 
         '''estimate shift score'''
-        shift_label_score = 0.5+0.5*((dist_weight * collision_score).sum() / dist_weight.sum())
-
+        shift_label_score = (dist_weight * collision_score).sum() / dist_weight.sum()
+        shift_label_score = shift_label_score * (1 - lambda1) + lambda1
+        # print(shift_label_score.item())
         return shift_label_score.float()
     else:
         return torch.tensor(0,device=shift_scores.device).float()
@@ -135,7 +136,8 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             direction,start_point,end_point,shifted_start_point=get_shift_parameteres(depth, pix_A, pix_B, j)
             shift_mask=get_shift_mask(pc, direction, shifted_start_point, end_point,spatial_mask)
 
-            label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j)
+            lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)**0.5
+            label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j,lambda1)
 
             '''view shift action'''
             # view_shift(pc,spatial_mask,shift_mask,start_point, end_point)
@@ -148,7 +150,6 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             statistics.update_confession_matrix(label, prediction_)
 
             '''instance loss'''
-            lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)
 
             loss_ = mes_loss(prediction_, label)
             if (label.item()<=0.0) and (prediction_<=0.): loss_*=0
@@ -159,7 +160,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             # moving_rates.view()
             if loss_ == 0.0:
                 statistics.labels_with_zero_loss += 1
-            loss += loss_+decayed_loss*(1-lambda1)
+            loss += loss_+decayed_loss
     return loss
 
 def train_(file_ids,learning_rate):
