@@ -8,8 +8,8 @@ class ModelWrapper():
         self.model=model
         self.optimizer=optimizer
 
-        self.model_name=module_key+'model'
-        self.optimizer_name=module_key+'optimizer'
+        self.model_name=module_key+'_model'
+        self.optimizer_name=module_key+'_optimizer'
 
         self.weight_decay = 0.000001
         self.learning_rate=1*1e-5

@@ -3,7 +3,7 @@ from torch.utils import data
 from label_unpack import LabelObj
 
 
-class suction_quality_dataset(data.Dataset):
+class JointQualityDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):
         super().__init__()
         self.data_pool = data_pool
@@ -24,5 +24,3 @@ class suction_quality_dataset(data.Dataset):
 
     def __len__(self):
         return len(self.files_indexes)
-
-

@@ -160,7 +160,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             # moving_rates.view()
             if loss_ == 0.0:
                 statistics.labels_with_zero_loss += 1
-            loss += loss_+decayed_loss
+            loss += loss_+decayed_loss*0.1
     return loss
 
 def train_(file_ids,learning_rate):

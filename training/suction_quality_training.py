@@ -188,7 +188,6 @@ class TrainerDDP:
                 '''compute loss'''
                 loss = accumulate_loss(b, pixel_index, predictions, score,statistics,self.moving_rates)
 
-
                 '''Verification'''
                 # view_suction_label(depth, normal, pixel_index, b)
 
