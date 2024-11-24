@@ -19,4 +19,13 @@ def say_baa():
         i += 1
 
 if __name__ == "__main__":
-    x=[1,2,3,4,5,6]
+    x=np.array([1,2,30,4,5,6])
+    y=np.array([1,2,3,4,5,606])
+    z=np.array([10,12,3,4,5,606])
+
+    x[-1]=y[-1]
+    z=x+y
+    z[0]=9
+    print(z)
+    print(x)
+    print(y)

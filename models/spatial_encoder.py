@@ -15,7 +15,6 @@ class SpatialEncoder(nn.Module):
         if out_dimension is not None and out_dimension>2:
             self.spatial_encoding= nn.Linear(2, out_dimension).to('cuda')
 
-
     def forward(self, batch_size ):
         spatial_data=depth_xy_spatial_data( batch_size)
         spatial_data_2d=reshape_for_layer_norm(spatial_data, camera=camera, reverse=False)
@@ -23,4 +22,13 @@ class SpatialEncoder(nn.Module):
             spatial_data_2d=self.spatial_encoding(spatial_data_2d)
         return spatial_data_2d
 
-
+if __name__ == '__main__':
+    x=depth_xy_spatial_data(1)
+    print(x[0,1,0,:])
+    print(x[0,1,:,0])
+    x = reshape_for_layer_norm(x, camera=camera, reverse=False)
+    x = reshape_for_layer_norm(x, camera=camera, reverse=True)
+    print('-------------------------------------')
+    print(x[0,1,0,:])
+    print(x[0,1,:,0])
+    print(x.shape)

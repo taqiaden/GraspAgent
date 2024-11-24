@@ -113,7 +113,7 @@ def sample_positive_buffer(dict_name,size=None):
     random.shuffle(positive_labels)
     if size is not None and len(positive_labels) >= size: positive_labels=positive_labels[0:size]
 
-    return positive_labels\
+    return positive_labels
 
 def sample_all_positive_and_negatives(dict_name,list_size,shuffle=True):
     positive_labels=[]

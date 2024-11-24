@@ -86,7 +86,6 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
             suction_zone_radius=0.012
             density_factor=30000*suction_zone_radius
 
-            print(generated_normals.shape)
             for j in range(b):
                 '''get parameters'''
                 pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
@@ -116,6 +115,7 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
                 angle_radians, angle_degrees= angle_between_vectors_cross(average_region_normal, target_normal)
                 angle_difference=angle_degrees
                 print(f'Angle difference between normals = {angle_difference}')
+
 
                 '''view suction region'''
                 colors = np.zeros_like(pc)

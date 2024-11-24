@@ -20,14 +20,14 @@ from records.training_satatistics import TrainingTracker, MovingMetrics
 from registration import transform_to_camera_frame, camera
 from visualiztion import vis_scene, view_npy_open3d, view_shift_pose, view_score, view_score2
 
-instances_per_sample=1
+instances_per_sample=10
 module_key = r'shift_net'
 training_buffer = online_data()
 
 training_buffer.main_modality=training_buffer.depth
 print=custom_print
 BATCH_SIZE=1
-learning_rate=5*1e-4
+learning_rate=1*1e-5
 EPOCHS = 1
 weight_decay = 0.000001
 workers=2
@@ -36,7 +36,9 @@ max_lr=0.01
 min_lr=5*1e-5
 
 mes_loss=nn.MSELoss()
+l1_loss=nn.L1Loss()
 
+sig=nn.Sigmoid()
 
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
 
@@ -60,11 +62,11 @@ def get_shift_parameteres(depth,pix_A, pix_B,j):
 
     '''get start and end points'''
     target = np.copy(bin_center)
-    target[2] = start_point[2]
-    end_point = start_point + ((target - start_point) * shift_length) / np.linalg.norm(target - start_point)
-    shifted_start_point=start_point + ((target - start_point) * shift_contact_margin) / np.linalg.norm(target - start_point)
+    target[2] = np.copy(start_point[2])
+    direction = target - start_point
 
-    direction = end_point - start_point
+    end_point = start_point + ((direction * shift_length) / np.linalg.norm(direction))
+    shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
 
     return direction,start_point,end_point,shifted_start_point
 
@@ -89,6 +91,7 @@ def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,l
     '''get collided points'''
     direct_collision_points = pc[shift_mask]
     if direct_collision_points.shape[0] > 0:
+        return torch.tensor(1,device=shift_scores.device).float()
         '''get score of collided points'''
         collision_score = shift_scores[j, 0][mask][shift_mask]
         collision_score = torch.clip(collision_score, 0, 1.0)
@@ -102,14 +105,15 @@ def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,l
         dist_weight=torch.from_numpy(dist_weight).to(collision_score.device)
 
         '''estimate shift score'''
-        shift_label_score = (dist_weight * collision_score).sum() / dist_weight.sum()
-        shift_label_score = shift_label_score * (1 - lambda1) + lambda1
+        shift_label_score =0.5+0.5*( (dist_weight * collision_score).sum() / dist_weight.sum())
+        # shift_label_score = shift_label_score * (1 - lambda1) + lambda1
         # print(shift_label_score.item())
         return shift_label_score.float()
     else:
         return torch.tensor(0,device=shift_scores.device).float()
 
 def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
+    # shift_scores=sig(shift_scores)
     loss = 0
     for j in range(BATCH_SIZE):
         '''get point clouds'''
@@ -119,7 +123,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
         spatial_mask = estimate_object_mask(pc)
 
         '''view scores'''
-        # view_scores(pc, shift_scores[j, 0][mask])
+        view_scores(pc, shift_scores[j, 0][mask])
 
         for k in range(instances_per_sample):
 
@@ -127,11 +131,12 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             while True:
                 pix_A = np.random.randint(0, 480)
                 pix_B = np.random.randint(0, 712)
+                max_score=torch.max(shift_scores).item()
+                range_=(max_score-torch.min(shift_scores)).item()
 
-                # selection_probability = abs(0.5 - shift_scores[j, 0, pix_A, pix_B]).item()
-                # selection_probability=min(selection_probability,0.75)
-
-                if mask[pix_A, pix_B] == 1: break
+                selection_probability = 1-(max_score - shift_scores[j, 0, pix_A, pix_B]).item()/range_
+                selection_probability=selection_probability**2
+                if mask[pix_A, pix_B] == 1 and np.random.random()<selection_probability: break
 
             direction,start_point,end_point,shifted_start_point=get_shift_parameteres(depth, pix_A, pix_B, j)
             shift_mask=get_shift_mask(pc, direction, shifted_start_point, end_point,spatial_mask)
@@ -139,31 +144,37 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)**0.5
             label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j,lambda1)
 
-            '''view shift action'''
-            # view_shift(pc,spatial_mask,shift_mask,start_point, end_point)
+
 
             '''target prediction and label score'''
             prediction_ = shift_scores[j, 0, pix_A, pix_B]
             # label = torch.ones_like(prediction_) if np.any(shift_mask==True)  else torch.zeros_like(prediction_)
 
+            '''view shift action'''
+            # if k==0:
+            #     # if (prediction_>0.5 and label<0.) or(prediction_<0.5 and label>0.5):
+            #     print(prediction_.item())
+            #     print(label.item())
+            #     view_shift(pc,spatial_mask,shift_mask,start_point, end_point)
             '''update confession matrix'''
             statistics.update_confession_matrix(label, prediction_)
 
             '''instance loss'''
+            loss_ = l1_loss(prediction_, label)
+            # if label<=0: loss_=loss_+mes_loss(prediction_, label)
 
-            loss_ = mes_loss(prediction_, label)
-            if (label.item()<=0.0) and (prediction_<=0.): loss_*=0
+            # if (label.item()<=0.0) and (prediction_<=0.): loss_*=0
 
-            if label>0.0: loss_*=(1+lambda1)
+            # if label>0.0: loss_*=(1+lambda1)
             decayed_loss=binary_l1(shift_scores[j, 0][mask],torch.zeros_like(shift_scores[j, 0][mask])).mean()
             moving_rates.update(label, prediction_)
             # moving_rates.view()
             if loss_ == 0.0:
                 statistics.labels_with_zero_loss += 1
-            loss += loss_+decayed_loss*0.1
+            loss += loss_+decayed_loss
     return loss
 
-def train_(file_ids,learning_rate):
+def train_(file_ids,adaptive_learning_rate):
     moving_rates = MovingMetrics(module_key,decay_rate=0.001)
 
     '''dataloader'''
@@ -176,7 +187,7 @@ def train_(file_ids,learning_rate):
 
     '''optimizer'''
     print(Fore.CYAN,f'Learning rate = {learning_rate}',Fore.RESET)
-    model_wrapper.ini_sgd_optimizer(learning_rate=learning_rate)
+    model_wrapper.ini_adam_optimizer(learning_rate=learning_rate)
     statistics = TrainingTracker(name='', iterations_per_epoch=len(data_loader), samples_size=len(dataset))
 
     for epoch in range(EPOCHS):
