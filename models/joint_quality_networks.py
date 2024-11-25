@@ -49,7 +49,7 @@ class JointQualityNet(nn.Module):
         suction_quality_classifier=self.suction_quality(features,suction_pose)
 
         '''shift affordance head'''
-        shift_affordance_regressor=self.shift_affordance(features,suction_pose)
+        shift_affordance_regressor=self.shift_affordance(features,self.spatial_encoding)
 
         return griper_collision_classifier,suction_quality_classifier,shift_affordance_regressor
 

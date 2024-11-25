@@ -100,3 +100,49 @@ def unit_sphere_pc_normalization( pc_data,constant_scale=True,constant_shift=Tru
         pc_data_new /= scale
 
     return pc_data_new,scale,pc_center
+
+def circle_to_points(radius = 1,number_of_points = 30,x=0,y=0,z=None):
+    interval_radian = (2 * np.pi) / number_of_points
+    if z is None:
+        point_cloud = [np.array([np.cos(interval_radian * i)+x,np.sin(interval_radian * i)+y]) for i in range(number_of_points)]
+    else:
+        point_cloud = [np.array([(np.cos(interval_radian * i)*radius) + x, (np.sin(interval_radian * i)*radius) + y,z]) for i in
+                   range(number_of_points)]
+
+    point_cloud=np.array(point_cloud)
+    return point_cloud
+
+def compute_curvature(points, radius=0.5):
+    pcd = numpy_to_o3d(points)
+
+    # Build a KDTree for efficient neighbor search
+    kdtree = o3d.geometry.KDTreeFlann(pcd)
+
+    curvature = []
+    for point in points:
+        # Find neighbors within the specified radius
+        [k, idx, _] = kdtree.search_radius_vector_3d(point, radius)
+
+        # If not enough neighbors, set curvature to 0
+        if k < 3:
+            curvature.append(0)
+            continue
+
+        # Compute the covariance matrix of the neighborhood
+        M = np.cov(np.asarray(pcd.points)[idx].T)
+
+        # Calculate eigenvalues and eigenvectors
+        eigenvalues, _ = np.linalg.eigh(M)
+
+        # Curvature is approximated by the ratio of the smallest eigenvalue to the sum of eigenvalues
+        curvature.append(eigenvalues[0] / (eigenvalues[0] + eigenvalues[1] + eigenvalues[2]))
+
+    return curvature
+
+def rotate_point_clouds(point_clouds,rotation_matrix):
+    return np.matmul(rotation_matrix,point_clouds.T).T
+
+if __name__ == "__main__":
+    points=circle_to_points(radius=1,number_of_points=2,x=2,y=3,z=10)
+    print(points)
+    print(points.shape)

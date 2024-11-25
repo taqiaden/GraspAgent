@@ -144,8 +144,6 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)**0.5
             label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j,lambda1)
 
-
-
             '''target prediction and label score'''
             prediction_ = shift_scores[j, 0, pix_A, pix_B]
             # label = torch.ones_like(prediction_) if np.any(shift_mask==True)  else torch.zeros_like(prediction_)
@@ -160,7 +158,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             statistics.update_confession_matrix(label, prediction_)
 
             '''instance loss'''
-            loss_ = l1_loss(prediction_, label)
+            loss_ = binary_l1(prediction_, label)
             # if label<=0: loss_=loss_+mes_loss(prediction_, label)
 
             # if (label.item()<=0.0) and (prediction_<=0.): loss_*=0

@@ -20,6 +20,8 @@ import torch.nn.functional as F
 from lib.report_utils import  progress_indicator
 from filelock import FileLock
 
+from visualiztion import view_npy_open3d
+
 lock = FileLock("file.lock")
 
 module_key='grasp_sampler'

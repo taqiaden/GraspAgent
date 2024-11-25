@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 
 from Configurations import config
-
+import open3d as o3d
 
 def seeds(x):
     random.seed(x)
@@ -341,7 +341,6 @@ def line_distance(points,start,end):
     cross=np.cross(vec,start-points)
     return np.divide(abs(cross),np.linalg.norm(vec))
 
-
 def distance_point_clouds_to_vector(point_clouds,vector):
     normalized_vector=vector/np.linalg.norm(vector)
     # return np.dot(point_clouds,normalized_vector)
@@ -350,7 +349,6 @@ def distance_point_clouds_to_vector(point_clouds,vector):
     distance=np.linalg.norm(point_clouds-projections,axis=1)
 
     return distance
-
 
 def angle_between_vectors_cross(u, v):
     """
@@ -380,12 +378,15 @@ def angle_between_vectors_cross(u, v):
 
     return angle_radians, angle_degrees
 
-if __name__ == "__main__":
-    l=[1,2,3]
-    print(max_normalization(l,10))
-    exit()
 
-    for i in range(100):
-        p = (random_point_within_a_sphere(20,only_negative_z=True))
-        print(p)
-        # print(vector_length(p))
+
+if __name__ == "__main__":
+    vec1 = np.array([1, 0, 0])
+    vec2 = np.array([0, 1, 0])
+
+    R = rotation_matrix_from_vectors(vec1,vec2)
+
+
+    pc=np.stack([vec1,vec2])
+    r=np.matmul(R,pc.T).T
+    print(r)

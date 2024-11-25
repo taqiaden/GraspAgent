@@ -25,6 +25,8 @@ class ModelWrapper():
         file_name=self.model_name if file_index is None else str(file_index)+self.model_name
         export_model_state(self.model, file_name)
 
+        print(f'{self.model_name} check point exported')
+
     '''optimizer operations'''
     def ini_adam_optimizer(self,learning_rate=None,file_index=None):
         file_name = self.optimizer_name if file_index is None else str(file_index) + self.optimizer_name
@@ -45,7 +47,7 @@ class ModelWrapper():
         export_optm(self.optimizer, file_name)
 
 class GANWrapper():
-    def __init__(self,module_key,generator,critic):
+    def __init__(self,module_key,generator,critic=None):
         self.module_key=module_key
         self.critic=critic
         self.generator=generator
@@ -54,12 +56,17 @@ class GANWrapper():
         self.learning_rate=1*1e-5
 
     '''model operations'''
-    def ini_models(self,train=True):
+    def ini_generator(self,train=True):
         self.generator = initialize_model(self.generator, self.module_key+'_generator')
         self.generator.train(train)
 
+    def ini_critic(self,train=True):
         self.critic = initialize_model(self.critic, self.module_key+'_critic')
         self.critic.train(train)
+
+    def ini_models(self,train=True):
+        self.ini_generator(train)
+        self.ini_critic(train)
 
     def export_models(self,file_index=None):
         export_model_state(self.generator, self.module_key+'_generator')
