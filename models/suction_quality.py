@@ -16,11 +16,11 @@ class suction_quality_net(nn.Module):
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
         self.pose_transform = nn.Linear(3, 16).to('cuda')
 
-        self.res_block= res_block_mlp_LN(in_c=64+16,medium_c=32,out_c=16,activation=nn.ReLU(True)).to('cuda')
+        self.res_block= res_block_mlp_LN(in_c=64+16,medium_c=32,out_c=16,activation=nn.ReLU()).to('cuda')
 
         self.decoder= nn.Sequential(
             nn.LayerNorm(16),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(16, 1),
         ).to('cuda')
 

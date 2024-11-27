@@ -90,5 +90,4 @@ def suction_seal_loss(target_point,pc,normals,target_index,prediction_,statistic
         label = torch.zeros_like(prediction_)
 
     statistics.update_confession_matrix(label, prediction_)
-
     return bce_loss(prediction_, label)

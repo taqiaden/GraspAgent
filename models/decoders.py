@@ -59,35 +59,35 @@ class att_res_mlp_LN(nn.Module):
         self.key = nn.Sequential(
             nn.Linear(in_c1, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(32, 16),
         ).to('cuda')
 
         self.value = nn.Sequential(
             nn.Linear(in_c1, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(32, 16),
         ).to('cuda')
 
         self.query =  nn.Sequential(
             nn.Linear(in_c2, 12, bias=False),
             nn.LayerNorm([12]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(12, 16),
         ).to('cuda')
 
         self.res=nn.Sequential(
             nn.Linear(in_c1+in_c2, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(32, 16),
         ).to('cuda')
 
         self.d=nn.Sequential(
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Dropout(drop_out_ratio),
             nn.Linear(16, out_c),
         ).to('cuda')

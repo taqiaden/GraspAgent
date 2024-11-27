@@ -1,28 +1,24 @@
 import numpy as np
 import torch
+from torch import nn
 
 from Configurations.ENV_boundaries import bin_center
-from lib.depth_map import pixel_to_point, transform_to_camera_frame
-from registration import camera
+
 
 shift_length=0.1
 shift_elevation_threshold = 0.001
 shift_contact_margin = 0.01
+bce_loss=nn.BCELoss()
 
-def get_shift_parameteres(depth,pix_A, pix_B,j):
+def get_shift_parameteres(shift_target_point):
     '''check affected entities'''
-    depth_value = depth[j, 0, pix_A, pix_B].cpu().numpy()
-    start_point = pixel_to_point(np.array([pix_A, pix_B]), depth_value, camera)
-    start_point = transform_to_camera_frame(start_point[None, :], reverse=True)[0]
-
+    start_point = shift_target_point
     '''get start and end points'''
     target = np.copy(bin_center)
     target[2] = np.copy(start_point[2])
     direction = target - start_point
-
     end_point = start_point + ((direction * shift_length) / np.linalg.norm(direction))
     shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
-
     return direction,start_point,end_point,shifted_start_point
 
 def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
@@ -42,11 +38,17 @@ def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
     shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
     return shift_mask
 
-def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,lambda1):
+def estimate_shift_score(pc,shift_mask,shift_scores):
     '''get collided points'''
     direct_collision_points = pc[shift_mask]
     if direct_collision_points.shape[0] > 0:
         return torch.tensor(1,device=shift_scores.device).float()
+    else:
+        return torch.tensor(0,device=shift_scores.device).float()
+
+def estimate_weighted_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j):
+    if shift_mask.sum() > 0:
+        direct_collision_points = pc[shift_mask]
         '''get score of collided points'''
         collision_score = shift_scores[j, 0][mask][shift_mask]
         collision_score = torch.clip(collision_score, 0, 1.0)
@@ -66,3 +68,13 @@ def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,l
         return shift_label_score.float()
     else:
         return torch.tensor(0,device=shift_scores.device).float()
+
+def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_):
+    direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
+    shift_mask = get_shift_mask(pc, direction, shifted_start_point, end_point, spatial_mask)
+    if shift_mask.sum() > 0:
+        label= torch.tensor(1, device=prediction_.device).float()
+    else:
+        label= torch.tensor(0, device=prediction_.device).float()
+    statistics.update_confession_matrix(label, prediction_)
+    return bce_loss(prediction_, label)

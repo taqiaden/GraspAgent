@@ -77,7 +77,7 @@ class MovingMetrics():
         print(Fore.RESET)
 
 class TrainingTracker():
-    def __init__(self,name='',iterations_per_epoch=None,samples_size=None):
+    def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False):
         self.name=name
         self.iterations_per_epoch=iterations_per_epoch
         self.samples_size=samples_size
@@ -86,12 +86,15 @@ class TrainingTracker():
 
         '''confession matrix'''
         self.confession_matrix=ConfessionMatrix()
-
         self.labels_with_zero_loss = 0
 
         '''track_discrimination_loss'''
         self.positive_loss=0.0
         self.negative_loss=0.0
+
+        '''balance indicator'''
+        self.label_balance_indicator=self.load_balance_indicator() if track_label_balance else None
+
 
     def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
         if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent
@@ -99,7 +102,19 @@ class TrainingTracker():
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
         self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
+        if self.label_balance_indicator is not None: self.update_balance_indicator(label)
 
+
+    def load_balance_indicator(self):
+        return get_float('label_balance_indicator',section=self.name)
+
+
+    def update_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.005,use_momentum=True):
+        adapted_decay_rate=max(decay_rate,self.label_balance_indicator*decay_rate) if use_momentum else decay_rate
+        if label>pivot_value:
+            self.label_balance_indicator=(1-adapted_decay_rate)*self.label_balance_indicator+adapted_decay_rate
+        else:
+            self.label_balance_indicator = (1 - adapted_decay_rate) * self.label_balance_indicator - adapted_decay_rate
 
     def print(self):
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
@@ -121,4 +136,10 @@ class TrainingTracker():
             print(f'Running positive loss = {self.positive_loss}')
             print(f'Running negative loss = {self.negative_loss}')
 
+        if self.label_balance_indicator is not None:
+            print(f'label balance indicator = {self.label_balance_indicator}')
+
         print(Fore.RESET)
+
+    def save(self):
+        save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)

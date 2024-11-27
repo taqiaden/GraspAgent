@@ -54,10 +54,10 @@ class SuctionPartSampler(nn.Module):
         self.decoder= nn.Sequential(
             nn.Linear(64, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(16, 3),
         ).to('cuda')
     def forward(self, representation_2d ):

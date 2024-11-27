@@ -15,6 +15,7 @@ from lib.report_utils import progress_indicator
 from models.shift_net import ShiftNet
 from records.training_satatistics import TrainingTracker, MovingMetrics
 from registration import transform_to_camera_frame, camera
+from training.joint_quality_lr import model_dependent_sampling
 from training.learning_objectives.shift_affordnace import get_shift_parameteres, get_shift_mask, estimate_shift_score
 from visualiztion import vis_scene, view_npy_open3d, view_shift_pose, view_score, view_score2
 
@@ -68,26 +69,20 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
         view_scores(pc, shift_scores[j, 0][mask])
 
         for k in range(instances_per_sample):
-
-            '''pick random pixels'''
-            while True:
-                pix_A = np.random.randint(0, 480)
-                pix_B = np.random.randint(0, 712)
-                max_score=torch.max(shift_scores).item()
-                range_=(max_score-torch.min(shift_scores)).item()
-
-                selection_probability = 1-(max_score - shift_scores[j, 0, pix_A, pix_B]).item()/range_
-                selection_probability=selection_probability**2
-                if mask[pix_A, pix_B] == 1 and np.random.random()<selection_probability: break
-
-            direction,start_point,end_point,shifted_start_point=get_shift_parameteres(depth, pix_A, pix_B, j)
+            shift_head_predictions = shift_scores[j, 0][mask]
+            shift_head_max_score = torch.max(shift_scores).item()
+            shift_head_score_range = (shift_head_max_score - torch.min(shift_scores)).item()
+            shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,
+                                                            shift_head_score_range)
+            shift_target_point = pc[shift_target_index]
+            direction,start_point,end_point,shifted_start_point=get_shift_parameteres(shift_target_point)
             shift_mask=get_shift_mask(pc, direction, shifted_start_point, end_point,spatial_mask)
 
             lambda1 = max(moving_rates.tnr - moving_rates.tpr, 0)**0.5
             label=estimate_shift_score(pc, shift_mask, shift_scores, mask, shifted_start_point, j,lambda1)
 
             '''target prediction and label score'''
-            prediction_ = shift_scores[j, 0, pix_A, pix_B]
+            prediction_ = shift_head_predictions[shift_target_index]
             # label = torch.ones_like(prediction_) if np.any(shift_mask==True)  else torch.zeros_like(prediction_)
 
             '''view shift action'''

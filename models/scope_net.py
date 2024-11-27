@@ -20,10 +20,10 @@ class scope_net_vanilla(nn.Module):
         self.encoder=nn.Sequential(
             nn.Linear(in_size, 64, bias=False),
             nn.LayerNorm(64),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(64, 128,bias=False),
             nn.LayerNorm(128),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(128, 64,bias=False),
         ).to('cuda')
 
@@ -31,10 +31,10 @@ class scope_net_vanilla(nn.Module):
 
         self.decoder = nn.Sequential(
             nn.LayerNorm(64),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(64, 16, bias=False),
             nn.LayerNorm(16),
-            nn.ReLU(True),
+            nn.ReLU(),
             # nn.Dropout(0.5),
             nn.Linear(16, 1),
         ).to('cuda')

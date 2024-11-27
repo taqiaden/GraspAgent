@@ -17,7 +17,7 @@ class AbstractHead(nn.Module):
         # self.d = nn.Sequential(
         #     nn.Linear(16, 8, bias=False),
         #     nn.LayerNorm([8]),
-        #     nn.ReLU(True),
+        #     nn.ReLU(),
         #     nn.Linear(8, 1),
         # ).to('cuda')
         self.sigmoid=nn.Sigmoid()
@@ -52,7 +52,6 @@ class JointQualityNet(nn.Module):
 
         '''backbone'''
         features = self.back_bone(depth)
-
         '''spatial data'''
         if self.spatial_encoding.shape[0]!=depth.shape[0]:self.spatial_encoding=depth_xy_spatial_data(batch_size=depth.shape[0])
 

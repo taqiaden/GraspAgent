@@ -16,10 +16,10 @@ class BackgroundSegNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
-        self.res=res_block_mlp_LN(in_c=64,medium_c=32,out_c=16,activation=nn.ReLU(True)).to('cuda')
+        self.res=res_block_mlp_LN(in_c=64,medium_c=32,out_c=16,activation=nn.ReLU()).to('cuda')
         self.decoder= nn.Sequential(
             nn.LayerNorm(16),
-            nn.ReLU(True),
+            nn.ReLU(),
             nn.Linear(16, 1),
         ).to('cuda')
 
