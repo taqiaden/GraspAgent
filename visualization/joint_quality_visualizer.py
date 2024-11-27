@@ -18,7 +18,8 @@ from registration import camera
 from lib.report_utils import  progress_indicator
 from filelock import FileLock
 from training.joint_grasp_sampler_tr import module_key as grasp_sampler_key
-from training.joint_quality_lr import normals_check, deflection_check, seal_check, curvature_check
+from training.learning_objectives.suction_seal import suction_zone_radius, normals_check, curvature_check, \
+    deflection_check, seal_check
 from visualiztion import view_npy_open3d, view_suction_zone, view_score2
 from analytical_suction_sampler import estimate_suction_direction
 import numpy as np
@@ -34,21 +35,12 @@ print=custom_print
 max_lr=0.01
 min_lr=1*1e-6
 
-suction_zone_radius = 0.012
-curvature_radius = 0.0025
-curvature_deviation_threshold = 0.0025
-angle_threshold_degree = 5.0
-seal_ring_deviation = 0.002
-suction_area_deflection = 0.005
-
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
 
 def view_scores(pc,scores,threshold=0.5):
     view_scores = scores.detach().cpu().numpy()
     view_scores[view_scores < threshold] *= 0.0
     view_score2(pc, view_scores)
-
-
 
 def view_suction_area(pc,dist_mask,target_point,direction,spatial_mask):
     colors = np.zeros_like(pc)
@@ -63,7 +55,6 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
 
     grasp_sampler =GANWrapper(module_key=grasp_sampler_key,generator=GraspSampler)
     grasp_sampler.ini_generator(train=False)
-
 
     '''dataloader'''
     file_ids=sample_random_buffer(size=n_samples, dict_name=suction_grasp_tracker)

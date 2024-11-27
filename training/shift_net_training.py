@@ -2,22 +2,20 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
-
-from Configurations.ENV_boundaries import bin_center
-from Configurations.config import shift_length, shift_elevation_threshold, shift_contact_margin
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.shift_net_dl import ShiftNetDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
-from lib.depth_map import depth_to_point_clouds, pixel_to_point
+from lib.depth_map import depth_to_point_clouds
 from lib.loss.D_loss import binary_l1
 from lib.optimizer import exponential_decay_lr_
 from lib.report_utils import progress_indicator
 from models.shift_net import ShiftNet
 from records.training_satatistics import TrainingTracker, MovingMetrics
 from registration import transform_to_camera_frame, camera
+from training.learning_objectives.shift_affordnace import get_shift_parameteres, get_shift_mask, estimate_shift_score
 from visualiztion import vis_scene, view_npy_open3d, view_shift_pose, view_score, view_score2
 
 instances_per_sample=10
@@ -54,63 +52,7 @@ def view_scores(pc,scores):
     view_scores[view_scores < 0.5] *= 0.0
     view_score2(pc, view_scores)
 
-def get_shift_parameteres(depth,pix_A, pix_B,j):
-    '''check affected entities'''
-    depth_value = depth[j, 0, pix_A, pix_B].cpu().numpy()
-    start_point = pixel_to_point(np.array([pix_A, pix_B]), depth_value, camera)
-    start_point = transform_to_camera_frame(start_point[None, :], reverse=True)[0]
 
-    '''get start and end points'''
-    target = np.copy(bin_center)
-    target[2] = np.copy(start_point[2])
-    direction = target - start_point
-
-    end_point = start_point + ((direction * shift_length) / np.linalg.norm(direction))
-    shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
-
-    return direction,start_point,end_point,shifted_start_point
-
-def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
-    '''signed distance'''
-    d = direction / np.linalg.norm(direction)
-    s = np.dot(shifted_start_point - pc, d)
-    t = np.dot(pc - end_point, d)
-
-    '''distance to the line segment'''
-    flatten_pc = np.copy(pc)
-    flatten_pc[:, 2] = shifted_start_point[2]
-    distances = np.cross(end_point - shifted_start_point, shifted_start_point - flatten_pc) / np.linalg.norm(
-        end_point - shifted_start_point)
-    distances = np.linalg.norm(distances, axis=1)
-
-    '''isolate the bin'''
-    shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
-    return shift_mask
-
-def estimate_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_point,j,lambda1):
-    '''get collided points'''
-    direct_collision_points = pc[shift_mask]
-    if direct_collision_points.shape[0] > 0:
-        return torch.tensor(1,device=shift_scores.device).float()
-        '''get score of collided points'''
-        collision_score = shift_scores[j, 0][mask][shift_mask]
-        collision_score = torch.clip(collision_score, 0, 1.0)
-
-        '''distance weighting'''
-        dist_weight = (shift_length - np.linalg.norm(shifted_start_point[np.newaxis] - direct_collision_points,
-                                                     axis=-1)) / shift_length
-        assert np.all(dist_weight < 1),f'{dist_weight}'
-
-        dist_weight = dist_weight ** 2
-        dist_weight=torch.from_numpy(dist_weight).to(collision_score.device)
-
-        '''estimate shift score'''
-        shift_label_score =0.5+0.5*( (dist_weight * collision_score).sum() / dist_weight.sum())
-        # shift_label_score = shift_label_score * (1 - lambda1) + lambda1
-        # print(shift_label_score.item())
-        return shift_label_score.float()
-    else:
-        return torch.tensor(0,device=shift_scores.device).float()
 
 def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
     # shift_scores=sig(shift_scores)
@@ -158,7 +100,7 @@ def cumulative_shift_loss(depth,shift_scores,statistics,moving_rates):
             statistics.update_confession_matrix(label, prediction_)
 
             '''instance loss'''
-            loss_ = binary_l1(prediction_, label)
+            loss_ = l1_loss(prediction_, label)
             # if label<=0: loss_=loss_+mes_loss(prediction_, label)
 
             # if (label.item()<=0.0) and (prediction_<=0.): loss_*=0

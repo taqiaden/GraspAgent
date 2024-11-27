@@ -102,7 +102,7 @@ class TrainingTracker():
 
 
     def print(self):
-        print(Fore.LIGHTBLUE_EX)
+        print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
         if self.iterations_per_epoch is not None:
             print(f'Average loss = {self.running_loss/self.iterations_per_epoch}')
         else:
