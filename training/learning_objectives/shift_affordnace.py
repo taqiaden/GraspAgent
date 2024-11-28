@@ -4,11 +4,11 @@ from torch import nn
 
 from Configurations.ENV_boundaries import bin_center
 
-
 shift_length=0.1
 shift_elevation_threshold = 0.001
 shift_contact_margin = 0.01
 bce_loss=nn.BCELoss()
+l1_loss=nn.L1Loss()
 
 def get_shift_parameteres(shift_target_point):
     '''check affected entities'''
@@ -77,4 +77,4 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     else:
         label= torch.tensor(0, device=prediction_.device).float()
     statistics.update_confession_matrix(label, prediction_)
-    return bce_loss(prediction_, label)
+    return l1_loss(prediction_, label)**2

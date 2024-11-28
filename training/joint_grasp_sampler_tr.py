@@ -243,8 +243,6 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
             out_of_scope_times += sum(out_of_scope_list)
             good_firmness_times += sum(firmness_state_list)
 
-            '''Quality metrics'''
-            view_metrics(generated_grasps, collision_state_list, out_of_scope_list, firmness_state_list)
 
             '''train critic'''
             c_running_loss += train_critic(gan, generated_grasps, b, pixel_index,

@@ -18,7 +18,6 @@ l1_smooth_loss=nn.SmoothL1Loss(beta=1.0)
 mse_loss=nn.MSELoss()
 bce_loss=nn.BCELoss()
 
-
 def normals_check(normals,dist_mask,target_normal):
     '''region normals'''
     region_normals = normals[dist_mask]
@@ -78,16 +77,18 @@ def suction_seal_loss(target_point,pc,normals,target_index,prediction_,statistic
     points_at_seal_region = pc[dist_mask]
 
     '''suction criteria'''
-    first_criteria = normals_check(normals, dist_mask, target_normal)
-    second_criteria = curvature_check(points_at_seal_region)
-    third_criteria = deflection_check(target_normal, points_at_seal_region)
+    # first_criteria = normals_check(normals, dist_mask, target_normal)
+    # second_criteria = curvature_check(points_at_seal_region)
+    # third_criteria = deflection_check(target_normal, points_at_seal_region)
     fourth_criteria = seal_check(target_point, points_at_seal_region)
 
     '''suction seal loss'''
-    if first_criteria and second_criteria and third_criteria and fourth_criteria:
+    # if first_criteria and second_criteria and third_criteria and fourth_criteria:
+    if fourth_criteria:
+
         label = torch.ones_like(prediction_)
     else:
         label = torch.zeros_like(prediction_)
 
     statistics.update_confession_matrix(label, prediction_)
-    return bce_loss(prediction_, label)
+    return l1_loss(prediction_, label)**2

@@ -38,7 +38,8 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
         prediction_ = model_predictions[target_index]
         if spatial_mask is not None:
             if spatial_mask[target_index] == 0: continue
-        selection_probability = abs((1-balance_indicator)/2 - (model_max_score - prediction_).item() / model_score_range)
+        xa=((model_max_score - prediction_).item() / model_score_range) * balance_indicator
+        selection_probability = ((1-balance_indicator)/2 + xa+0.5*(1-abs(balance_indicator)))
         selection_probability=selection_probability**probability_exponent
         if np.random.random() < selection_probability: break
     else:
@@ -113,20 +114,20 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
                 '''view suction scores'''
                 for k in range(instances_per_sample):
                     '''gripper head'''
-                    gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=5,balance_indicator=gripper_head_statistics.label_balance_indicator)
+                    gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=gripper_head_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions[gripper_target_index]
                     gripper_target_pose = gripper_poses[gripper_target_index]
                     gripper_loss+=gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,gripper_head_statistics)
 
                     '''suction head'''
-                    suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=5,balance_indicator=suction_head_statistics.label_balance_indicator)
+                    suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=suction_head_statistics.label_balance_indicator)
                     suction_target_point = pc[suction_target_index]
                     suction_prediction_ = suction_head_predictions[suction_target_index]
                     suction_loss+=suction_seal_loss(suction_target_point,pc,normals,suction_target_index,suction_prediction_,suction_head_statistics)
 
                     '''shift head'''
-                    shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=5,balance_indicator=shift_head_statistics.label_balance_indicator)
+                    shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=shift_head_statistics.label_balance_indicator)
                     shift_target_point = pc[shift_target_index]
                     shift_prediction_=shift_head_predictions[shift_target_index]
                     shift_loss+=shift_affordance_loss(pc,shift_target_point,spatial_mask,shift_head_statistics,shift_prediction_)
@@ -148,6 +149,7 @@ def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
     suction_head_statistics.print()
     gripper_head_statistics.print()
     shift_head_statistics.print()
+
 
     suction_head_statistics.save()
     gripper_head_statistics.save()
