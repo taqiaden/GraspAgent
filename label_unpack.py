@@ -1,6 +1,10 @@
+import torch
+
 from Configurations import config
-from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, get_pixel_index, depth_to_point_clouds
-from pose_object import encode_gripper_pose_npy
+from lib.collision_unit import grasp_collision_detection
+from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth, get_pixel_index, depth_to_point_clouds, \
+    pixel_to_point
+from pose_object import encode_gripper_pose_npy, pose_7_to_transformation
 from registration import camera
 
 
@@ -56,3 +60,21 @@ class LabelObj():
     def get_pixel_index(self):
         pixel_index=get_pixel_index(self.depth, camera, self.target_point)
         return pixel_index
+
+    def check_collision(self,depth,visualize=False):
+        assert self.is_gripper==True
+        pc = self.get_point_clouds_from_depth(depth=depth)
+        pixel_index = self.get_pixel_index()
+
+        depth_value = depth[pixel_index[0], pixel_index[1]]
+
+        '''get pose parameters'''
+        target_point = pixel_to_point(pixel_index, depth_value, camera)
+        target_point = transform_to_camera_frame(target_point[None, :], reverse=True)[0]
+
+        target_pose = self.get_gripper_pose_7()
+        T_d, width, distance = pose_7_to_transformation(torch.from_numpy(target_pose), target_point)
+
+        collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
+
+        return collision_intensity>0

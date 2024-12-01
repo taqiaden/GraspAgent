@@ -40,7 +40,6 @@ if __name__ == "__main__":
 
 
     assert rgb.shape==(1200,1920,3), f'{rgb.shape}'
-    print(rgb.shape)
 
     heap_rgb=crop_scene_image(rgb)
 
@@ -48,8 +47,6 @@ if __name__ == "__main__":
     pc = refine_point_cloud(pc)
 
     heap_depth=pc_to_depth_map(pc)
-
-    # standard_heap_depth=standardize_depth(heap_depth, reverse=False)
 
     view_image(heap_rgb)
     view_image(heap_depth)

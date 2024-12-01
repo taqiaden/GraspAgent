@@ -1,12 +1,14 @@
 import os
 import numpy as np
 import torch
+from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker, DataTracker
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
 from lib.models_utils import initialize_model_state
 from lib.report_utils import progress_indicator
 from models.scope_net import scope_net_vanilla, suction_scope_model_state_path
 from lib.report_utils import progress_indicator as pi
+
 
 online_data = online_data()
 
@@ -98,10 +100,36 @@ def rename_files():
         idx=online_data.get_index(filename)
         os.rename(os.path.join(path,filename),os.path.join(path,idx+online_data.point_clouds.sufix))
 
-# rename_files()
-# print('Clean redundancy')
-# clean_old_data_redundancy()
-# print('Convert point clouds to depth')
-# convert_all_point_clouds_to_depth()
+def check_collision_in_data():
+    indexes=online_data.get_indexes()
+    # indexes=sample_positive_buffer(size=None, dict_name=gripper_grasp_tracker,disregard_collision_samples=True)
+
+    print(f'total samples = {len(indexes)}')
+
+    pi = progress_indicator('progress ', max_limit=len(indexes))
+
+    counters=[0,0]
+    for i in range(len(indexes)):
+        current_index=indexes[i]
+        label = online_data.label.load_as_numpy(current_index)
+        label_obj = LabelObj(label=label)
+        if label_obj.failure or label_obj.is_suction: continue
+        depth = online_data.depth.load_as_numpy(current_index)
+        collision_state=label_obj.check_collision(depth=depth,visualize=True)
+
+        if collision_state>0:
+            counters[0]+=1
+        else:
+            counters[1]+=1
+        pi.step(i)
+
+    pi.end()
+    print(f'instances with collision={counters[0]}')
+    print(f'instances without collision={counters[1]}')
+check_collision_in_data()
+
+
+
+
 
 

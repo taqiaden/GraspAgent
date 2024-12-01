@@ -1,5 +1,5 @@
 import random
-
+from lib.report_utils import  progress_indicator
 from Online_data_audit.dictionary_utils import load_dict, save_dict
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
@@ -12,6 +12,7 @@ suction_grasp_tracker=r'suction_grasp_dict'
 
 # [0] 1 for success
 # [1] 1 for test data
+# [2] 1 for for collision
 gripper_container_size=10
 suction_container_size=10
 
@@ -42,6 +43,12 @@ class DataTracker():
         self.dict[file_id] = new_record
 
     def set_test_sample(self,file_id,list_index,data=1):
+        old_record = self.get_value(file_id)
+        new_record = old_record
+        new_record[list_index] = data
+        self.dict[file_id] = new_record
+
+    def set_collision_state(self,file_id,list_index,data=2):
         old_record = self.get_value(file_id)
         new_record = old_record
         new_record[list_index] = data
@@ -95,15 +102,18 @@ def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True,l
 
     data_tracker.save()
 
-def sample_positive_buffer(dict_name,size=None):
+def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False):
     positive_labels=[]
-    data_tracker = DataTracker(name=dict_name, list_size=4)
+    data_tracker = DataTracker(name=dict_name, list_size=10)
 
     for key in data_tracker.dict:
         record=data_tracker.dict[key]
         # print(record)
 
         ground_truth=record[0]
+        collision_state=record[2]
+        if disregard_collision_samples and collision_state==1:continue
+
 
         if int(ground_truth)==1:
             positive_labels.append(key)
@@ -182,17 +192,46 @@ def split_test_set(tracker_name,list_size=10,test_size_ratio=0.2,index=1):
     for i in range(len(train_labels)):
         data_tracker.set_test_sample( train_labels[i], index, data=0)
 
+    data_tracker.save()
+
 def split_gripper_data():
     split_test_set(gripper_grasp_tracker, list_size=gripper_container_size, test_size_ratio=0.2, index=1)
 def split_suction_data():
     split_test_set(suction_grasp_tracker, list_size=suction_container_size, test_size_ratio=0.2, index=1)
+
+def track_collision_state(list_size=10,index=2):
+    '''get number of test samples'''
+    positive_labels,negative_labels=sample_all_positive_and_negatives(gripper_grasp_tracker, list_size, shuffle=True)
+
+    ids=positive_labels+negative_labels
+    pi = progress_indicator('progress ', max_limit=len(ids))
+
+    '''set collision state'''
+    data_tracker = DataTracker(name=gripper_grasp_tracker, list_size=list_size)
+    counter=0
+    for i in range(len(ids)):
+        '''check collision'''
+        label = online_data.label.load_as_numpy(ids[i])
+        label_obj = LabelObj(label=label)
+        if label_obj.failure or label_obj.is_suction: continue
+        depth = online_data.depth.load_as_numpy(ids[i])
+        collision_state = label_obj.check_collision(depth=depth)
+        counter+=collision_state
+        data_tracker.set_collision_state( ids[i], index, data=collision_state)
+        pi.step(i)
+
+    pi.end()
+    print(f'Found {counter} samples in collision state out of {len(ids)}')
+    data_tracker.save()
+
 if __name__ == '__main__':
+    track_collision_state()
     # set_suction_dictionary()
     # set_gripper_dictionary()
-    split_gripper_data()
-    split_suction_data()
+    # split_gripper_data()
+    # split_suction_data()
 
-    balanced_list=sample_random_buffer(dict_name=suction_grasp_tracker)
+    # balanced_list=sample_random_buffer(dict_name=suction_grasp_tracker)
 
-    print(len(balanced_list))
+    # print(len(balanced_list))
 

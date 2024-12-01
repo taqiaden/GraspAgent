@@ -3,12 +3,20 @@ import torch
 from torch import nn
 
 from Configurations.ENV_boundaries import bin_center
+from visualiztion import view_shift_pose
 
 shift_length=0.1
 shift_elevation_threshold = 0.001
 shift_contact_margin = 0.01
 bce_loss=nn.BCELoss()
 l1_loss=nn.L1Loss()
+
+def view_shift(pc,spatial_mask,shift_mask,start_point, end_point):
+    colors = np.zeros_like(pc)
+    colors[spatial_mask, 0] += 1.
+    colors[shift_mask, 1] += 1.
+    view_shift_pose(start_point, end_point, pc, pc_colors=colors)
+    spatial_mask[spatial_mask == 0] = 1
 
 def get_shift_parameteres(shift_target_point):
     '''check affected entities'''
@@ -69,7 +77,7 @@ def estimate_weighted_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_
     else:
         return torch.tensor(0,device=shift_scores.device).float()
 
-def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_):
+def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,visualize=False):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     shift_mask = get_shift_mask(pc, direction, shifted_start_point, end_point, spatial_mask)
     if shift_mask.sum() > 0:
@@ -77,4 +85,7 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     else:
         label= torch.tensor(0, device=prediction_.device).float()
     statistics.update_confession_matrix(label, prediction_)
-    return l1_loss(prediction_, label)**2
+    if visualize:
+        print(f'Shift label={label}, prediction= {prediction_}')
+        view_shift(pc, spatial_mask, shift_mask, start_point, end_point)
+    return bce_loss(prediction_, label)

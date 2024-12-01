@@ -1,15 +1,18 @@
 import numpy as np
 import torch
+from colorama import Fore
+from matplotlib import pyplot as plt
 from torch import nn
 
 from lib.math_utils import rotation_matrix_from_vectors, angle_between_vectors_cross
 from lib.pc_utils import circle_to_points, compute_curvature
+from visualiztion import view_suction_zone
 
 suction_zone_radius = 0.012
 curvature_radius = 0.0025
 curvature_deviation_threshold = 0.0025
 angle_threshold_degree = 5.0
-seal_ring_deviation = 0.002
+seal_ring_deviation = 0.003
 suction_area_deflection = 0.005
 
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
@@ -17,6 +20,12 @@ l1_loss=nn.L1Loss()
 l1_smooth_loss=nn.SmoothL1Loss(beta=1.0)
 mse_loss=nn.MSELoss()
 bce_loss=nn.BCELoss()
+
+def view_suction_area(pc,dist_mask,target_point,direction,spatial_mask):
+    colors = np.zeros_like(pc)
+    colors[spatial_mask, 0] += 1.
+    colors[dist_mask, 1] += 1.
+    view_suction_zone(target_point,direction, pc, colors)
 
 def normals_check(normals,dist_mask,target_normal):
     '''region normals'''
@@ -43,9 +52,13 @@ def curvature_check(points_at_seal_region):
 
     return curvature_std < curvature_deviation_threshold
 
-def deflection_check(target_normal,points_at_seal_region):
+def transform_point_to_in_suction_direction(target_normal,points_at_seal_region):
     R = rotation_matrix_from_vectors(target_normal, np.array([0, 0, 1]))
     transformed_points_at_seal_region = np.matmul(R, points_at_seal_region.T).T
+    return transformed_points_at_seal_region
+def deflection_check(transformed_points_at_seal_region):
+    # R = rotation_matrix_from_vectors(target_normal, np.array([0, 0, 1]))
+    # transformed_points_at_seal_region = np.matmul(R, points_at_seal_region.T).T
     seal_deflection = np.max(transformed_points_at_seal_region[:, 2]) - np.min(transformed_points_at_seal_region[:, 2])
     # if seal_deflection < suction_area_deflection:
     #     print(f'seal deflection = {seal_deflection}')
@@ -53,42 +66,95 @@ def deflection_check(target_normal,points_at_seal_region):
     #     print(Fore.RED, f'seal deflection = {seal_deflection}', Fore.RESET)
 
     return seal_deflection < suction_area_deflection
-
-def seal_check(target_point,points_at_seal_region):
-    seal_test_points = circle_to_points(radius=suction_zone_radius, number_of_points=100, x=target_point[0],
+def seal_check_A(target_point,points_within_spherical_seal_region,visualize=False):
+    seal_test_points = circle_to_points(radius=suction_zone_radius, number_of_points=30, x=target_point[0],
                                         y=target_point[1], z=target_point[2])
 
-    xy_dist = np.linalg.norm(seal_test_points[:, np.newaxis, 0:2] - points_at_seal_region[np.newaxis, :, 0:2], axis=-1)
+    xy_dist = np.linalg.norm(seal_test_points[:, np.newaxis, 0:2] - points_within_spherical_seal_region[np.newaxis, :, 0:2], axis=2)
+    # print(xy_dist.shape)
+    # print((seal_test_points[:, np.newaxis, 0:2] - points_within_spherical_seal_region[np.newaxis, :, 0:2]).shape)
+
     min_xy_dist = np.min(xy_dist, axis=1)
+    # print(min_xy_dist.shape)
+    # plt.plot(min_xy_dist)
+    # plt.show()
+
+
     seal_deviation = np.max(min_xy_dist)
-    # if seal_deviation < seal_ring_deviation:
-    #     print(f'maximum seal deviation = {seal_deviation}')
-    # else:
-    #     print(Fore.RED, f'maximum seal deviation = {seal_deviation}', Fore.RESET)
+    if visualize:
+        if seal_deviation < seal_ring_deviation:
+            print(f'maximum seal deviation = {seal_deviation}')
+        else:
+            print(Fore.RED, f'maximum seal deviation = {seal_deviation}', Fore.RESET)
 
     return seal_deviation < seal_ring_deviation
 
-def suction_seal_loss(target_point,pc,normals,target_index,prediction_,statistics):
-    '''mask suction region'''
-    dist_ = np.linalg.norm(target_point[np.newaxis] - pc, axis=-1)
-    dist_mask = dist_ < suction_zone_radius
+def seal_check_B(target_point,points_within_cylindrical_seal_region,visualize=False):
+    seal_test_points = circle_to_points(radius=suction_zone_radius, number_of_points=30, x=target_point[0],
+                                        y=target_point[1], z=target_point[2])
+    xyz_dist = np.linalg.norm(
+        seal_test_points[:, np.newaxis, 0:2] - points_within_cylindrical_seal_region[np.newaxis, :, 0:2],
+        axis=2)
+
+    nearest_in_xy = np.argmin(xyz_dist, axis=1)
+
+    z_dist = seal_test_points[:, 2] - points_within_cylindrical_seal_region[nearest_in_xy, 2]
+
+    grad = np.gradient(z_dist)
+    grad = np.abs(np.gradient(grad))
+
+    grad_max=np.max(grad)
+
+    c=0.002
+    if visualize:
+        if grad_max< c:
+            print(f'maximum change in seal distance = {grad_max}')
+        else:
+            print(Fore.RED, f'maximum change in seal distance  = {grad_max}', Fore.RESET)
+
+    return np.max(grad) < c
+
+def suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial_mask,visualize=False):
     target_normal = normals[target_index]
+    transformed_pc=transform_point_to_in_suction_direction(target_normal, pc)
+    target_point=pc[target_index]
+    transformed_target_point=transformed_pc[target_index]
+    '''mask suction region'''
+    xyz_dist_ = np.linalg.norm(transformed_target_point[np.newaxis] - transformed_pc, axis=-1)
+
+    spherical_mask = xyz_dist_ < suction_zone_radius
+
     '''circle to points'''
-    points_at_seal_region = pc[dist_mask]
+    points_within_spherical_seal_region = transformed_pc[spherical_mask]
+    number_of_points=spherical_mask.sum()
+    if visualize:
+        print(f'number of points at suction spherical region = {number_of_points}')
 
     '''suction criteria'''
     # first_criteria = normals_check(normals, dist_mask, target_normal)
     # second_criteria = curvature_check(points_at_seal_region)
-    # third_criteria = deflection_check(target_normal, points_at_seal_region)
-    fourth_criteria = seal_check(target_point, points_at_seal_region)
+    # third_criteria = deflection_check(transformed_points_at_seal_region)
+    # fourth_criteria = seal_check(transformed_target_point, points_within_spherical_seal_region,points_within_cylindrical_seal_region,visualize)
+    criteria = False
+    if number_of_points>250:
+        if seal_check_A(transformed_target_point, points_within_spherical_seal_region, visualize=visualize):
+            if seal_check_B(transformed_target_point, points_within_spherical_seal_region, visualize=visualize):
+                criteria = True
+    else:
+        if visualize:
+            print(Fore.RED,f'minimum point size is not satisfied',Fore.RESET)
 
     '''suction seal loss'''
     # if first_criteria and second_criteria and third_criteria and fourth_criteria:
-    if fourth_criteria:
-
+    if criteria:
         label = torch.ones_like(prediction_)
     else:
         label = torch.zeros_like(prediction_)
 
+    if visualize:
+        print(f'suction seal label= {label}, prediction = {prediction_}')
+        # view_suction_area(pc, spherical_mask, target_point, target_normal, spatial_mask)
+        view_suction_area(pc, spherical_mask, target_point, target_normal, spatial_mask)
+
     statistics.update_confession_matrix(label, prediction_)
-    return l1_loss(prediction_, label)**2
+    return bce_loss(prediction_, label)

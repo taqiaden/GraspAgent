@@ -70,7 +70,7 @@ class SuctionPartSampler(nn.Module):
 class AbstractQualityClassifier(nn.Module):
     def __init__(self,in_c1, in_c2, out_c):
         super().__init__()
-        self.att_block = att_res_mlp_LN(in_c1=in_c1, in_c2=in_c2, out_c=8).to('cuda')
+        self.att_block = att_res_mlp_LN(in_c1=in_c1, in_c2=in_c2, out_c=out_c).to('cuda')
         # self.res_block=res_block_mlp_LN(in_c=in_c1+in_c2,medium_c=32,out_c=1).to('cuda')
         # self.d = nn.Sequential(
         #     nn.Linear(16, 8, bias=False),
@@ -78,13 +78,14 @@ class AbstractQualityClassifier(nn.Module):
         #     nn.ReLU(),
         #     nn.Linear(8, 1),
         # ).to('cuda')
-        # self.sigmoid=nn.Sigmoid()
+        self.sigmoid=nn.Sigmoid()
 
     def forward(self, features_2d,pose_2d ):
         output_2d = self.att_block(features_2d,pose_2d)
         # output_2d_a = self.att_block(features_2d,pose_2d)
         # output_2d_b = self.res_block(torch.cat([features_2d,pose_2d],dim=-1))
         # output_2d=self.d(torch.cat([output_2d_a,output_2d_b],dim=-1))
+        output_2d=self.sigmoid(output_2d)
         return output_2d
 
 class ActionNet(nn.Module):

@@ -32,8 +32,9 @@ class ConfessionMatrix():
         return self.TP/(self.TP+self.FP)
 
     def view(self):
-        print(f'TP={self.TP}, FP={self.FP}')
-        print(f'FN={self.FN}, TN={self.TN}')
+        total=self.total_classification()
+        print(f'TP={int((self.TP/total)*100)}%, FP={int((self.FP/total)*100)}%')
+        print(f'FN={int((self.FN/total)*100)}%, TN={int((self.TN/total)*100)}%')
 
 class MovingMetrics():
     def __init__(self,name='000',decay_rate=0.001):
@@ -109,7 +110,7 @@ class TrainingTracker():
         return get_float('label_balance_indicator',section=self.name)
 
 
-    def update_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.005,use_momentum=True):
+    def update_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.005,use_momentum=False):
         adapted_decay_rate=max(decay_rate,self.label_balance_indicator*decay_rate) if use_momentum else decay_rate
         if label>pivot_value:
             self.label_balance_indicator=(1-adapted_decay_rate)*self.label_balance_indicator+adapted_decay_rate
