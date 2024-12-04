@@ -116,7 +116,73 @@ class att_res_mlp_LN(nn.Module):
         output=self.d(embedding)
         return output
 
+class att_res_mlp_LN2(nn.Module):
+    def __init__(self,in_c1,in_c2,out_c,drop_out_ratio=0.0):
+        super().__init__()
+        assert in_c1 >32 and out_c<32 and in_c2<16
 
+        self.key = nn.Sequential(
+            nn.Linear(in_c1, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            nn.Linear(in_c1, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+        ).to('cuda')
+
+        self.query =  nn.Sequential(
+            nn.Linear(in_c2, 16, bias=False),
+            nn.LayerNorm([16]),
+            nn.ReLU(),
+            nn.Linear(16, 8),
+        ).to('cuda')
+
+        self.res=nn.Sequential(
+            nn.Linear(in_c1+in_c2, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+        ).to('cuda')
+
+        self.d=nn.Sequential(
+            nn.Linear(128+16, 64, bias=False),
+            nn.LayerNorm([64]),
+            nn.ReLU(),
+            nn.Linear(64, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Dropout(drop_out_ratio),
+            nn.Linear(32, out_c),
+        ).to('cuda')
+
+
+
+    def forward(self, key_value_input,query_input):
+        '''residual'''
+        inputs=torch.cat([key_value_input,query_input],dim=1)
+        res=self.res(inputs)
+
+        '''key value from input1'''
+        key=self.key(key_value_input)
+        value=self.value(key_value_input)
+
+        '''Query from input2'''
+        query=self.query(query_input)
+
+        '''attention score'''
+        att_map=key[:,None,:]*query[:,:,None]
+        att_map=F.softmax(att_map,dim=-1)
+        att_score=(att_map*value[:,None,:]).flatten(1,2)
+
+        '''output'''
+        embedding=torch.cat([att_score,res],dim=1)
+        output=self.d(embedding)
+        return output
 class att_res_decoder_A(nn.Module):
     def __init__(self,in_c1,in_c2,out_c,Batch_norm=True,Instance_norm=False):
         super().__init__()

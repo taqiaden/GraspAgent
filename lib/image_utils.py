@@ -4,7 +4,20 @@ from PIL import Image
 import numpy as np
 from colorama import Fore
 
+def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True):
+    processed_gray_image=np.copy(depth)
+    non_zero_min=np.min(depth[np.nonzero(depth)])
+    processed_gray_image[processed_gray_image==0.0]+=non_zero_min
+    max_=np.max(processed_gray_image)
+    range=max_-non_zero_min
+    processed_gray_image-=non_zero_min
+    processed_gray_image/=range
+    if convert_to_three_channels:
+        processed_gray_image=np.concatenate([processed_gray_image,processed_gray_image,processed_gray_image],axis=-1)
 
+    if view:view_image(processed_gray_image)
+
+    return  processed_gray_image
 def check_image_similarity(old_image, new_image):
     res = np.sum((old_image.astype("float") - new_image.astype("float")) ** 2)
     res /= (old_image.shape[0] * old_image.shape[1])

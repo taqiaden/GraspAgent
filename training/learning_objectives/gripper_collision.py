@@ -58,6 +58,6 @@ def gripper_collision_loss(gripper_target_pose, gripper_target_point,pc,predicti
     T_d, width, distance = pose_7_to_transformation(gripper_target_pose, gripper_target_point)
     collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
     label = torch.zeros_like(prediction_) if collision_intensity > 0 else torch.ones_like(prediction_)
-    statistics.update_confession_matrix(label, prediction_)
+    statistics.update_confession_matrix(label, prediction_.detach())
     if visualize: print(f'gripper collision label ={label}, prediction= {prediction_}')
     return bce_loss(prediction_, label)

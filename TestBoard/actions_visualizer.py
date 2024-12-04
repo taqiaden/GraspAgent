@@ -103,22 +103,22 @@ def loop():
             '''view suction scores'''
             for k in range(instances_per_sample):
                 '''gripper head'''
-                gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=gripper_head_statistics.label_balance_indicator)
+                gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
                 gripper_target_point = pc[gripper_target_index]
                 gripper_prediction_ = gripper_head_predictions[gripper_target_index]
                 gripper_target_pose = gripper_poses[gripper_target_index]
                 gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,gripper_head_statistics)
 
                 '''suction head'''
-                suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=suction_head_statistics.label_balance_indicator)
+                suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
                 suction_prediction_ = suction_head_predictions[suction_target_index]
                 suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_head_statistics,spatial_mask,visualize=True)
 
                 '''shift head'''
-                shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=shift_head_statistics.label_balance_indicator)
+                shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=-1)
                 shift_target_point = pc[shift_target_index]
                 shift_prediction_=shift_head_predictions[shift_target_index]
-                shift_affordance_loss(pc,shift_target_point,spatial_mask,shift_head_statistics,shift_prediction_,visualize=True)
+                shift_affordance_loss(pc,shift_target_point,spatial_mask,shift_head_statistics,shift_prediction_,normals,shift_target_index,visualize=True)
 
         pi.step(i)
     pi.end()

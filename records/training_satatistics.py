@@ -77,6 +77,40 @@ class MovingMetrics():
         print(f'Moving true negative rate = {self.tnr}')
         print(Fore.RESET)
 
+class MovingRate():
+    def __init__(self,name='000',decay_rate=0.001):
+        self.name=name
+        self.sub_name=name+'_moving_rate'
+        self.balance_indicator=0.0
+
+        self.decay_rate=decay_rate
+
+        self.moving_rate=0.0
+
+        self.truncate_factor=10/self.decay_rate
+
+
+        '''load latest'''
+        self.upload()
+
+    def update(self,value,pivot_value=0.5):
+        if value>pivot_value:
+            self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate
+        else:
+            self.moving_rate = (1 - self.decay_rate) * self.moving_rate
+
+    def save(self):
+        save_key(self.sub_name, self.moving_rate, section=self.name)
+
+    def upload(self):
+        self.moving_rate=get_float(self.sub_name,section=self.name)
+
+    def view(self):
+        print(Fore.LIGHTBLUE_EX,end='')
+        truncated_moving_rate=float(int(self.moving_rate* self.truncate_factor)) / self.truncate_factor
+        print(f'{self.sub_name} = {truncated_moving_rate}',end='')
+        print(Fore.RESET)
+
 class TrainingTracker():
     def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False):
         self.name=name

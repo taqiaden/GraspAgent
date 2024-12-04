@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from colorama import Fore
-from matplotlib import pyplot as plt
 from torch import nn
 
 from lib.math_utils import rotation_matrix_from_vectors, angle_between_vectors_cross
@@ -52,7 +51,7 @@ def curvature_check(points_at_seal_region):
 
     return curvature_std < curvature_deviation_threshold
 
-def transform_point_to_in_suction_direction(target_normal,points_at_seal_region):
+def transform_point_to_normal_in_plane(target_normal,points_at_seal_region):
     R = rotation_matrix_from_vectors(target_normal, np.array([0, 0, 1]))
     transformed_points_at_seal_region = np.matmul(R, points_at_seal_region.T).T
     return transformed_points_at_seal_region
@@ -116,7 +115,7 @@ def seal_check_B(target_point,points_within_cylindrical_seal_region,visualize=Fa
 
 def suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial_mask,visualize=False):
     target_normal = normals[target_index]
-    transformed_pc=transform_point_to_in_suction_direction(target_normal, pc)
+    transformed_pc=transform_point_to_normal_in_plane(target_normal, pc)
     target_point=pc[target_index]
     transformed_target_point=transformed_pc[target_index]
     '''mask suction region'''
@@ -156,5 +155,5 @@ def suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial_mas
         # view_suction_area(pc, spherical_mask, target_point, target_normal, spatial_mask)
         view_suction_area(pc, spherical_mask, target_point, target_normal, spatial_mask)
 
-    statistics.update_confession_matrix(label, prediction_)
+    statistics.update_confession_matrix(label, prediction_.detach())
     return bce_loss(prediction_, label)

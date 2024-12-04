@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from Configurations.config import theta_scope, phi_scope
 from lib.custom_activations import GripperGraspRegressor2
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import att_res_mlp_LN
+from models.decoders import att_res_mlp_LN, att_res_mlp_LN2
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera, standardize_depth
@@ -70,7 +70,7 @@ class SuctionPartSampler(nn.Module):
 class AbstractQualityClassifier(nn.Module):
     def __init__(self,in_c1, in_c2, out_c):
         super().__init__()
-        self.att_block = att_res_mlp_LN(in_c1=in_c1, in_c2=in_c2, out_c=out_c).to('cuda')
+        self.att_block = att_res_mlp_LN2(in_c1=in_c1, in_c2=in_c2, out_c=out_c).to('cuda')
         # self.res_block=res_block_mlp_LN(in_c=in_c1+in_c2,medium_c=32,out_c=1).to('cuda')
         # self.d = nn.Sequential(
         #     nn.Linear(16, 8, bias=False),
@@ -101,7 +101,7 @@ class ActionNet(nn.Module):
 
         self.gripper_collision = AbstractQualityClassifier(in_c1=64, in_c2=7, out_c=1)
         self.suction_quality = AbstractQualityClassifier(in_c1=64, in_c2=3, out_c=1)
-        self.shift_affordance = AbstractQualityClassifier(in_c1=64, in_c2=2, out_c=1)
+        self.shift_affordance = AbstractQualityClassifier(in_c1=64, in_c2=2+3, out_c=1)
 
     def forward(self, depth,approach_randomness_ratio=0.0):
         '''input standardization'''
@@ -131,7 +131,8 @@ class ActionNet(nn.Module):
         suction_quality_classifier = self.suction_quality(features, suction_direction_detached)
 
         '''shift affordance head'''
-        shift_affordance_classifier = self.shift_affordance(features, self.spatial_encoding)
+        shift_query_features=torch.cat([suction_direction_detached,self.spatial_encoding], dim=-1)
+        shift_affordance_classifier = self.shift_affordance(features,shift_query_features )
 
         '''reshape'''
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)

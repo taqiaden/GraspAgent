@@ -3,19 +3,23 @@ import torch
 from torch import nn
 
 from Configurations.ENV_boundaries import bin_center
+from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_length=0.1
+shift_length=0.035
 shift_elevation_threshold = 0.001
-shift_contact_margin = 0.01
+shift_contact_margin = 0.003
+interference_allowance=0.003
 bce_loss=nn.BCELoss()
 l1_loss=nn.L1Loss()
 
-def view_shift(pc,spatial_mask,shift_mask,start_point, end_point):
+def view_shift(pc,spatial_mask,shift_mask,start_point, end_point,signed_distance_mask,target_normal):
     colors = np.zeros_like(pc)
     colors[spatial_mask, 0] += 1.
     colors[shift_mask, 1] += 1.
-    view_shift_pose(start_point, end_point, pc, pc_colors=colors)
+    colors[signed_distance_mask, 2] += 1.
+
+    view_shift_pose(start_point, end_point, pc,target_normal, pc_colors=colors)
     spatial_mask[spatial_mask == 0] = 1
 
 def get_shift_parameteres(shift_target_point):
@@ -77,15 +81,29 @@ def estimate_weighted_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_
     else:
         return torch.tensor(0,device=shift_scores.device).float()
 
-def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,visualize=False):
+def check_collision_for_shift():
+    pass
+
+def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,normals,target_index,visualize=False):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     shift_mask = get_shift_mask(pc, direction, shifted_start_point, end_point, spatial_mask)
-    if shift_mask.sum() > 0:
+
+    '''collision check'''
+    target_normal = normals[target_index]
+    transformed_pc = transform_point_to_normal_in_plane(target_normal, pc)
+    transformed_target_point = transformed_pc[target_index]
+    xy_dist = np.linalg.norm(transformed_target_point[ np.newaxis, 0:2] - transformed_pc[ :, 0:2], axis=-1)
+
+    signed_distance_mask = (xy_dist < shift_contact_margin) & (transformed_pc[:,2]>transformed_target_point[2]+interference_allowance)
+    collision=signed_distance_mask.sum()>0
+
+    if shift_mask.sum() > 0 and collision==False:
         label= torch.tensor(1, device=prediction_.device).float()
     else:
         label= torch.tensor(0, device=prediction_.device).float()
-    statistics.update_confession_matrix(label, prediction_)
+    statistics.update_confession_matrix(label, prediction_.detach())
+
     if visualize:
         print(f'Shift label={label}, prediction= {prediction_}')
-        view_shift(pc, spatial_mask, shift_mask, start_point, end_point)
+        view_shift(pc, spatial_mask, shift_mask, start_point, end_point,signed_distance_mask,target_normal)
     return bce_loss(prediction_, label)

@@ -1,8 +1,9 @@
 import numpy as np
 import cv2
+
 from Configurations.ENV_boundaries import depth_lower_bound, depth_mean, depth_std
 from lib.depth_map import point_clouds_to_depth, CameraInfo, depth_to_point_clouds, transform_to_camera_frame
-from lib.image_utils import view_image
+from lib.image_utils import view_image, depth_to_gray_scale
 from lib.pc_utils import refine_point_cloud
 from visualiztion import view_npy_open3d
 
@@ -38,7 +39,7 @@ def view_colored_point_cloud(RGB,Depth):
 if __name__ == "__main__":
     rgb = cv2.imread('Frame_0.ppm')  # [1200,1920,3]
 
-
+    print(rgb.shape)
     assert rgb.shape==(1200,1920,3), f'{rgb.shape}'
 
     heap_rgb=crop_scene_image(rgb)
@@ -47,6 +48,7 @@ if __name__ == "__main__":
     pc = refine_point_cloud(pc)
 
     heap_depth=pc_to_depth_map(pc)
+    processed_gray_image=depth_to_gray_scale(heap_depth,view=True)
 
     view_image(heap_rgb)
     view_image(heap_depth)

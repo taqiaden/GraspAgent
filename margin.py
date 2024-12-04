@@ -1,8 +1,10 @@
 import numpy as np
 import torch
+import torchvision
 from torch import nn
 
-if __name__ == "__main__":
-    b=torch.tensor([1,2,3,4,5,6,7]).cuda()
-    print(b[-2:])
+from lib.cuda_utils import cuda_memory_report
 
+if __name__ == "__main__":
+
+    print(torchvision.__version__)

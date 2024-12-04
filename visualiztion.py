@@ -116,22 +116,18 @@ def o3d_line(start, end, colors_=None):
 
     return line_set
 
-def view_shift_pose(start,end,pc,pc_colors=None):
+def view_shift_pose(start,end,pc,target_normal,pc_colors=None):
     start=np.copy(start)
     end=np.copy(end)
-    start2=np.copy(start)
-    start2[2]+=0.1
-    vertical_line=o3d_line(start,start2,colors_=[0,0.5,0])
-    start[2] += 0.001
-    end[2] += 0.001
-    move_direction_line=o3d_line(start,end,colors_=[0,0.5,0])
-    start[2] += 0.1
-    end[2] += 0.1
-    p_direction_line=o3d_line(start,end,colors_=[0,0.5,0])
+
+    end2=np.copy(start)
+    end2+=target_normal*0.1
+    vertical_line=o3d_line(start,end2,colors_=[0,0.5,0])
+
 
     pcd = numpy_to_o3d(pc,  color=pc_colors)
 
-    o3d.visualization.draw_geometries([pcd, vertical_line,move_direction_line,p_direction_line])
+    o3d.visualization.draw_geometries([pcd, vertical_line])
 
 def view_suction_zone(target_point,direction,pc,pc_colors):
     start=np.copy(target_point)
