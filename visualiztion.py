@@ -26,35 +26,24 @@ def visualize_vox(npy):
                 if npy[i, j, k] == 1: points_list.append((i, j, k))
     points_list = np.asarray(points_list)
     view_npy_open3d(points_list)
-def dense_grasps_visualization(pc, generated_pose_7,grasp_score_pred,target_mask):
-    # Method 1
+def dense_grasps_visualization(pc, generated_pose_7,view_mask):
     T_d_list = []
     width_list = []
     for i in range(5000):
-        random_index = np.random.randint(0, config.num_points)
-        if target_mask[0, random_index, 0] == False: continue
+        random_index = np.random.randint(0, pc.shape[0])
 
-        if grasp_score_pred[0, 0, random_index] < 0.4: continue
+        if not view_mask[ random_index] : continue
+        target_pose_7 = generated_pose_7[ random_index]
 
-        tmp_pose = generated_pose_7[0:1, :, random_index]
-
-        poses_7 = tmp_pose[:, None, :].clone()
-
-        # visualize verfication
-        pc_ = pc[0, :, 0:3].cpu().numpy()  # + mean
-
-        target_point = pc_[random_index]
-        target_pose_7 = poses_7[0, :, :]
+        target_point = pc[random_index]
         T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
         T_d_list.append(T_d)
         width_list.append(width)
     if len(width_list) == 0: return
-    T_d = np.concatenate(T_d_list, axis=0)
-    width = np.concatenate(width_list, axis=0)
+    T_d = np.stack(T_d_list, axis=0)
+    width = np.stack(width_list, axis=0)
 
-    vis_scene(T_d, width, npy=pc[0, :, 0:3].cpu().numpy())
-
-    return
+    vis_scene(T_d, width, npy=pc)
 
 
 def view_o3d(pcd,view_coordinate=True,geometries_list=None):
@@ -189,11 +178,12 @@ def vis_scene(T_d_stack,width_stack, npy=None):
 
     for i in range(T_d_stack.shape[0]):
         mesh=construct_gripper_mesh_2(width_stack[i], T_d_stack[i])
-        mesh.paint_uniform_color([1,0, 0])
+        mesh.paint_uniform_color([0.6,0.6, 0.6])
         scene_list.append(mesh)
 
     '''add point cloud'''
-    pcd = highlight_background(npy)
+    masked_colors = np.ones_like(npy) * [0.52, 0.8, 0.92]
+    pcd = numpy_to_o3d(pc=npy, color=masked_colors)
     scene_list.append(pcd)
 
     '''visualize'''

@@ -8,6 +8,7 @@ from check_points.check_point_conventions import ModelWrapper
 from dataloaders.background_seg_dl import BackgroundSegDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.dataset_utils import online_data
 from lib.depth_map import depth_to_point_clouds
 from lib.loss.D_loss import binary_smooth_l1, binary_l1
@@ -24,7 +25,7 @@ training_buffer = online_data()
 
 training_buffer.main_modality=training_buffer.depth
 print=custom_print
-BATCH_SIZE=2
+BATCH_SIZE=1
 learning_rate=5*1e-5
 EPOCHS = 300
 weight_decay = 0.000001
@@ -70,14 +71,14 @@ def train_(file_ids):
     background_seg.ini_model()
 
     '''optimizer'''
-    background_seg.ini_sgd_optimizer(learning_rate=learning_rate)
+    background_seg.ini_adam_optimizer(learning_rate=learning_rate)
 
     for epoch in range(EPOCHS):
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1), max_limit=len(data_loader))
         statistics=TrainingTracker(name='',iterations_per_epoch=len(data_loader),samples_size=len(dataset))
 
         for i, batch in enumerate(data_loader, 0):
-            depth,target_indexes= batch
+            depth,file_index= batch
             depth=depth.cuda().float()
             b = depth.shape[0]
             '''get predictions'''
@@ -86,20 +87,31 @@ def train_(file_ids):
 
             '''compute loss'''
             loss=0.
+            c=0
             for j in range(b):
                 pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
 
                 pc = transform_to_camera_frame(pc, reverse=True)
-                manual_mask=estimate_object_mask(pc)
+                # manual_mask=estimate_object_mask(pc)
+                # bin_mask=bin_planes_detection(pc,view=False,file_index=file_index[j])
+                # if bin_mask is None:
+                #     print('Unable to detect the bin')
+                #     continue
+                # else:
+                #     c+=1
+                prediction = predicted_seg_scores[j, :, :, 0][mask]
+                predicted_mask = prediction.detach().cpu().numpy() > 0.5
+                view_npy_open3d(pc[predicted_mask])
+                continue
 
-                label=torch.from_numpy(manual_mask).to(predicted_seg_scores.device).float()
+                label=torch.from_numpy(bin_mask).to(predicted_seg_scores.device).float()
                 prediction=predicted_seg_scores[j,:,:,0][mask]
-                loss += binary_l1(prediction, label).mean()
+                loss += bce_loss(prediction, label)
 
                 '''view and labeling'''
-                # manual_labeling(j, target_indexes, label, prediction, pc)
-
-            loss=loss/b
+                manual_labeling(j, file_index, label, prediction, pc)
+            if c==0 : continue
+            loss=loss/c
 
             '''optimize'''
             loss.backward()
@@ -108,7 +120,7 @@ def train_(file_ids):
             statistics.running_loss += loss.item()
             pi.step(i)
 
-            if i%100==0:        background_seg.export_model()
+            if i%100==0 and i!=0:        background_seg.export_model()
 
 
         pi.end()

@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 from colorama import Fore
 
-def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True):
+def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize=False):
     processed_gray_image=np.copy(depth)
     non_zero_min=np.min(depth[np.nonzero(depth)])
     processed_gray_image[processed_gray_image==0.0]+=non_zero_min
@@ -14,6 +14,10 @@ def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True):
     processed_gray_image/=range
     if convert_to_three_channels:
         processed_gray_image=np.concatenate([processed_gray_image,processed_gray_image,processed_gray_image],axis=-1)
+    if colorize:
+        processed_gray_image[:,:,2]=1-(processed_gray_image[:,:,2]**np.random.uniform(0.1,3))
+        processed_gray_image[:,:,1]=1-(processed_gray_image[:,:,1]**np.random.uniform(0.1,2))
+        processed_gray_image[:,:,0]=1-(processed_gray_image[:,:,0]**np.random.uniform(0.1,1))
 
     if view:view_image(processed_gray_image)
 
@@ -46,3 +50,4 @@ def resize_image(im,size):
 def view_image(image,title=''):
     cv2.imshow(title, image)
     cv2.waitKey(0)
+

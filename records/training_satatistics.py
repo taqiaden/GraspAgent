@@ -112,7 +112,7 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker():
-    def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False):
+    def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False,track_prediction_balance=False):
         self.name=name
         self.iterations_per_epoch=iterations_per_epoch
         self.samples_size=samples_size
@@ -128,7 +128,8 @@ class TrainingTracker():
         self.negative_loss=0.0
 
         '''balance indicator'''
-        self.label_balance_indicator=self.load_balance_indicator() if track_label_balance else None
+        self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
+        self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
 
     def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
@@ -137,19 +138,29 @@ class TrainingTracker():
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
         self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
-        if self.label_balance_indicator is not None: self.update_balance_indicator(label)
+        if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
+        if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
 
 
-    def load_balance_indicator(self):
+    def load_label_balance_indicator(self):
         return get_float('label_balance_indicator',section=self.name)
 
+    def load_prediction_balance_indicator(self):
+        return get_float('prediction_balance_indicator',section=self.name)
 
-    def update_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.005,use_momentum=False):
+    def update_label_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.001,use_momentum=False):
         adapted_decay_rate=max(decay_rate,self.label_balance_indicator*decay_rate) if use_momentum else decay_rate
         if label>pivot_value:
             self.label_balance_indicator=(1-adapted_decay_rate)*self.label_balance_indicator+adapted_decay_rate
         else:
             self.label_balance_indicator = (1 - adapted_decay_rate) * self.label_balance_indicator - adapted_decay_rate
+
+    def update_prediction_balance_indicator(self,prediction,pivot_value=0.5,decay_rate=0.001,use_momentum=False):
+        adapted_decay_rate=max(decay_rate,self.prediction_balance_indicator*decay_rate) if use_momentum else decay_rate
+        if prediction>pivot_value:
+            self.prediction_balance_indicator=(1-adapted_decay_rate)*self.prediction_balance_indicator+adapted_decay_rate
+        else:
+            self.prediction_balance_indicator = (1 - adapted_decay_rate) * self.prediction_balance_indicator - adapted_decay_rate
 
     def print(self):
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
@@ -174,7 +185,11 @@ class TrainingTracker():
         if self.label_balance_indicator is not None:
             print(f'label balance indicator = {self.label_balance_indicator}')
 
+        if self.prediction_balance_indicator is not None:
+            print(f'prediction balance indicator = {self.prediction_balance_indicator}')
+
         print(Fore.RESET)
 
     def save(self):
         save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
+        save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)

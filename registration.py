@@ -39,7 +39,6 @@ def view_colored_point_cloud(RGB,Depth):
 if __name__ == "__main__":
     rgb = cv2.imread('Frame_0.ppm')  # [1200,1920,3]
 
-    print(rgb.shape)
     assert rgb.shape==(1200,1920,3), f'{rgb.shape}'
 
     heap_rgb=crop_scene_image(rgb)
@@ -48,7 +47,8 @@ if __name__ == "__main__":
     pc = refine_point_cloud(pc)
 
     heap_depth=pc_to_depth_map(pc)
-    processed_gray_image=depth_to_gray_scale(heap_depth,view=True)
+
+    processed_gray_image=depth_to_gray_scale(heap_depth,view=True,colorize=True)
 
     view_image(heap_rgb)
     view_image(heap_depth)

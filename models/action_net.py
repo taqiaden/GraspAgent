@@ -19,6 +19,10 @@ def randomize_approach(approach,randomization_ratio=0.0):
     assert theta_scope==90. and phi_scope==360.
     random_tensor[:,0:2]=(random_tensor[:,0:2]*2)-1
 
+    '''scale to the size of the base vector'''
+    norm=torch.norm(approach,dim=-1).detach()
+    random_tensor*=norm
+
     '''add the randomization'''
     randomized_approach=approach*(1-randomization_ratio)+random_tensor*randomization_ratio
 
@@ -109,6 +113,7 @@ class ActionNet(nn.Module):
 
         '''backbone'''
         features = self.back_bone(depth)
+        depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
 
         '''Spatial data'''
@@ -141,7 +146,7 @@ class ActionNet(nn.Module):
         suction_quality_classifier = reshape_for_layer_norm(suction_quality_classifier, camera=camera, reverse=True)
         shift_affordance_classifier = reshape_for_layer_norm(shift_affordance_classifier, camera=camera, reverse=True)
 
-        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier
+        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,depth_features
 
 class Critic(nn.Module):
     def __init__(self):

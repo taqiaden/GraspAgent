@@ -33,9 +33,9 @@ def space_key_pressed(): ## starts listener modulefg h
         listener.join()
     return result
 def save_pickle(path,tuples):
-    pickled_tuple=pickle.dumps(tuples)
+    # pickled_tuple=pickle.dumps(tuples)
     with open(path,'wb') as file:
-        pickle.dump(pickled_tuple,file)
+        pickle.dump(tuples,file)
 def save_pickle_to_server(path,tuples):
     pickled_tuple=pickle.dumps(tuples)
     with smbclient.open_file(path,mode="wb") as f:

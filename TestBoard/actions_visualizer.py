@@ -3,6 +3,7 @@ from colorama import Fore
 from torch.utils import data
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer,  gripper_grasp_tracker
+from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
 from interpolate_bin import estimate_object_mask
@@ -14,11 +15,11 @@ from records.training_satatistics import TrainingTracker
 from registration import camera
 from lib.report_utils import  progress_indicator
 from filelock import FileLock
-from training.action_lr import model_dependent_sampling
-from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
-from training.learning_objectives.shift_affordnace import  shift_affordance_loss
-from training.learning_objectives.suction_seal import suction_seal_loss
-from visualiztion import view_score2, view_npy_open3d
+# from training.action_lr import model_dependent_sampling
+# from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
+# from training.learning_objectives.shift_affordnace import  shift_affordance_loss
+# from training.learning_objectives.suction_seal import suction_seal_loss
+from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualization
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -52,9 +53,9 @@ def loop():
     suction_sampler_statistics = TrainingTracker(name=module_key+'_suction_sampler', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
     critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
 
-    collision_times = 0.
-    out_of_scope_times = 0.
-    good_firmness_times = 0.
+    # collision_times = 0.
+    # out_of_scope_times = 0.
+    # good_firmness_times = 0.
 
     pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
 
@@ -66,15 +67,15 @@ def loop():
 
         '''generate grasps'''
         with torch.no_grad():
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier = gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,_ = gan.generator(
                 depth.clone())
 
         '''Evaluate generated grasps'''
-        collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
-                                                                                       gripper_pose, pose_7,visualize=True)
-        collision_times += sum(collision_state_list)
-        out_of_scope_times += sum(out_of_scope_list)
-        good_firmness_times += sum(firmness_state_list)
+        # collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
+        #                                                                                gripper_pose, pose_7,visualize=False)
+        # collision_times += sum(collision_state_list)
+        # out_of_scope_times += sum(out_of_scope_list)
+        # good_firmness_times += sum(firmness_state_list)
 
         for j in range(b):
             '''get parameters'''
@@ -87,10 +88,22 @@ def loop():
             gripper_head_predictions=griper_collision_classifier[j, 0][mask]
             shift_head_predictions = shift_affordance_classifier[j, 0][mask]
 
-            view_npy_open3d(pc,normals=normals)
-            view_scores(pc, gripper_head_predictions, threshold=0.5)
-            view_scores(pc, suction_head_predictions, threshold=0.5)
-            view_scores(pc, shift_head_predictions, threshold=0.5)
+            '''suction grasp sampler'''
+            suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
+            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&spatial_mask)
+
+            '''gripper grasp sampler'''
+            gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.5
+            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&spatial_mask)
+
+            '''shift action sampler'''
+            shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
+            estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
+
+            # view_scores(pc, gripper_head_predictions, threshold=0.5)
+            # view_scores(pc, suction_head_predictions, threshold=0.5)
+            # view_scores(pc, shift_head_predictions, threshold=0.5)
+            # view_npy_open3d(pc,normals=normals)
 
             '''limits'''
             gripper_head_max_score = torch.max(griper_collision_classifier).item()
@@ -100,25 +113,25 @@ def loop():
             shift_head_max_score = torch.max(shift_affordance_classifier).item()
             shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
 
-            '''view suction scores'''
-            for k in range(instances_per_sample):
-                '''gripper head'''
-                gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
-                gripper_target_point = pc[gripper_target_index]
-                gripper_prediction_ = gripper_head_predictions[gripper_target_index]
-                gripper_target_pose = gripper_poses[gripper_target_index]
-                gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,gripper_head_statistics)
-
-                '''suction head'''
-                suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
-                suction_prediction_ = suction_head_predictions[suction_target_index]
-                suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_head_statistics,spatial_mask,visualize=True)
-
-                '''shift head'''
-                shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=-1)
-                shift_target_point = pc[shift_target_index]
-                shift_prediction_=shift_head_predictions[shift_target_index]
-                shift_affordance_loss(pc,shift_target_point,spatial_mask,shift_head_statistics,shift_prediction_,normals,shift_target_index,visualize=True)
+            # '''view suction scores'''
+            # # for k in range(instances_per_sample):
+            # #     '''gripper head'''
+            #     # gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
+            #     # gripper_target_point = pc[gripper_target_index]
+            #     # gripper_prediction_ = gripper_head_predictions[gripper_target_index]
+            #     # gripper_target_pose = gripper_poses[gripper_target_index]
+            #     # gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,gripper_head_statistics)
+            #
+            #     '''suction head'''
+            #     # suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
+            #     # suction_prediction_ = suction_head_predictions[suction_target_index]
+            #     # suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_head_statistics,spatial_mask,visualize=True)
+            #
+            #     '''shift head'''
+            #     # shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=-1)
+            #     # shift_target_point = pc[shift_target_index]
+            #     # shift_prediction_=shift_head_predictions[shift_target_index]
+            #     # shift_affordance_loss(pc,shift_target_point,spatial_mask,shift_head_statistics,shift_prediction_,normals,shift_target_index,visualize=True)
 
         pi.step(i)
     pi.end()
@@ -128,10 +141,10 @@ def loop():
     shift_head_statistics.print()
     gripper_sampler_statistics.print()
     suction_sampler_statistics.print()
-    size = len(file_ids)
-    print(f'Collision ratio = {collision_times / size}')
-    print(f'out of scope ratio = {out_of_scope_times / size}')
-    print(f'firm grasp ratio = {good_firmness_times / size}')
+    # size = len(file_ids)
+    # print(f'Collision ratio = {collision_times / size}')
+    # print(f'out of scope ratio = {out_of_scope_times / size}')
+    # print(f'firm grasp ratio = {good_firmness_times / size}')
 
 if __name__ == "__main__":
     for i in range(10000):

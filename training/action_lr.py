@@ -28,12 +28,14 @@ instances_per_sample=1
 module_key='action_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
+normal_weight = 10
 
 print=custom_print
 
-def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,spatial_mask=None,maximum_iterations=1000,probability_exponent=2.0,balance_indicator=1.0):
+def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,spatial_mask=None,maximum_iterations=1000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
         target_index = np.random.randint(0, pc.shape[0])
+        if np.random.random() <  random_sampling_probability:break
         prediction_ = model_predictions[target_index]
         if spatial_mask is not None:
             if spatial_mask[target_index] == 0:
@@ -152,7 +154,7 @@ class TrainActionNet:
             mask = masks[j]
             gripper_loss = gripper_sampler_loss(pixel_index, j, collision_state_list, out_of_scope_list,
                                                 label_critic_score, generated_critic_score)
-            suction_loss = suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
+            suction_loss = suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])*normal_weight
             # balance_weight=1 if suction_loss<=gripper_loss else gripper_loss/suction_loss
             gripper_sampling_loss += gripper_loss
             suction_sampling_loss += suction_loss  # *balance_weight
@@ -170,7 +172,6 @@ class TrainActionNet:
 
         return gan
 
-
     def begin(self):
         collision_times = 0.
         out_of_scope_times = 0.
@@ -186,7 +187,7 @@ class TrainActionNet:
 
             '''generate grasps'''
             with torch.no_grad():
-                gripper_pose,suction_direction,_,_,_ = self.gan.generator(depth.clone())
+                gripper_pose,suction_direction,_,_,_,_ = self.gan.generator(depth.clone())
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
                 for j in range(b):
@@ -231,7 +232,7 @@ class TrainActionNet:
                 spatial_masks.append(spatial_mask)
 
             '''generated grasps'''
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier = self.gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,_ = self.gan.generator(
                 depth.clone())
 
             '''train generator'''
@@ -290,7 +291,7 @@ class TrainActionNet:
             decay_= lambda scores:torch.clamp(scores-torch.zeros_like(scores),0).mean()
 
             decay_loss=decay_(griper_collision_classifier)+decay_(suction_quality_classifier)+decay_(shift_affordance_classifier)
-            decay_loss*=1/3
+            decay_loss*=0.3
 
             loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss+decay_loss
             loss.backward()
@@ -345,7 +346,7 @@ if __name__ == "__main__":
         # train_action_net.begin()
         try:
             cuda_memory_report()
-            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=5e-6)
+            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=1e-6)
             train_action_net.begin()
         except Exception as error_message:
             del train_action_net

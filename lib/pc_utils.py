@@ -1,6 +1,7 @@
 import numpy as np
 import open3d as o3d
 import torch
+from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
 from Configurations.ENV_boundaries import ref_pc_center
 
@@ -142,7 +143,41 @@ def compute_curvature(points, radius=0.5):
 def rotate_point_clouds(point_clouds,rotation_matrix):
     return np.matmul(rotation_matrix,point_clouds.T).T
 
+def circle_points(r, n,x_center,y_center,z_center):
+    circles = []
+    for r, n in zip(r, n):
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        x = r * np.cos(t)+x_center
+        y = r * np.sin(t)+y_center
+        z=np.zeros_like(x)+z_center
+        if z_center is not None:
+
+            circles.append(np.c_[x, y,z])
+        else:
+            circles.append(np.c_[x, y,0])
+    return circles
+
+def circle_cavity_to_point(radius=1.0,n_circles=10,plot=False,x_center=0,y_center=0,z_center=0):
+    r=[]
+    n=[]
+    for i in range(n_circles):
+        current_radius  = (i/(n_circles-1))    *   radius
+        r.append(current_radius)
+        n.append(1+int(2*np.pi*i))
+
+    circles = circle_points(r, n,x_center,y_center,z_center)
+
+    if plot:
+        fig, ax = plt.subplots()
+        for circle in circles:
+            ax.scatter(circle[:, 0], circle[:, 1])
+        ax.set_aspect('equal')
+        plt.show()
+    return np.concatenate(circles,axis=0)
+
 if __name__ == "__main__":
-    points=circle_to_points(radius=1,number_of_points=2,x=2,y=3,z=10)
-    print(points)
-    print(points.shape)
+    circle_cavity_to_point(radius=0.7,n_circles=15,plot=True)
+
+    # points=circle_to_points(radius=1,number_of_points=2,x=2,y=3,z=10)
+    # print(points)
+    # print(points.shape)

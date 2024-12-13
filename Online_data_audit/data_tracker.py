@@ -108,12 +108,9 @@ def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False
 
     for key in data_tracker.dict:
         record=data_tracker.dict[key]
-        # print(record)
-
         ground_truth=record[0]
         collision_state=record[2]
         if disregard_collision_samples and collision_state==1:continue
-
 
         if int(ground_truth)==1:
             positive_labels.append(key)
@@ -125,12 +122,15 @@ def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False
 
     return positive_labels
 
-def sample_all_positive_and_negatives(dict_name,list_size,shuffle=True):
+def sample_all_positive_and_negatives(dict_name,list_size=10,shuffle=True,disregard_collision_samples=False):
     positive_labels=[]
     negative_labels=[]
     data_tracker = DataTracker(name=dict_name, list_size=list_size)
     for key in data_tracker.dict:
         record=data_tracker.dict[key]
+
+        collision_state=record[2]
+        if disregard_collision_samples and collision_state == 1: continue
         # print(record)
 
         ground_truth=record[0]

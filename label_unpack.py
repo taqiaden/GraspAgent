@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from Configurations import config
@@ -34,6 +35,8 @@ class LabelObj():
             '''suction parameters'''
             if self.is_suction:
                 self.normal = label[24:27]
+            else:
+                self.normal=np.array([0.0,0.0,0.0])
 
 
     def get_depth(self,point_clouds=None):
@@ -53,8 +56,11 @@ class LabelObj():
         return point_clouds
 
     def get_gripper_pose_7(self):
-        R = self.T_d[0:3, 0:3]
-        pose_7 = encode_gripper_pose_npy(self.distance, self.width, R)
+        if self.is_gripper:
+            R = self.T_d[0:3, 0:3]
+            pose_7 = encode_gripper_pose_npy(self.distance, self.width, R)
+        else:
+            pose_7=np.array([0.0]*7)
         return pose_7
 
     def get_pixel_index(self):

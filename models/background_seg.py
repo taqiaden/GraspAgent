@@ -22,6 +22,7 @@ class BackgroundSegNet(nn.Module):
             nn.ReLU(),
             nn.Linear(16, 1),
         ).to('cuda')
+        self.sig=nn.Sigmoid()
 
     def forward(self, depth ):
         '''input standardization'''
@@ -38,4 +39,5 @@ class BackgroundSegNet(nn.Module):
 
         '''unflatten'''
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
+        output=self.sig(output)
         return output

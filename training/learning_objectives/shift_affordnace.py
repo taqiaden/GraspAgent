@@ -93,7 +93,6 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     transformed_pc = transform_point_to_normal_in_plane(target_normal, pc)
     transformed_target_point = transformed_pc[target_index]
     xy_dist = np.linalg.norm(transformed_target_point[ np.newaxis, 0:2] - transformed_pc[ :, 0:2], axis=-1)
-
     signed_distance_mask = (xy_dist < shift_contact_margin) & (transformed_pc[:,2]>transformed_target_point[2]+interference_allowance)
     collision=signed_distance_mask.sum()>0
 
