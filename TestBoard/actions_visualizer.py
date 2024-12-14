@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from colorama import Fore
 from torch.utils import data
@@ -8,6 +9,7 @@ from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import   custom_print
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from models.action_net import ActionNet, Critic
@@ -60,14 +62,14 @@ def loop():
     pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
 
     for i, batch in enumerate(data_loader, 0):
-        depth,pose_7,pixel_index= batch
+        depth,pose_7,pixel_index,file_ids= batch
         depth = depth.cuda().float()  # [b,1,480.712]
         pose_7 = pose_7.cuda().float()
         b = depth.shape[0]
 
         '''generate grasps'''
         with torch.no_grad():
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,_ = gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = gan.generator(
                 depth.clone())
 
         '''Evaluate generated grasps'''
@@ -87,18 +89,27 @@ def loop():
             suction_head_predictions=suction_quality_classifier[j, 0][mask]
             gripper_head_predictions=griper_collision_classifier[j, 0][mask]
             shift_head_predictions = shift_affordance_classifier[j, 0][mask]
+            background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
 
-            '''suction grasp sampler'''
-            suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
-            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&spatial_mask)
+            '''background detection head'''
+            # bin_mask = bin_planes_detection(pc, threshold=0.0015, view=True, file_index=file_ids[j])
+            # if bin_mask is not None:
+            bin_mask = background_class_predictions.detach().cpu().numpy() > 0.5
+            colors = np.zeros_like(pc)
+            colors[bin_mask, 0] += 1.
+            view_npy_open3d(pc, color=colors)
 
-            '''gripper grasp sampler'''
-            gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.5
-            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&spatial_mask)
-
-            '''shift action sampler'''
-            shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
-            estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
+            # '''suction grasp sampler'''
+            # suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
+            # estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&spatial_mask)
+            #
+            # '''gripper grasp sampler'''
+            # gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.5
+            # dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&spatial_mask)
+            #
+            # '''shift action sampler'''
+            # shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
+            # estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
 
             # view_scores(pc, gripper_head_predictions, threshold=0.5)
             # view_scores(pc, suction_head_predictions, threshold=0.5)
@@ -106,12 +117,12 @@ def loop():
             # view_npy_open3d(pc,normals=normals)
 
             '''limits'''
-            gripper_head_max_score = torch.max(griper_collision_classifier).item()
-            gripper_head_score_range = (gripper_head_max_score - torch.min(griper_collision_classifier)).item()
-            suction_head_max_score = torch.max(suction_quality_classifier).item()
-            suction_head_score_range = (suction_head_max_score - torch.min(suction_quality_classifier)).item()
-            shift_head_max_score = torch.max(shift_affordance_classifier).item()
-            shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
+            # gripper_head_max_score = torch.max(griper_collision_classifier).item()
+            # gripper_head_score_range = (gripper_head_max_score - torch.min(griper_collision_classifier)).item()
+            # suction_head_max_score = torch.max(suction_quality_classifier).item()
+            # suction_head_score_range = (suction_head_max_score - torch.min(suction_quality_classifier)).item()
+            # shift_head_max_score = torch.max(shift_affordance_classifier).item()
+            # shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
 
             # '''view suction scores'''
             # # for k in range(instances_per_sample):
@@ -136,11 +147,11 @@ def loop():
         pi.step(i)
     pi.end()
 
-    suction_head_statistics.print()
-    gripper_head_statistics.print()
-    shift_head_statistics.print()
-    gripper_sampler_statistics.print()
-    suction_sampler_statistics.print()
+    # suction_head_statistics.print()
+    # gripper_head_statistics.print()
+    # shift_head_statistics.print()
+    # gripper_sampler_statistics.print()
+    # suction_sampler_statistics.print()
     # size = len(file_ids)
     # print(f'Collision ratio = {collision_times / size}')
     # print(f'out of scope ratio = {out_of_scope_times / size}')

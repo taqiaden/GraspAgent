@@ -38,7 +38,5 @@ hide_smbclient_log=True
 # robot constants
 width_scale=550
 
-
-
 weight_decay = 0.000001
 workers=2

@@ -2,6 +2,14 @@ from colorama import Fore
 from Configurations.dynamic_config import save_key, add_to_value, get_value, get_float
 from lib.loss.D_loss import binary_l1
 
+def confession_mask(label,prediction_,pivot_value=0.5):
+    TP_mask = (label > pivot_value) & (prediction_ > pivot_value)
+    FP_mask = (label < pivot_value) & (prediction_ > pivot_value)
+    FN_mask = (label > pivot_value) & (prediction_ <= pivot_value)
+    TN_mask = (label < pivot_value) & (prediction_ <= pivot_value)
+
+    return TP_mask, FP_mask, FN_mask, TN_mask
+
 class ConfessionMatrix():
     def __init__(self,TP=0,FP=0,FN=0,TN=0):
         '''confession matrix'''
@@ -11,10 +19,14 @@ class ConfessionMatrix():
         self.TN = TN
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
-        self.TP += ((label > pivot_value) & (prediction_ > pivot_value)).sum()
-        self.FP += ((label < pivot_value) & (prediction_ > pivot_value)).sum()
-        self.FN += ((label > pivot_value) & (prediction_ <= pivot_value)).sum()
-        self.TN += ((label < pivot_value) & (prediction_ <= pivot_value)).sum()
+        '''masks'''
+        TP_mask,FP_mask,FN_mask,TN_mask=confession_mask(label,prediction_,pivot_value=pivot_value)
+        self.TP += (TP_mask).sum()
+        self.FP += (FP_mask).sum()
+        self.FN += (FN_mask).sum()
+        self.TN += (TN_mask).sum()
+
+        return TP_mask,FP_mask,FN_mask,TN_mask
 
     def correct_classification(self):
         return self.TP+self.TN
@@ -33,8 +45,8 @@ class ConfessionMatrix():
 
     def view(self):
         total=self.total_classification()
-        print(f'TP={int((self.TP/total)*100)}%, FP={int((self.FP/total)*100)}%')
-        print(f'FN={int((self.FN/total)*100)}%, TN={int((self.TN/total)*100)}%')
+        print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%')
+        print(f'FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingMetrics():
     def __init__(self,name='000',decay_rate=0.001):
@@ -89,7 +101,6 @@ class MovingRate():
 
         self.truncate_factor=10/self.decay_rate
 
-
         '''load latest'''
         self.upload()
 
@@ -137,9 +148,10 @@ class TrainingTracker():
         else:self.negative_loss+=binary_l1(prediction, label).item()**exponent
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
-        self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
+        TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
         if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
         if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
+        return TP_mask,FP_mask,FN_mask,TN_mask
 
 
     def load_label_balance_indicator(self):

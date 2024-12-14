@@ -1,7 +1,6 @@
-import torch
 
 
-def gripper_sampler_loss(pixel_index,j,collision_state_list,out_of_scope_list,label_critic_score,generated_critic_score):
+def gripper_sampler_loss(pixel_index,j,collision_state_list,out_of_scope_list,generated_critic_score):
     pix_A = pixel_index[j, 0]
     pix_B = pixel_index[j, 1]
     collision_state_ = collision_state_list[j]

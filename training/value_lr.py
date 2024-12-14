@@ -108,7 +108,7 @@ class TrainValueNet:
             '''generated grasps'''
             with torch.no_grad():
                 gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier \
-                    ,depth_features= self.action_net.generator(depth.clone())
+                    ,background_class,depth_features= self.action_net.generator(depth.clone())
                 '''process label'''
                 for j in range(b):
                     pix_A = pixel_index[j, 0]

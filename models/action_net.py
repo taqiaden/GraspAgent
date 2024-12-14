@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from Configurations.config import theta_scope, phi_scope
 from lib.custom_activations import GripperGraspRegressor2
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import att_res_mlp_LN, att_res_mlp_LN2
+from models.decoders import att_res_mlp_LN, att_res_mlp_LN2, res_block_mlp_LN
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera, standardize_depth
@@ -75,22 +75,28 @@ class AbstractQualityClassifier(nn.Module):
     def __init__(self,in_c1, in_c2, out_c):
         super().__init__()
         self.att_block = att_res_mlp_LN2(in_c1=in_c1, in_c2=in_c2, out_c=out_c).to('cuda')
-        # self.res_block=res_block_mlp_LN(in_c=in_c1+in_c2,medium_c=32,out_c=1).to('cuda')
-        # self.d = nn.Sequential(
-        #     nn.Linear(16, 8, bias=False),
-        #     nn.LayerNorm([8]),
-        #     nn.ReLU(),
-        #     nn.Linear(8, 1),
-        # ).to('cuda')
-        self.sigmoid=nn.Sigmoid()
 
     def forward(self, features_2d,pose_2d ):
         output_2d = self.att_block(features_2d,pose_2d)
-        # output_2d_a = self.att_block(features_2d,pose_2d)
-        # output_2d_b = self.res_block(torch.cat([features_2d,pose_2d],dim=-1))
-        # output_2d=self.d(torch.cat([output_2d_a,output_2d_b],dim=-1))
-        output_2d=self.sigmoid(output_2d)
         return output_2d
+
+class BackgroundDetector(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.res=res_block_mlp_LN(in_c=64,medium_c=32,out_c=16,activation=nn.ReLU()).to('cuda')
+        self.decoder= nn.Sequential(
+            nn.LayerNorm(16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+        ).to('cuda')
+        self.sig=nn.Sigmoid()
+
+    def forward(self, depth_features_2d ):
+        '''decode'''
+        output_2d = self.decoder(self.res(depth_features_2d))
+        output_2d=self.sig(output_2d)
+        return output_2d
+
 
 class ActionNet(nn.Module):
     def __init__(self):
@@ -106,6 +112,10 @@ class ActionNet(nn.Module):
         self.gripper_collision = AbstractQualityClassifier(in_c1=64, in_c2=7, out_c=1)
         self.suction_quality = AbstractQualityClassifier(in_c1=64, in_c2=3, out_c=1)
         self.shift_affordance = AbstractQualityClassifier(in_c1=64, in_c2=2+3, out_c=1)
+        self.background_detector=AbstractQualityClassifier(in_c1=64, in_c2=2, out_c=1)
+
+        self.sigmoid=nn.Sigmoid()
+
 
     def forward(self, depth,approach_randomness_ratio=0.0):
         '''input standardization'''
@@ -131,6 +141,7 @@ class ActionNet(nn.Module):
         gripper_pose_detached=torch.clip(gripper_pose.detach(),0.,1.)
         griper_collision_classifier = self.gripper_collision(features, gripper_pose_detached)
 
+
         '''suction quality head'''
         suction_direction_detached=torch.clip(suction_direction.detach(),0.,1.)
         suction_quality_classifier = self.suction_quality(features, suction_direction_detached)
@@ -139,14 +150,25 @@ class ActionNet(nn.Module):
         shift_query_features=torch.cat([suction_direction_detached,self.spatial_encoding], dim=-1)
         shift_affordance_classifier = self.shift_affordance(features,shift_query_features )
 
+        '''background detection'''
+        background_class=self.background_detector(features,self.spatial_encoding)
+
+        '''sigmoid'''
+        griper_collision_classifier=self.sigmoid(griper_collision_classifier)
+        suction_quality_classifier=self.sigmoid(suction_quality_classifier)
+        shift_affordance_classifier=self.sigmoid(shift_affordance_classifier)
+        background_class=self.sigmoid(background_class)
+
+
         '''reshape'''
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
         suction_direction = reshape_for_layer_norm(suction_direction, camera=camera, reverse=True)
         griper_collision_classifier = reshape_for_layer_norm(griper_collision_classifier, camera=camera, reverse=True)
         suction_quality_classifier = reshape_for_layer_norm(suction_quality_classifier, camera=camera, reverse=True)
         shift_affordance_classifier = reshape_for_layer_norm(shift_affordance_classifier, camera=camera, reverse=True)
+        background_class=reshape_for_layer_norm(background_class, camera=camera, reverse=True)
 
-        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,depth_features
+        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,background_class,depth_features
 
 class Critic(nn.Module):
     def __init__(self):

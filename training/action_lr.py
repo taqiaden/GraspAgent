@@ -1,15 +1,17 @@
 import torch
 from colorama import Fore
+from torch import nn
 from torch.utils import data
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer,  gripper_grasp_tracker
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
-from interpolate_bin import estimate_object_mask
 from lib.IO_utils import   custom_print
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.loss.balanced_bce_loss import BalancedBCELoss
 from models.action_net import ActionNet, Critic
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
@@ -28,17 +30,19 @@ instances_per_sample=1
 module_key='action_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
-normal_weight = 10
 
+bce_loss=nn.BCELoss()
+
+balanced_bce_loss=BalancedBCELoss()
 print=custom_print
 
-def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,spatial_mask=None,maximum_iterations=1000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
+def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,objects_mask=None,maximum_iterations=1000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
         target_index = np.random.randint(0, pc.shape[0])
         if np.random.random() <  random_sampling_probability:break
         prediction_ = model_predictions[target_index]
-        if spatial_mask is not None:
-            if spatial_mask[target_index] == 0:
+        if objects_mask is not None:
+            if objects_mask[target_index] == 0:
                 continue
         pivot_point=np.sqrt(np.abs(balance_indicator))*np.sign(balance_indicator)
         xa=((model_max_score - prediction_).item() / model_score_range) * pivot_point
@@ -61,11 +65,9 @@ class TrainActionNet:
         '''model wrapper'''
         self.gan=self.prepare_model_wrapper()
 
-
         self.moving_collision_rate=MovingRate('collision',decay_rate=0.001)
         self.moving_firmness=MovingRate('firmness',decay_rate=0.001)
         self.moving_out_of_scope=MovingRate('out_of_scope',decay_rate=0.001)
-
 
         self.data_loader=self.prepare_data_loader()
 
@@ -76,6 +78,7 @@ class TrainActionNet:
         self.gripper_sampler_statistics = TrainingTracker(name=module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
         self.suction_sampler_statistics = TrainingTracker(name=module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
         self.critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.background_detector_statistics = TrainingTracker(name=module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=False)
 
 
     def prepare_data_loader(self):
@@ -135,12 +138,9 @@ class TrainActionNet:
 
         return C_loss.item()
 
-    def train_generator(self,gan, depth, label_generated_grasps, batch_size, pixel_index, collision_state_list,
+    def train_generator(self,gan, depth, batch_size, pixel_index, collision_state_list,
                         out_of_scope_list
                         , gripper_pose, suction_direction, pcs, masks):
-        '''critic score of reference label '''
-        with torch.no_grad():
-            label_critic_score = gan.critic(depth.clone(), label_generated_grasps)
 
         '''Critic score of generated grasps'''
         generated_critic_score = gan.critic(depth.clone(), gripper_pose)
@@ -152,10 +152,8 @@ class TrainActionNet:
         for j in range(batch_size):
             pc = pcs[j]
             mask = masks[j]
-            gripper_loss = gripper_sampler_loss(pixel_index, j, collision_state_list, out_of_scope_list,
-                                                label_critic_score, generated_critic_score)
-            suction_loss = suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])*normal_weight
-            # balance_weight=1 if suction_loss<=gripper_loss else gripper_loss/suction_loss
+            gripper_loss = gripper_sampler_loss(pixel_index, j, collision_state_list, out_of_scope_list,  generated_critic_score)
+            suction_loss = suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
             gripper_sampling_loss += gripper_loss
             suction_sampling_loss += suction_loss  # *balance_weight
 
@@ -180,14 +178,14 @@ class TrainActionNet:
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
         gripper_pose=None
         for i, batch in enumerate(self.data_loader, 0):
-            depth,pose_7,pixel_index= batch
+            depth,pose_7,pixel_index,file_ids= batch
             depth = depth.cuda().float()  # [b,1,480.712]
             pose_7 = pose_7.cuda().float()
             b = depth.shape[0]
 
             '''generate grasps'''
             with torch.no_grad():
-                gripper_pose,suction_direction,_,_,_,_ = self.gan.generator(depth.clone())
+                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone())
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
                 for j in range(b):
@@ -221,23 +219,20 @@ class TrainActionNet:
 
             pcs=[]
             masks=[]
-            spatial_masks=[]
+            # spatial_masks=[]
             for j in range(b):
                 '''get parameters'''
                 pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
                 pc = transform_to_camera_frame(pc, reverse=True)
-                spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
                 pcs.append(pc)
                 masks.append(mask)
-                spatial_masks.append(spatial_mask)
 
             '''generated grasps'''
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,_ = self.gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = self.gan.generator(
                 depth.clone())
 
             '''train generator'''
-            gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, label_generated_grasps, b,
-                                              pixel_index,
+            gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,
                                               collision_state_list, out_of_scope_list,gripper_pose,
                                                                           suction_direction,pcs,masks)
             self.gripper_sampler_statistics.running_loss+=gripper_sampling_loss.item()
@@ -247,20 +242,22 @@ class TrainActionNet:
             suction_loss=torch.tensor(0.0,device=gripper_pose.device)
             gripper_loss=torch.tensor(0.0,device=gripper_pose.device)
             shift_loss=torch.tensor(0.0,device=gripper_pose.device)
+            background_loss=torch.tensor(0.0,device=gripper_pose.device)
+            non_zero_background_loss_counter=0
             for j in range(b):
-                '''get parameters'''
                 pc=pcs[j]
                 mask=masks[j]
-                spatial_mask = spatial_masks[j]
 
-                normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
                 gripper_poses=gripper_pose[j].permute(1,2,0)[mask].detach()#.cpu().numpy()
                 suction_head_predictions=suction_quality_classifier[j, 0][mask]
                 gripper_head_predictions=griper_collision_classifier[j, 0][mask]
                 shift_head_predictions = shift_affordance_classifier[j, 0][mask]
+                background_class_predictions = background_class.permute(0,2, 3, 1)[j, :, :, 0][mask]
 
                 '''limits'''
                 with torch.no_grad():
+                    normals = suction_direction[j].permute(1, 2, 0)[mask].detach().cpu().numpy()
+                    objects_mask = background_class_predictions.detach().cpu().numpy() <= 0.5
                     gripper_head_max_score = torch.max(griper_collision_classifier).item()
                     gripper_head_score_range = (gripper_head_max_score - torch.min(griper_collision_classifier)).item()
                     suction_head_max_score = torch.max(suction_quality_classifier).item()
@@ -268,38 +265,52 @@ class TrainActionNet:
                     shift_head_max_score = torch.max(shift_affordance_classifier).item()
                     shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
 
-                '''view suction scores'''
+                '''background detection head'''
+                bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.0015, view=False, file_index=file_ids[j])
+                if bin_mask is not None:
+                    label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
+
+                    background_loss += balanced_bce_loss(background_class_predictions,label)
+
+                    self.background_detector_statistics.update_confession_matrix(label,background_class_predictions)
+
+                    non_zero_background_loss_counter+=1
+
                 for k in range(instances_per_sample):
-                    '''gripper head'''
-                    gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=self.gripper_head_statistics.label_balance_indicator)
+                    '''gripper collision head'''
+                    gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.gripper_head_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions[gripper_target_index]
                     gripper_target_pose = gripper_poses[gripper_target_index]
                     gripper_loss+=gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,self.gripper_head_statistics)
 
-                    '''suction head'''
-                    suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=self.suction_head_statistics.label_balance_indicator)
+                    '''suction seal head'''
+                    suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.suction_head_statistics.label_balance_indicator)
                     suction_prediction_ = suction_head_predictions[suction_target_index]
-                    suction_loss+=suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,self.suction_head_statistics,spatial_mask)
+                    suction_loss+=suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,self.suction_head_statistics,objects_mask)
 
-                    '''shift head'''
+                    '''shift affordance head'''
                     shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=self.shift_head_statistics.label_balance_indicator)
                     shift_target_point = pc[shift_target_index]
                     shift_prediction_=shift_head_predictions[shift_target_index]
-                    shift_loss+=shift_affordance_loss(pc,shift_target_point,spatial_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)
+                    shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)
 
             decay_= lambda scores:torch.clamp(scores-torch.zeros_like(scores),0).mean()
-
             decay_loss=decay_(griper_collision_classifier)+decay_(suction_quality_classifier)+decay_(shift_affordance_classifier)
             decay_loss*=0.3
 
-            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss+decay_loss
+            if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
+
+            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss*10+decay_loss+background_loss
             loss.backward()
             self.gan.generator_optimizer.step()
 
             self.suction_head_statistics.running_loss += suction_loss.item()
             self.gripper_head_statistics.running_loss += gripper_loss.item()
             self.shift_head_statistics.running_loss += shift_loss.item()
+            self.background_detector_statistics.running_loss+=background_loss.item()
+
+            if i%500==0 and i!=0:self.export_check_points()
 
             pi.step(i)
         pi.end()
@@ -309,23 +320,25 @@ class TrainActionNet:
         self.export_check_points()
 
     def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times):
-        self.suction_head_statistics.print()
-        self.gripper_head_statistics.print()
-        self.shift_head_statistics.print()
-        self.gripper_sampler_statistics.print()
-        self.suction_sampler_statistics.print()
-        self.critic_statistics.print()
-        values = gripper_pose.permute(1, 0, 2, 3).flatten(1).detach()
-        std = torch.std(values, dim=-1)
+        with torch.no_grad():
+            self.suction_head_statistics.print()
+            self.gripper_head_statistics.print()
+            self.shift_head_statistics.print()
+            self.gripper_sampler_statistics.print()
+            self.suction_sampler_statistics.print()
+            self.critic_statistics.print()
+            self.background_detector_statistics.print()
+            values = gripper_pose.permute(1, 0, 2, 3).flatten(1).detach()
+            std = torch.std(values, dim=-1)
 
-        print(f'gripper_pose std = {std}')
-        print(f'Collision ratio = {collision_times / self.size}')
-        print(f'firm grasp ratio = {good_firmness_times / self.size}')
-        print(f'out of scope ratio = {out_of_scope_times / self.size}')
+            print(f'gripper_pose std = {std.detach()}')
+            print(f'Collision ratio = {collision_times / self.size}')
+            print(f'firm grasp ratio = {good_firmness_times / self.size}')
+            print(f'out of scope ratio = {out_of_scope_times / self.size}')
 
-        self.moving_collision_rate.view()
-        self.moving_firmness.view()
-        self.moving_out_of_scope.view()
+            self.moving_collision_rate.view()
+            self.moving_firmness.view()
+            self.moving_out_of_scope.view()
 
     def export_check_points(self):
         self.gan.export_models()
@@ -339,10 +352,11 @@ class TrainActionNet:
         self.gripper_head_statistics.save()
         self.shift_head_statistics.save()
         self.critic_statistics.save()
+        # self.background_detector_statistics.save()
 
 if __name__ == "__main__":
     for i in range(10000):
-        # train_action_net = TrainActionNet(batch_size=2, n_samples=100, learning_rate=5e-6)
+        # train_action_net = TrainActionNet(batch_size=2, n_samples=10, learning_rate=5e-5)
         # train_action_net.begin()
         try:
             cuda_memory_report()

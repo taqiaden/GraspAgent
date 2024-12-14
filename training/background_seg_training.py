@@ -2,16 +2,18 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
+from torch.nn.functional import smooth_l1_loss
 
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.background_seg_dl import BackgroundSegDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
-from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, view_statistics
 from lib.dataset_utils import online_data
 from lib.depth_map import depth_to_point_clouds
 from lib.loss.D_loss import binary_smooth_l1, binary_l1
+from lib.loss.focal_loss import FocalLoss
 from lib.report_utils import progress_indicator
 from models.background_seg import BackgroundSegNet
 from records.training_satatistics import TrainingTracker
@@ -27,7 +29,7 @@ training_buffer.main_modality=training_buffer.depth
 print=custom_print
 BATCH_SIZE=1
 learning_rate=5*1e-5
-EPOCHS = 300
+EPOCHS = 3
 weight_decay = 0.000001
 workers=2
 
@@ -92,24 +94,35 @@ def train_(file_ids):
                 pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
 
                 pc = transform_to_camera_frame(pc, reverse=True)
-                # manual_mask=estimate_object_mask(pc)
-                # bin_mask=bin_planes_detection(pc,view=False,file_index=file_index[j])
-                # if bin_mask is None:
-                #     print('Unable to detect the bin')
-                #     continue
-                # else:
-                #     c+=1
                 prediction = predicted_seg_scores[j, :, :, 0][mask]
-                predicted_mask = prediction.detach().cpu().numpy() > 0.5
-                view_npy_open3d(pc[predicted_mask])
-                continue
+
+                # manual_mask=estimate_object_mask(pc)
+                bin_mask=bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,view=True,file_index=file_index[j])
+
+                '''view'''
+                # predicted_mask = prediction.detach().cpu().numpy() > 0.5
+                # colors = np.zeros_like(pc)
+                # colors[predicted_mask, 0] += 1.
+                # view_npy_open3d(pc, color=colors)
+
+
+
+
+                if bin_mask is None:
+                    print('Unable to detect the bin')
+                    continue
+                else:
+                    c+=1
+
 
                 label=torch.from_numpy(bin_mask).to(predicted_seg_scores.device).float()
-                prediction=predicted_seg_scores[j,:,:,0][mask]
-                loss += bce_loss(prediction, label)
+                positive_cls_mask=label>0.5
+                positive_loss=bce_loss(prediction[positive_cls_mask], label[positive_cls_mask])
+                negative_loss=bce_loss(prediction[~positive_cls_mask], label[~positive_cls_mask])
+                loss += positive_loss+negative_loss
 
                 '''view and labeling'''
-                manual_labeling(j, file_index, label, prediction, pc)
+                # manual_labeling(j, file_index, label, prediction, pc)
             if c==0 : continue
             loss=loss/c
 
@@ -135,7 +148,7 @@ if __name__ == "__main__":
         # training_buffer.clear()
         # if len(training_buffer) == 0:
         #     load_training_buffer(size=10000)
-        file_ids = sample_positive_buffer(size=100, dict_name=gripper_grasp_tracker)
+        file_ids = sample_positive_buffer(size=10, dict_name=gripper_grasp_tracker)
         train_(file_ids)
         # training_buffer.clear()
 
