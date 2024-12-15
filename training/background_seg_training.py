@@ -3,7 +3,6 @@ import torch
 from colorama import Fore
 from torch import nn
 from torch.nn.functional import smooth_l1_loss
-
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.background_seg_dl import BackgroundSegDataset
@@ -97,7 +96,7 @@ def train_(file_ids):
                 prediction = predicted_seg_scores[j, :, :, 0][mask]
 
                 # manual_mask=estimate_object_mask(pc)
-                bin_mask=bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,view=True,file_index=file_index[j])
+                bin_mask=bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.002,view=True,file_index=file_index[j])
 
                 '''view'''
                 # predicted_mask = prediction.detach().cpu().numpy() > 0.5
@@ -105,15 +104,11 @@ def train_(file_ids):
                 # colors[predicted_mask, 0] += 1.
                 # view_npy_open3d(pc, color=colors)
 
-
-
-
                 if bin_mask is None:
                     print('Unable to detect the bin')
                     continue
                 else:
                     c+=1
-
 
                 label=torch.from_numpy(bin_mask).to(predicted_seg_scores.device).float()
                 positive_cls_mask=label>0.5

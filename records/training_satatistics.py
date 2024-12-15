@@ -1,3 +1,4 @@
+import torch
 from colorama import Fore
 from Configurations.dynamic_config import save_key, add_to_value, get_value, get_float
 from lib.loss.D_loss import binary_l1
@@ -148,10 +149,11 @@ class TrainingTracker():
         else:self.negative_loss+=binary_l1(prediction, label).item()**exponent
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
-        TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
-        if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
-        if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
-        return TP_mask,FP_mask,FN_mask,TN_mask
+        with torch.no_grad():
+            TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
+            if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
+            if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
+            return TP_mask,FP_mask,FN_mask,TN_mask
 
 
     def load_label_balance_indicator(self):
@@ -174,10 +176,11 @@ class TrainingTracker():
         else:
             self.prediction_balance_indicator = (1 - adapted_decay_rate) * self.prediction_balance_indicator - adapted_decay_rate
 
-    def print(self):
+    def print(self,swiped_samples=None):
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
-        if self.iterations_per_epoch is not None:
-            print(f'Average loss = {self.running_loss/self.iterations_per_epoch}')
+        size=swiped_samples if swiped_samples is not None else self.iterations_per_epoch
+        if size is not None:
+            print(f'Average loss = {self.running_loss/size}')
         else:
             print(f'Running loss = {self.running_loss}')
 

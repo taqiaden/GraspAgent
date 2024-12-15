@@ -80,6 +80,7 @@ class TrainActionNet:
         self.critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
         self.background_detector_statistics = TrainingTracker(name=module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=False)
 
+        self.swiped_samples=0
 
     def prepare_data_loader(self):
         file_ids = sample_positive_buffer(size=self.n_samples, dict_name=gripper_grasp_tracker,
@@ -95,8 +96,9 @@ class TrainActionNet:
                      collision_state_list, out_of_scope_list, firmness_state_list):
 
         '''concatenation'''
-        generated_grasps_cat = torch.cat([generated_grasps, label_generated_grasps], dim=0)
-        depth_cat = depth.repeat(2, 1, 1, 1)
+        with torch.no_grad():
+            generated_grasps_cat = torch.cat([generated_grasps, label_generated_grasps], dim=0)
+            depth_cat = depth.repeat(2, 1, 1, 1)
 
         '''get predictions'''
         critic_score = gan.critic(depth_cat, generated_grasps_cat)
@@ -165,7 +167,7 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
         return gan
@@ -266,13 +268,12 @@ class TrainActionNet:
                     shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
 
                 '''background detection head'''
-                bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.0015, view=False, file_index=file_ids[j])
+                bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-
                     background_loss += balanced_bce_loss(background_class_predictions,label)
 
-                    self.background_detector_statistics.update_confession_matrix(label,background_class_predictions)
+                    self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
 
                     non_zero_background_loss_counter+=1
 
@@ -301,16 +302,21 @@ class TrainActionNet:
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
-            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss*10+decay_loss+background_loss
+            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss*10+decay_loss+background_loss*2
             loss.backward()
             self.gan.generator_optimizer.step()
+            self.gan.generator_optimizer.zero_grad()
 
-            self.suction_head_statistics.running_loss += suction_loss.item()
-            self.gripper_head_statistics.running_loss += gripper_loss.item()
-            self.shift_head_statistics.running_loss += shift_loss.item()
-            self.background_detector_statistics.running_loss+=background_loss.item()
+            with torch.no_grad():
+                self.suction_head_statistics.running_loss += suction_loss.item()
+                self.gripper_head_statistics.running_loss += gripper_loss.item()
+                self.shift_head_statistics.running_loss += shift_loss.item()
+                self.background_detector_statistics.running_loss+=background_loss.item()
 
-            if i%500==0 and i!=0:self.export_check_points()
+            self.swiped_samples+=b
+            if i%100==0 and i!=0:
+                self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
+                self.export_check_points()
 
             pi.step(i)
         pi.end()
@@ -332,9 +338,9 @@ class TrainActionNet:
             std = torch.std(values, dim=-1)
 
             print(f'gripper_pose std = {std.detach()}')
-            print(f'Collision ratio = {collision_times / self.size}')
-            print(f'firm grasp ratio = {good_firmness_times / self.size}')
-            print(f'out of scope ratio = {out_of_scope_times / self.size}')
+            print(f'Collision ratio = {collision_times / self.swiped_samples}')
+            print(f'firm grasp ratio = {good_firmness_times / self.swiped_samples}')
+            print(f'out of scope ratio = {out_of_scope_times / self.swiped_samples}')
 
             self.moving_collision_rate.view()
             self.moving_firmness.view()
@@ -355,12 +361,15 @@ class TrainActionNet:
         # self.background_detector_statistics.save()
 
 if __name__ == "__main__":
-    for i in range(10000):
+
+    for i in range(1000):
         # train_action_net = TrainActionNet(batch_size=2, n_samples=10, learning_rate=5e-5)
         # train_action_net.begin()
+        # lr=1e-5/(1+min(9,i))
+        lr=1e-6
         try:
             cuda_memory_report()
-            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=1e-6)
+            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
             train_action_net.begin()
         except Exception as error_message:
             del train_action_net

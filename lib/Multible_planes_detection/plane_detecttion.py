@@ -195,7 +195,25 @@ def distance_to_plane(pc,plane_equ):
     p_ += plane_equ[3]
     return p_
 
-def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,view=False,file_index=None):
+def get_edge_mask(pc,mask_,edge_threshold,disregarded_dimension=0):
+    masked_pc = pc[mask_]
+    max_elevated_point_arg = np.argmax(masked_pc[:, 2])
+    max_elevated_point = masked_pc[max_elevated_point_arg]
+    if disregarded_dimension==0:
+        two2_pc = pc[:, [1,2]]
+        dist = np.linalg.norm(two2_pc - max_elevated_point[np.newaxis, [1,2]],axis=-1)
+    elif disregarded_dimension==1:
+        two2_pc = pc[:, [0,2]]
+        dist = np.linalg.norm(two2_pc - max_elevated_point[np.newaxis, [0,2]],axis=-1)
+    elif disregarded_dimension == 2:
+
+        two2_pc = pc[:, [0, 1]]
+        dist = np.linalg.norm(two2_pc - max_elevated_point[np.newaxis, [0, 1]], axis=-1)
+
+    edge_mask_ = dist < edge_threshold
+    return edge_mask_
+
+def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge_threshold=0.005,view=False,file_index=None):
     if file_index is not None:
         file_path = cache_dir + file_index + '.pkl'
         if os.path.exists(file_path):
@@ -217,17 +235,40 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,view
     masks_list = []
 
     for plane_equ, z_max, direction in detected_bin_tuple:
-        p_ = distance_to_plane(pc,plane_equ)\
-
-        if -3<plane_equ[0]<3 and -3<plane_equ[1]<3 and plane_equ[2] >0.95  :
+        p_ = distance_to_plane(pc,plane_equ)
+        if -0.3<plane_equ[0]<.3 and -0.3<plane_equ[1]<0.3 and plane_equ[2] >0.95  :
             t=floor_threshold
         else:
             t = sides_threshold
 
         if direction > 0:
-            masks_list.append((p_ > -t) & (pc[:, 2] <= z_max+t))
+            mask_=(p_ > -t) & (pc[:, 2] <= z_max+t)
         else:
-            masks_list.append((p_ < t) & (pc[:, 2] <= z_max+t))
+            mask_=(p_ < t) & (pc[:, 2] <= z_max+t)
+
+        if -0.3<plane_equ[0]<0.3 and -0.3<plane_equ[1]<0.3 and plane_equ[2] >0.95  :
+            '''floor'''
+            pass
+        else:
+
+            '''mask upper edges'''
+            if -0.3<plane_equ[0]<0.3:
+                '''sides along  y'''
+                edge_mask = get_edge_mask(pc, mask_, edge_threshold, disregarded_dimension=0)
+                mask_ = mask_ | edge_mask
+            else:
+                '''sides along  x'''
+                edge_mask = get_edge_mask(pc, mask_, edge_threshold, disregarded_dimension=1)
+                mask_ = mask_ | edge_mask
+
+            if view:
+                colors = np.zeros_like(pc)
+                colors[edge_mask, 0] += 1.
+                view_npy_open3d(pc, color=colors)
+
+
+
+        masks_list.append(mask_)
 
     bin_mask = masks_list[0] | masks_list[1] | masks_list[2] | masks_list[3] | masks_list[4]
 

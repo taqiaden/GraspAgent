@@ -85,31 +85,32 @@ def loop():
             pc = transform_to_camera_frame(pc, reverse=True)
             normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()
-            spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
+            # spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
             suction_head_predictions=suction_quality_classifier[j, 0][mask]
             gripper_head_predictions=griper_collision_classifier[j, 0][mask]
             shift_head_predictions = shift_affordance_classifier[j, 0][mask]
             background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+            objects_mask = background_class_predictions.detach().cpu().numpy() <= 0.5
 
             '''background detection head'''
-            # bin_mask = bin_planes_detection(pc, threshold=0.0015, view=True, file_index=file_ids[j])
+            # bin_mask = bin_planes_detection(pc, threshold=0.0015, view=True, file_index=file_ids[j])qYG
             # if bin_mask is not None:
             bin_mask = background_class_predictions.detach().cpu().numpy() > 0.5
-            colors = np.zeros_like(pc)
-            colors[bin_mask, 0] += 1.
+            colors =np.ones_like(pc) * [0.52, 0.8, 0.92]
+            colors[~bin_mask] /= 1.5
             view_npy_open3d(pc, color=colors)
 
-            # '''suction grasp sampler'''
-            # suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
-            # estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&spatial_mask)
-            #
-            # '''gripper grasp sampler'''
-            # gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.5
-            # dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&spatial_mask)
-            #
-            # '''shift action sampler'''
-            # shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
-            # estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
+            '''suction grasp sampler'''
+            suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
+            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask)
+
+            '''gripper grasp sampler'''
+            gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.5
+            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&objects_mask)
+
+            '''shift action sampler'''
+            shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
+            estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
 
             # view_scores(pc, gripper_head_predictions, threshold=0.5)
             # view_scores(pc, suction_head_predictions, threshold=0.5)
@@ -136,7 +137,7 @@ def loop():
             #     '''suction head'''
             #     # suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
             #     # suction_prediction_ = suction_head_predictions[suction_target_index]
-            #     # suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_head_statistics,spatial_mask,visualize=True)
+            #     # suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_he ad_statistics,spatial_mask,visualize=True)
             #
             #     '''shift head'''
             #     # shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=-1)
