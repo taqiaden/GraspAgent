@@ -63,7 +63,7 @@ class TrainValueNet:
 
     def value_model_wrapper(self):
         '''load  models'''
-        value_net = ModelWrapper(model=ValueNet,module_key=module_key)
+        value_net = ModelWrapper(model=ValueNet(),module_key=module_key)
         value_net.ini_model(train=True)
         return value_net
 

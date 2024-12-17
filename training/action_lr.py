@@ -12,7 +12,7 @@ from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
-from models.action_net import ActionNet, Critic
+from models.action_net import ActionNet, Critic, action_module_key
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
 from lib.report_utils import  progress_indicator
@@ -27,7 +27,6 @@ import numpy as np
 lock = FileLock("file.lock")
 instances_per_sample=1
 
-module_key='action_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 
@@ -72,13 +71,13 @@ class TrainActionNet:
         self.data_loader=self.prepare_data_loader()
 
         '''initialize statistics records'''
-        self.suction_head_statistics = TrainingTracker(name=module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.gripper_head_statistics = TrainingTracker(name=module_key+'_gripper_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.shift_head_statistics = TrainingTracker(name=module_key+'_shift_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.gripper_sampler_statistics = TrainingTracker(name=module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.suction_sampler_statistics = TrainingTracker(name=module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.background_detector_statistics = TrainingTracker(name=module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=False)
+        self.suction_head_statistics = TrainingTracker(name=action_module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.gripper_head_statistics = TrainingTracker(name=action_module_key+'_gripper_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.shift_head_statistics = TrainingTracker(name=action_module_key+'_shift_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.gripper_sampler_statistics = TrainingTracker(name=action_module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.suction_sampler_statistics = TrainingTracker(name=action_module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.critic_statistics = TrainingTracker(name=action_module_key+'_critic', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
+        self.background_detector_statistics = TrainingTracker(name=action_module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=False)
 
         self.swiped_samples=0
 
@@ -141,7 +140,7 @@ class TrainActionNet:
         return C_loss.item()
 
     def train_generator(self,gan, depth, batch_size, pixel_index, collision_state_list,
-                        out_of_scope_list
+                        out_of_scope_list,firmness_state_list
                         , gripper_pose, suction_direction, pcs, masks):
 
         '''Critic score of generated grasps'''
@@ -154,7 +153,7 @@ class TrainActionNet:
         for j in range(batch_size):
             pc = pcs[j]
             mask = masks[j]
-            gripper_loss = gripper_sampler_loss(pixel_index, j, collision_state_list, out_of_scope_list,  generated_critic_score)
+            gripper_loss = gripper_sampler_loss(pixel_index, j, collision_state_list[j], out_of_scope_list[j],firmness_state_list[j],  generated_critic_score)
             suction_loss = suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
             gripper_sampling_loss += gripper_loss
             suction_sampling_loss += suction_loss  # *balance_weight
@@ -163,7 +162,7 @@ class TrainActionNet:
 
     def prepare_model_wrapper(self):
         '''load  models'''
-        gan = GANWrapper(module_key, ActionNet, Critic)
+        gan = GANWrapper(action_module_key, ActionNet, Critic)
         gan.ini_models(train=True)
 
         '''optimizers'''
@@ -235,7 +234,7 @@ class TrainActionNet:
 
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,
-                                              collision_state_list, out_of_scope_list,gripper_pose,
+                                              collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
                                                                           suction_direction,pcs,masks)
             self.gripper_sampler_statistics.running_loss+=gripper_sampling_loss.item()
             self.suction_sampler_statistics.running_loss+=suction_sampling_loss.item()
@@ -302,7 +301,7 @@ class TrainActionNet:
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
-            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss+suction_sampling_loss*10+decay_loss+background_loss*2
+            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss*10+suction_sampling_loss*50+decay_loss+background_loss*30
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
@@ -327,13 +326,13 @@ class TrainActionNet:
 
     def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times):
         with torch.no_grad():
-            self.suction_head_statistics.print()
-            self.gripper_head_statistics.print()
-            self.shift_head_statistics.print()
-            self.gripper_sampler_statistics.print()
-            self.suction_sampler_statistics.print()
-            self.critic_statistics.print()
-            self.background_detector_statistics.print()
+            self.suction_head_statistics.print(self.swiped_samples)
+            self.gripper_head_statistics.print(self.swiped_samples)
+            self.shift_head_statistics.print(self.swiped_samples)
+            self.gripper_sampler_statistics.print(self.swiped_samples)
+            self.suction_sampler_statistics.print(self.swiped_samples)
+            self.critic_statistics.print(self.swiped_samples)
+            self.background_detector_statistics.print(self.swiped_samples)
             values = gripper_pose.permute(1, 0, 2, 3).flatten(1).detach()
             std = torch.std(values, dim=-1)
 

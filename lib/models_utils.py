@@ -120,13 +120,12 @@ def initialize_model_state(model,model_state_path):
         print(Fore.RED,f'Warning: model state dictionary is not found, path : {model_state_path}',Fore.RESET)
     return model
 
-def initialize_model(model,path):
-    net = model()
+def initialize_model(model_obj,path):
     try:
-        net = initialize_model_state(net, path)
+        model_obj = initialize_model_state(model_obj, path)
     except Exception as e:
         print(Fore.RED, 'Load state dictionary exception,  ', str(e), Fore.RESET)
-    return net
+    return model_obj
 
 def activate_parameters_training(module_list,activate):
     for p in module_list.parameters():

@@ -49,7 +49,7 @@ def view_suction_area(pc,dist_mask,target_point,direction,spatial_mask):
 
 def loop():
     '''load  models'''
-    quality_net=ModelWrapper(model=JointQualityNet,module_key=module_key)
+    quality_net=ModelWrapper(model=JointQualityNet(),module_key=module_key)
     quality_net.ini_model(train=False)
 
 

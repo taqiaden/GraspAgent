@@ -1,9 +1,7 @@
 import torch
 from torch import nn
-
-
-gripper_scope_model_state_path=r'gripper_scope_model_state'
-suction_scope_model_state_path=r'suction_scope_model_state'
+gripper_scope_module_key='gripper_reachability'
+suction_scope_module_key='suction_reachability'
 
 mean_=torch.tensor([0.43,0.,0.11,0.,0.,0.62]).to('cuda')
 std_=torch.tensor([0.09,0.12,0.05,0.5,0.5,0.3]).to('cuda')
@@ -39,11 +37,14 @@ class scope_net_vanilla(nn.Module):
             nn.Linear(16, 1),
         ).to('cuda')
 
+        self.sig=nn.Sigmoid()
+
     def forward(self, data ):
         s_data=scope_standardization(data)# scope includes the x,y,z point plus the approach direction
         x=self.encoder(s_data)
         res=self.res(s_data)
         x=x+res
         output = self.decoder(x)
+        output=self.sig(output)
         return output
 

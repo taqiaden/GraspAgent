@@ -11,6 +11,7 @@ from registration import camera, standardize_depth
 
 use_bn=False
 use_in=True
+action_module_key='action_net'
 
 def randomize_approach(approach,randomization_ratio=0.0):
     random_tensor=torch.rand_like(approach)
@@ -97,7 +98,6 @@ class BackgroundDetector(nn.Module):
         output_2d=self.sig(output_2d)
         return output_2d
 
-
 class ActionNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -138,12 +138,12 @@ class ActionNet(nn.Module):
         suction_direction=self.suction_sampler(features)
 
         '''gripper collision head'''
-        gripper_pose_detached=torch.clip(gripper_pose.detach(),0.,1.)
+        gripper_pose_detached=gripper_pose.detach().clone()
+        gripper_pose_detached[:,-2:]=torch.clip(gripper_pose_detached[:,-2:],0.,1.)
         griper_collision_classifier = self.gripper_collision(features, gripper_pose_detached)
 
-
         '''suction quality head'''
-        suction_direction_detached=torch.clip(suction_direction.detach(),0.,1.)
+        suction_direction_detached=suction_direction.detach().clone()
         suction_quality_classifier = self.suction_quality(features, suction_direction_detached)
 
         '''shift affordance head'''
@@ -158,7 +158,6 @@ class ActionNet(nn.Module):
         suction_quality_classifier=self.sigmoid(suction_quality_classifier)
         shift_affordance_classifier=self.sigmoid(shift_affordance_classifier)
         background_class=self.sigmoid(background_class)
-
 
         '''reshape'''
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)

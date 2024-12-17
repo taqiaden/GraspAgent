@@ -68,7 +68,7 @@ def train_(file_ids):
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=workers, shuffle=True)
 
     '''model'''
-    background_seg=ModelWrapper(model=BackgroundSegNet,module_key=module_key)
+    background_seg=ModelWrapper(model=BackgroundSegNet(),module_key=module_key)
     background_seg.ini_model()
 
     '''optimizer'''

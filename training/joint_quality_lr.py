@@ -48,7 +48,7 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
 
 def train(batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
     '''load  models'''
-    quality_net=ModelWrapper(model=JointQualityNet,module_key=module_key)
+    quality_net=ModelWrapper(model=JointQualityNet(),module_key=module_key)
     quality_net.ini_model(train=True)
 
     grasp_sampler =GANWrapper(module_key=grasp_sampler_key,generator=GraspSampler)

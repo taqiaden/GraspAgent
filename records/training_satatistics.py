@@ -1,5 +1,7 @@
 import torch
 from colorama import Fore
+from torch.utils.hipify.hipify_python import value
+
 from Configurations.dynamic_config import save_key, add_to_value, get_value, get_float
 from lib.loss.D_loss import binary_l1
 
@@ -123,13 +125,13 @@ class MovingRate():
         print(f'{self.sub_name} = {truncated_moving_rate}',end='')
         print(Fore.RESET)
 
-class TrainingTracker():
+class TrainingTracker:
     def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False,track_prediction_balance=False):
         self.name=name
         self.iterations_per_epoch=iterations_per_epoch
         self.samples_size=samples_size
 
-        self.running_loss = 0.
+        self.running_loss_ = 0.
 
         '''confession matrix'''
         self.confession_matrix=ConfessionMatrix()
@@ -143,6 +145,20 @@ class TrainingTracker():
         self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
         self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
+        self.loss_moving_average_=self.load_loss_moving_average()
+        self.loss_update_counter=0
+
+    @property
+    def running_loss(self):
+        return self.running_loss_
+
+    @running_loss.setter
+    def running_loss(self,new_value):
+        self.running_loss_=new_value
+        self.loss_update_counter+=1
+        adaptive_decay = (self.loss_update_counter / (self.loss_update_counter + 10000)) ** 2
+        adaptive_decay =max(0.0001, min(adaptive_decay, 0.1))
+        self.loss_moving_average_=adaptive_decay * (self.running_loss_/self.loss_update_counter) + self.loss_moving_average_ * (1 - adaptive_decay)
 
     def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
         if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent
@@ -158,6 +174,9 @@ class TrainingTracker():
 
     def load_label_balance_indicator(self):
         return get_float('label_balance_indicator',section=self.name)
+
+    def load_loss_moving_average(self):
+        return get_float('loss_moving_average',section=self.name)
 
     def load_prediction_balance_indicator(self):
         return get_float('prediction_balance_indicator',section=self.name)
@@ -184,6 +203,8 @@ class TrainingTracker():
         else:
             print(f'Running loss = {self.running_loss}')
 
+        print(f'Loss (moving average) = {self.loss_moving_average_}')
+
         if self.confession_matrix.total_classification()>0:
             self.confession_matrix.view()
 
@@ -208,3 +229,4 @@ class TrainingTracker():
     def save(self):
         save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
         save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
+        save_key('loss_moving_average', self.loss_moving_average_, section=self.name)

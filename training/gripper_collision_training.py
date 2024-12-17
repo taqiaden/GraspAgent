@@ -96,7 +96,7 @@ def train_(file_ids,learning_rate):
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=workers, shuffle=True)
 
     '''model'''
-    gripper_collision=ModelWrapper(model=GripperCollisionNet,module_key=module_key)
+    gripper_collision=ModelWrapper(model=GripperCollisionNet(),module_key=module_key)
     gripper_collision.ini_model()
     generator = initialize_model(gripper_sampler_net, gripper_sampler_path).eval()
 

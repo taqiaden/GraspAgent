@@ -4,27 +4,27 @@ import time
 import numpy as np
 import torch
 from colorama import Fore
+
+import training.action_lr
 from Configurations import config
 from Configurations.run_config import simulation_mode, view_grasp_suction_points, suction_limit, gripper_limit, \
     suction_factor, gripper_factor, view_score_gradient, \
     chances_ref, shuffling_probability, view_action, report_result, scope_threshold, use_gripper, use_suction
 from Online_data_audit.process_feedback import save_grasp_sample
+from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from grasp_post_processing import gripper_processing, suction_processing
 from lib.ROS_communication import wait_for_feedback, ROS_communication_file
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import check_image_similarity
-from lib.models_utils import  initialize_model_state
 from lib.report_utils import progress_indicator
 from masks import  static_spatial_mask
-from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path
-from models.gripper_quality import gripper_quality_net, gripper_quality_model_state_path
-from models.scope_net import scope_net_vanilla, suction_scope_model_state_path, gripper_scope_model_state_path
-from models.suction_quality import suction_quality_net, suction_quality_model_state_path
-from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
+from models.action_net import ActionNet, action_module_key
+from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
+from models.value_net import ValueNet, value_module_key
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_new_perception, get_side_bins_images
 from registration import camera
-from visualiztion import visualize_grasp_and_suction_points, view_score, view_npy_open3d
+from visualiztion import view_score, visualize_grasp_and_suction_points
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
@@ -71,12 +71,11 @@ class GraspAgent():
         self.setting=Setting()
 
         '''models'''
-        self.gripper_D_model = None
-        self.suction_D_model = None
-        self.gripper_G_model = None
-        self.Suction_G_model = None
-        self.suction_scope_model = None
-        self.gripper_scope_model = None
+        self.action_net = None
+        self.value_net = None
+
+        self.suction_arm_reachability_net = None
+        self.gripper_arm_reachability_net = None
 
         '''ctime records'''
         # self.c_time_list=[-1,-1,-1,-1,-1,-1]
@@ -102,61 +101,64 @@ class GraspAgent():
         self.data=[]
 
     def initialize_check_points(self):
-        pi = progress_indicator('Loading check points  ', max_limit=7)
-        '''load check points'''
+        pi = progress_indicator('Loading check points  ', max_limit=5)
+
         pi.step(1)
-        # new_c_time=smbclient.path.getctime(suction_quality_model_state_path)
-        # if self.c_time_list[0] != new_c_time:
-        self.suction_D_model = initialize_model_state(suction_quality_net(), suction_quality_model_state_path)
-            # self.c_time_list[0] = new_c_time
+
+        action_net = GANWrapper(action_module_key, ActionNet)
+        action_net.ini_generator(train=False)
+        self.action_net = action_net.generator
+
         pi.step(2)
 
-        self.suction_scope_model = initialize_model_state(scope_net_vanilla(in_size=6), suction_scope_model_state_path)
+        value_net = ModelWrapper(model=ValueNet(), module_key=value_module_key)
+        value_net.ini_model(train=False)
+        self.value_net = value_net.model
+
         pi.step(3)
 
-        self.gripper_D_model = initialize_model_state(gripper_quality_net(), gripper_quality_model_state_path)
+        gripper_scope = ModelWrapper(model=scope_net_vanilla(in_size=6), module_key=gripper_scope_module_key)
+        gripper_scope.ini_model(train=False)
+        self.gripper_arm_reachability_net = gripper_scope.model
+
         pi.step(4)
 
-        self.gripper_scope_model=initialize_model_state(scope_net_vanilla(in_size=6),gripper_scope_model_state_path)
+        suction_scope = ModelWrapper(model=scope_net_vanilla(in_size=6), module_key=suction_scope_module_key)
+        suction_scope.ini_model(train=False)
+        self.suction_arm_reachability_net=suction_scope.model
+
         pi.step(5)
 
-        self.gripper_G_model = initialize_model_state(gripper_sampler_net(), gripper_sampler_path)
-        pi.step(6)
-
-        self.Suction_G_model = initialize_model_state(suction_sampler_net(), suction_sampler_model_state_path)
-        pi.step(7)
-
-        '''set evaluation mode'''
-        self.gripper_G_model.eval()
-        self.gripper_D_model.eval()
-        self.suction_D_model.eval()
-        self.Suction_G_model.eval()
-        self.suction_scope_model.eval()
-        self.gripper_scope_model.eval()
         pi.end()
 
     def model_inference(self,depth,rgb):
         self.depth=depth
         self.rgb=rgb
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
+        rgb_torch = torch.from_numpy(self.rgb).permute(2,0,1)[None, ...].to('cuda').float()
+
+        '''action net output'''
+        gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_affordance_classifier \
+            , background_class, depth_features = self.action_net(depth_torch.clone())
+
+        '''value net output'''
+        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value = self.value_net(rgb_torch,
+                                                                                                             depth_features,
+                                                                                                             gripper_pose,
+                                                                                                             suction_direction)
 
         '''depth to point clouds'''
         voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
         voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
 
-        '''sample suction'''
-        normals_pixels = self.Suction_G_model(depth_torch.clone())
-        normals = normals_pixels.squeeze().permute(1, 2, 0)[mask] # [N,3]
-
-        '''sample gripper'''
-        poses_pixels = self.gripper_G_model(depth_torch.clone())
-        poses = poses_pixels.squeeze().permute(1, 2, 0)[mask]
+        normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
+        poses = gripper_pose.squeeze().permute(1, 2, 0)[mask]
 
         '''suction scope'''
         positions = torch.from_numpy(voxel_pc).to('cuda').float()
         approach=normals.clone()
         approach[:,2]*=-1
-        suction_scope = self.suction_scope_model(torch.cat([positions, approach], dim=-1)).squeeze().detach().cpu().numpy()
+        suction_scope = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze().detach().cpu().numpy()
         suction_scope = np.clip(suction_scope, 0, 1)
         suction_scope[suction_scope>=scope_threshold]=1.
         suction_scope[suction_scope<scope_threshold]=0.0
@@ -165,16 +167,16 @@ class GraspAgent():
         gripper_approach=poses[:,0:3]
         distance=poses[:,-2:-1]*config.distance_scope
         transition=positions+distance*gripper_approach
-        gripper_scope=self.suction_scope_model(torch.cat([transition, gripper_approach], dim=-1)).squeeze().detach().cpu().numpy()
+        gripper_scope=self.gripper_arm_reachability_net(torch.cat([transition, gripper_approach], dim=-1)).squeeze().detach().cpu().numpy()
         gripper_scope = np.clip(gripper_scope, 0, 1)
         gripper_scope[gripper_scope >= scope_threshold] = 1.
         gripper_scope[gripper_scope < scope_threshold] = 0.0
 
         '''suction quality'''
-        suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()
+        # suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()
 
         '''gripper quality'''
-        gripper_quality_score = self.gripper_D_model(depth_torch.clone(), poses_pixels.clone()).squeeze()
+        # gripper_quality_score = self.gripper_D_model(depth_torch.clone(), poses_pixels.clone()).squeeze()
 
         '''res u net processing'''
         suction_quality_score = suction_quality_score[mask].detach().cpu().numpy()

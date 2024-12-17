@@ -5,10 +5,11 @@ chances_ref = 5
 use_gripper =False
 use_suction = True
 
-view_grasp_suction_points = False
+view_grasp_suction_points = True
 view_action= True
 view_score_gradient= True
 simulation_mode = True
+offline_point_cloud= True
 
 report_result=False
 
@@ -20,6 +21,6 @@ gripper_limit=0.5
 suction_factor=1.0
 gripper_factor=1.0
 
-score_threshold=0.0
+score_threshold=0.5
 
-scope_threshold=1.
+scope_threshold=0.5

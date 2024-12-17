@@ -21,7 +21,10 @@ execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
 gripper_scope_data_path='./dataset/scope_data/gripper/'
 suction_scope_data_path='./dataset/scope_data/suction/'
-scope_data_dir='./dataset/scope_data/'
+# scope_data_dir='./dataset/scope_data/'
+scope_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/scope_data/'
+
+
 configure_smbclient()
 
 maximum_scope_samples=10000
@@ -94,7 +97,6 @@ def generate_gripper_sample(gripper_pool,model):
 
     '''sample'''
     T,grasp_width=sample_pose(model)
-
 
     '''publish gripper pose'''
     pre_grasp_mat, end_effecter_mat = get_pose_matrixes(T, k_end_effector=0.169, k_pre_grasp=0.23)

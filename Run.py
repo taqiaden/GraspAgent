@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import numpy as np
 import torch
 from Grasp_Agent_ import GraspAgent
 from lib.bin_utils import empty_bin_check
 from lib.dataset_utils import configure_smbclient
+from lib.image_utils import depth_to_gray_scale
 from process_perception import get_new_perception, get_side_bins_images, get_scene_depth,get_scene_RGB
 
 configure_smbclient()
@@ -15,9 +17,10 @@ while True:
     with torch.no_grad():
         '''get modalities'''
         depth=get_scene_depth()
-        rgb=get_scene_RGB()
+        # rgb=get_scene_RGB()
+        random_rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
         '''inference and execution'''
-        grasp_agent.model_inference(depth,rgb)
+        grasp_agent.model_inference(depth,random_rgb)
         actions, states, data = grasp_agent.execute()
         if grasp_agent.mode.simulation: get_new_perception()
         for action_, state_, data_ in zip(actions, states, data):

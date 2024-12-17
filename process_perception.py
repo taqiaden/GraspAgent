@@ -3,7 +3,7 @@ import subprocess
 import cv2
 from colorama import Fore
 from Configurations.config import home_dir
-from Configurations.run_config import simulation_mode
+from Configurations.run_config import simulation_mode, offline_point_cloud
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth
 from lib.pc_utils import refine_point_cloud, random_down_sampling, closest_point, scene_point_clouds_mask
 from lib.report_utils import wait_indicator as wi
@@ -20,21 +20,23 @@ get_point_bash='./bash/get_point.sh'
 texture_image_path = config.home_dir + 'texture_image.jpg'
 get_rgb_bash='./bash/get_rgb.sh'
 rgb_path='Frame_0.ppm'
-offline_point_cloud= True
 
 last_rgb=None
 last_depth=None
 
 def get_new_perception():
-    ctime_stamp_rgb = os.path.getctime(rgb_path)
-    ctime_stamp_texture = os.path.getctime(texture_image_path)
-    ctime_stamp_pc = os.path.getctime(sensory_pc_path)
+
     if simulation_mode and offline_point_cloud == True:
         # get new data from data pool
         from lib.dataset_utils import online_data
         online_data=online_data()
         pc=online_data.load_random_pc()
         np.save(sensory_pc_path,pc)
+        return
+
+    ctime_stamp_rgb = os.path.getctime(rgb_path)
+    ctime_stamp_texture = os.path.getctime(texture_image_path)
+    ctime_stamp_pc = os.path.getctime(sensory_pc_path)
 
     subprocess.run(get_point_bash)
     subprocess.run(get_rgb_bash)

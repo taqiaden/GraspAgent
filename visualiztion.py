@@ -29,20 +29,30 @@ def visualize_vox(npy):
 def dense_grasps_visualization(pc, generated_pose_7,view_mask):
     T_d_list = []
     width_list = []
+    total_size=view_mask.sum()
+    if total_size<1: return
+    sampled_indexes=np.where(view_mask==1)[0]
+    np.random.shuffle(sampled_indexes)
+
+    # skip_step=int(np.log(total_size))^2
     for i in range(5000):
-        random_index = np.random.randint(0, pc.shape[0])
+        # random_index = np.random.randint(0, pc.shape[0])
+        #
+        # if not view_mask[ random_index] : continue
+        next_=int(i+(i**2)/10)
+        if total_size<=next_:break
+        picked_index=sampled_indexes[next_]
 
-        if not view_mask[ random_index] : continue
-        target_pose_7 = generated_pose_7[ random_index]
+        target_pose_7 = generated_pose_7[ picked_index]
 
-        target_point = pc[random_index]
+        target_point = pc[picked_index]
         T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
         T_d_list.append(T_d)
         width_list.append(width)
     if len(width_list) == 0: return
     T_d = np.stack(T_d_list, axis=0)
     width = np.stack(width_list, axis=0)
-
+    print(f'The sampled size of gripper grasp equals to {len(T_d_list)} out of total {total_size} ')
     vis_scene(T_d, width, npy=pc)
 
 

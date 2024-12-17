@@ -117,7 +117,7 @@ def train_(file_ids,adaptive_learning_rate):
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=workers, shuffle=True)
 
     '''model'''
-    model_wrapper=ModelWrapper(model=ShiftNet,module_key=module_key)
+    model_wrapper=ModelWrapper(model=ShiftNet(),module_key=module_key)
     model_wrapper.ini_model()
 
     '''optimizer'''

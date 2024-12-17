@@ -57,11 +57,11 @@ class GANWrapper():
 
     '''model operations'''
     def ini_generator(self,train=True):
-        self.generator = initialize_model(self.generator, self.module_key+'_generator')
+        self.generator = initialize_model(self.generator(), self.module_key+'_generator')
         self.generator.train(train)
 
     def ini_critic(self,train=True):
-        self.critic = initialize_model(self.critic, self.module_key+'_critic')
+        self.critic = initialize_model(self.critic(), self.module_key+'_critic')
         self.critic.train(train)
 
     def ini_models(self,train=True):

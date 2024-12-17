@@ -7,24 +7,18 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker import  gripper_grasp_tracker, sample_all_positive_and_negatives, suction_grasp_tracker
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from dataloaders.value_dl import ValueDataset
-from interpolate_bin import estimate_object_mask
 from lib.IO_utils import   custom_print
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.D_loss import binary_smooth_l1
-from models.action_net import ActionNet
-from models.value_net import ValueNet
+from models.action_net import ActionNet, action_module_key
+from models.value_net import ValueNet, value_module_key
 from records.training_satatistics import TrainingTracker
-from registration import camera
 from lib.report_utils import  progress_indicator
-from action_lr import module_key as action_module_key
-from training.learning_objectives.suction_seal import mse_loss
-from visualiztion import view_score2
+# from action_lr import module_key as action_module_key
 
 instances_per_sample=1
 
-module_key='value_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 normal_weight = 10
@@ -49,10 +43,10 @@ class TrainValueNet:
         self.data_loader=self.prepare_data_loader()
 
         '''initialize statistics records'''
-        self.gripper_grasp_statistics = TrainingTracker(name=module_key + '_gripper_grasp',
+        self.gripper_grasp_statistics = TrainingTracker(name=value_module_key + '_gripper_grasp',
                                                        iterations_per_epoch=len(self.data_loader),
                                                        samples_size=self.size, track_prediction_balance=True)
-        self.suction_grasp_statistics = TrainingTracker(name=module_key + '_suction_grasp',
+        self.suction_grasp_statistics = TrainingTracker(name=value_module_key + '_suction_grasp',
                                                        iterations_per_epoch=len(self.data_loader),
                                                        samples_size=self.size, track_prediction_balance=True)
 
@@ -76,7 +70,7 @@ class TrainValueNet:
 
     def value_model_wrapper(self):
         '''load  models'''
-        value_net = ModelWrapper(model=ValueNet,module_key=module_key)
+        value_net = ModelWrapper(model=ValueNet(),module_key=value_module_key)
         value_net.ini_model(train=True)
 
         '''optimizers'''
@@ -116,9 +110,9 @@ class TrainValueNet:
                     gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
                     suction_direction[j, :, pix_A, pix_B] = normal[j]
 
-            griper_grasp_score,suction_grasp_score=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction)
+            griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction)
 
-            '''accumulate loss'''
+            '''learning objectives'''
             gripper_grasp_loss = torch.tensor([0.],device=griper_grasp_score.device)
             suction_grasp_loss = torch.tensor([0.],device=griper_grasp_score.device)
 
@@ -128,16 +122,19 @@ class TrainValueNet:
                 label_ = score[j:j + 1]
                 if is_gripper[j] == 1:
                     prediction_ = griper_grasp_score[j, :, pix_A, pix_B]
-                    l=binary_smooth_l1(prediction_, label_)
+                    l=binary_smooth_l1(prediction_, label_)**2
+                    # print(f'g {prediction_.item()}, {label_}')
                     gripper_grasp_loss += l
                     self.gripper_grasp_statistics.running_loss+=l.item()
-                    self.gripper_grasp_statistics.update_confession_matrix(label_,prediction_)
+                    self.gripper_grasp_statistics.update_confession_matrix(label_,prediction_.detach())
                 else:
                     prediction_ = suction_grasp_score[j, :, pix_A, pix_B]
-                    l=binary_smooth_l1(prediction_, label_)
+                    l=binary_smooth_l1(prediction_, label_)**2
                     suction_grasp_loss += l
+                    # print(f's {prediction_.item()}, {label_}')
+
                     self.suction_grasp_statistics.running_loss += l.item()
-                    self.suction_grasp_statistics.update_confession_matrix(label_,prediction_)
+                    self.suction_grasp_statistics.update_confession_matrix(label_,prediction_.detach())
 
 
             loss = (gripper_grasp_loss+suction_grasp_loss)/b
@@ -150,12 +147,15 @@ class TrainValueNet:
             loss.backward()
             self.value_net.optimizer.step()
 
+            if i%100==0 and i!=0:
+                self.export_check_points()
+                self.view()
+
             pi.step(i)
         pi.end()
 
         self.export_check_points()
         self.view()
-
 
     def view(self):
         self.gripper_grasp_statistics.print()
@@ -169,12 +169,12 @@ class TrainValueNet:
         self.suction_grasp_statistics.save()
 
 if __name__ == "__main__":
-    train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=1e-5)
+    train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-4)
     train_value_net.begin()
     for i in range(10000):
         try:
             cuda_memory_report()
-            train_value_net=TrainValueNet(batch_size=2, n_samples=None, learning_rate=1e-5)
+            train_value_net=TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-4)
             train_value_net.begin()
         except Exception as error_message:
             print(error_message)
