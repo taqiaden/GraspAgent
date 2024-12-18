@@ -3,28 +3,31 @@ import subprocess
 import time
 import numpy as np
 import torch
+import trimesh
 from colorama import Fore
-
-import training.action_lr
 from Configurations import config
-from Configurations.run_config import simulation_mode, view_grasp_suction_points, suction_limit, gripper_limit, \
+from Configurations.ENV_boundaries import bin_center
+from Configurations.run_config import simulation_mode, view_grasp_suction_points, \
     suction_factor, gripper_factor, view_score_gradient, \
-    chances_ref, shuffling_probability, view_action, report_result, scope_threshold, use_gripper, use_suction
+    chances_ref, shuffling_probability, view_action, report_result, use_gripper, use_suction
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from grasp_post_processing import gripper_processing, suction_processing
+from grasp_post_processing import suction_processing, gripper_grasp_processing, gripper_shift_processing, \
+    exploration_probabilty, view_masked_grasp_pose
 from lib.ROS_communication import wait_for_feedback, ROS_communication_file
+from lib.bbox import convert_angles_to_transformation_form
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.gripper_exploration import local_exploration
 from lib.image_utils import check_image_similarity
 from lib.report_utils import progress_indicator
-from masks import  static_spatial_mask
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.value_net import ValueNet, value_module_key
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_new_perception, get_side_bins_images
 from registration import camera
-from visualiztion import view_score, visualize_grasp_and_suction_points
+from training.learning_objectives.shift_affordnace import shift_execution_length
+from visualiztion import view_npy_open3d, vis_scene
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'
@@ -47,6 +50,23 @@ class View():
         self.scores=view_score_gradient
         self.action=view_action
 
+class Action():
+    def __init__(self,point_index,action_index):
+        self.point_index=point_index
+        self.action_index=action_index
+        self.is_shift=action_index>1
+        self.is_grasp=action_index<=1
+        self.use_gripper_arm=(action_index==0) or (action_index==2)
+        self.use_suction_arm=(action_index==1) or (action_index==3)
+        
+        self.transformation=None
+        self.width=None
+        
+        self.is_executable=None
+        
+        
+        
+        
 def prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask):
     index_suction_cls = [i for i in range(len(suction_mask)) if suction_mask[i]]
     index_grasp_cls = [j for j in range(len(gripper_mask)) if gripper_mask[j]]
@@ -63,11 +83,29 @@ def prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_
 
     return candidates
 
+
+def get_shift_end_points(start_points):
+    targets=torch.zeros_like(start_points)
+    targets[:,0:2]+=torch.from_numpy(bin_center[0:2]).cuda()
+    targets[:,2] += start_points[:,2]
+    directions = targets - start_points
+    end_points = start_points + ((directions * shift_execution_length) / torch.linalg.norm(directions,axis=-1,keepdims=True))
+    return end_points
+
+
+def view_mask(voxel_pc, score, pivot=0.5):
+    mask_=score.cpu().numpy()>pivot
+    if mask_.sum() > 0:
+        colors = np.ones_like(voxel_pc) * [0.52, 0.8, 0.92]
+        colors[~mask_] /= 1.5
+        view_npy_open3d(voxel_pc, color=colors)
+
+
 class GraspAgent():
     def __init__(self):
         '''configurations'''
         self.mode=Mode()
-        self.view=View()
+        self.view_options=View()
         self.setting=Setting()
 
         '''models'''
@@ -77,9 +115,6 @@ class GraspAgent():
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
 
-        '''ctime records'''
-        # self.c_time_list=[-1,-1,-1,-1,-1,-1]
-
         '''modalities'''
         self.point_clouds = None
         self.depth=None
@@ -87,13 +122,17 @@ class GraspAgent():
 
         '''dense candidates'''
         self.gripper_poses=None
-        self.normal=None
-        self.candidates=None
-        self.gripper_scores=None
-        self.suction_scores=None
+        self.gripper_grasp_mask=None
+        self.suction_grasp_mask=None
+        self.gripper_shift_mask=None
+        self.suction_shift_mask=None
         self.voxel_pc=None
+        self.normals=None
+        self.q_value=None
+        self.trace_mask=None
 
-        self.n_candidates=0
+        self.n_grasps=0
+        self.n_shifts=0
 
         '''execution results'''
         self.actions=[]
@@ -131,6 +170,56 @@ class GraspAgent():
 
         pi.end()
 
+    def get_suction_grasp_reachability(self,positions,normals):
+        approach=normals.clone()
+        approach[:,2]*=-1
+        suction_scope = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        return suction_scope
+
+    def get_suction_shift_reachability(self,positions,normals):
+        approach=normals.clone()
+        approach[:,2]*=-1
+        suction_scope_a = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        shift_end_positions=get_shift_end_points(positions)
+        suction_scope_b = self.suction_arm_reachability_net(torch.cat([shift_end_positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        result=torch.stack([suction_scope_a,suction_scope_b],dim=-1)
+        result,_=torch.min(result,dim=-1)
+        return result
+
+    def get_gripper_grasp_reachability(self,positions,poses):
+        gripper_approach=(poses[:,0:3]).clone()
+        gripper_approach[:,2]*=-1
+        distance=poses[:,-2:-1]*config.distance_scope
+        transition=positions+distance*gripper_approach
+        gripper_scope=self.gripper_arm_reachability_net(torch.cat([transition, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        return gripper_scope
+
+    def get_gripper_shift_reachability(self,positions,normals):
+        gripper_approach=normals.clone()
+        gripper_approach[:,2]*=-1
+        gripper_scope_a=self.gripper_arm_reachability_net(torch.cat([positions, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        shift_end_positions = get_shift_end_points(positions)
+        gripper_scope_b=self.gripper_arm_reachability_net(torch.cat([shift_end_positions, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        result = torch.stack([gripper_scope_a, gripper_scope_b], dim=-1)
+        result, _ = torch.min(result, dim=-1)
+        return result
+
+    def next_action(self, epsilon=0.0):
+        masked_q_value=self.q_value*(1-self.trace_mask)
+        if np.random.rand()>epsilon:
+            flattened_index=torch.argmax(masked_q_value)
+            point_index = math.floor(flattened_index / 4)
+            action_index = flattened_index - int(4 * point_index)
+        else:
+            available_indexes=torch.nonzero(masked_q_value)
+            random_pick=np.random.random_integers(0,available_indexes.shape[0]-1)
+            point_index = available_indexes[random_pick][0]
+            action_index = available_indexes[random_pick][1]
+
+        self.trace_mask[point_index,action_index]=1
+        return point_index,action_index
+
+
     def model_inference(self,depth,rgb):
         self.depth=depth
         self.rgb=rgb
@@ -138,7 +227,7 @@ class GraspAgent():
         rgb_torch = torch.from_numpy(self.rgb).permute(2,0,1)[None, ...].to('cuda').float()
 
         '''action net output'''
-        gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_affordance_classifier \
+        gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
             , background_class, depth_features = self.action_net(depth_torch.clone())
 
         '''value net output'''
@@ -148,84 +237,180 @@ class GraspAgent():
                                                                                                              suction_direction)
 
         '''depth to point clouds'''
-        voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
-        voxel_pc = transform_to_camera_frame(voxel_pc, reverse=True)
+        self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
+        self.voxel_pc = transform_to_camera_frame(self.voxel_pc, reverse=True)
 
-        normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
+        '''pixels to points'''
+        self.normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
         poses = gripper_pose.squeeze().permute(1, 2, 0)[mask]
+        griper_collision_classifier=griper_collision_classifier.squeeze()[mask]
+        griper_grasp_score=griper_grasp_score.squeeze()[mask]
+        suction_seal_classifier=suction_seal_classifier.squeeze()[mask]
+        suction_grasp_score=suction_grasp_score.squeeze()[mask]
+        background_class=background_class.squeeze()[mask]
+        shift_appealing=shift_appealing.squeeze()[mask]
+        positions = torch.from_numpy(self.voxel_pc).to('cuda').float()
 
-        '''suction scope'''
-        positions = torch.from_numpy(voxel_pc).to('cuda').float()
-        approach=normals.clone()
-        approach[:,2]*=-1
-        suction_scope = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze().detach().cpu().numpy()
-        suction_scope = np.clip(suction_scope, 0, 1)
-        suction_scope[suction_scope>=scope_threshold]=1.
-        suction_scope[suction_scope<scope_threshold]=0.0
+        '''grasp reachability'''
+        suction_grasp_scope = self.get_suction_grasp_reachability(positions,self.normals)
+        gripper_grasp_scope=self.get_gripper_grasp_reachability(positions,poses)
 
-        '''gripper scope'''
-        gripper_approach=poses[:,0:3]
-        distance=poses[:,-2:-1]*config.distance_scope
-        transition=positions+distance*gripper_approach
-        gripper_scope=self.gripper_arm_reachability_net(torch.cat([transition, gripper_approach], dim=-1)).squeeze().detach().cpu().numpy()
-        gripper_scope = np.clip(gripper_scope, 0, 1)
-        gripper_scope[gripper_scope >= scope_threshold] = 1.
-        gripper_scope[gripper_scope < scope_threshold] = 0.0
+        '''grasp actions'''
+        self.gripper_grasp_mask=((background_class<0.5)*(gripper_grasp_scope>0.5)
+                               *(griper_collision_classifier>0.5)
+                               *(griper_grasp_score*gripper_factor>0.5)* int(self.setting.use_gripper))
+        self.suction_grasp_mask=((background_class<0.5)*(suction_grasp_scope>0.5)
+                               *(suction_seal_classifier>0.5)
+                               *(suction_grasp_score*suction_factor>0.5)* int(self.setting.use_suction))
+        self.suction_grasp_mask=self.suction_grasp_mask.squeeze()
+        self.gripper_grasp_mask=self.gripper_grasp_mask.squeeze()
 
-        '''suction quality'''
-        # suction_quality_score = self.suction_D_model(depth_torch.clone(), normals_pixels.clone()).squeeze()
+        '''shift reachability'''
+        gripper_shift_scope=self.get_gripper_shift_reachability( positions,self.normals)
+        suction_shift_scope=self.get_suction_shift_reachability(positions,self.normals)
 
-        '''gripper quality'''
-        # gripper_quality_score = self.gripper_D_model(depth_torch.clone(), poses_pixels.clone()).squeeze()
+        '''shift actions'''
+        self.gripper_shift_mask=(shift_appealing>0.5)*(gripper_shift_scope>0.5)#*(shift_affordance_classifier>0.5)
+        self.suction_shift_mask=(shift_appealing>0.5)*(suction_shift_scope>0.5)#*(shift_affordance_classifier>0.5)
 
-        '''res u net processing'''
-        suction_quality_score = suction_quality_score[mask].detach().cpu().numpy()
-        gripper_quality_score = gripper_quality_score[mask].detach().cpu().numpy()
-
-        '''final scores'''
-        # suction_scores=suction_quality_score * suction_scope
-        suction_scores= suction_quality_score
-        # gripper_scores = gripper_quality_score #* gripper_scope
-        gripper_scores = gripper_scope
-
-        suction_scores = suction_scores.squeeze()
-        gripper_scores = gripper_scores.squeeze()
-
-        '''set limits'''
-        suction_scores = suction_scores * suction_factor * int(self.setting.use_suction)
-        gripper_scores = gripper_scores * gripper_factor * int(self.setting.use_gripper)
-
+        '''gripper pose convention'''
         self.gripper_poses = vectors_to_ratio_metrics(poses)
-        self.normals = normals.detach().cpu().numpy()
 
-        '''Masks'''
-        spatial_mask=static_spatial_mask(voxel_pc)
-        gripper_mask=spatial_mask & (gripper_scores>gripper_limit)
-        suction_mask=spatial_mask & (suction_scores>suction_limit)
+        '''initiate random policy'''
+        self.q_value=torch.randn_like(q_value.squeeze().permute(1,2,0)[mask])
+        self.trace_mask=torch.zeros_like(self.q_value)
 
-        '''Visualization'''
-        if self.view.grasp_points: visualize_grasp_and_suction_points(suction_mask, gripper_mask,voxel_pc)
-        if self.view.scores:
-            view_score(voxel_pc, gripper_mask, gripper_scores)
-            view_score(voxel_pc, suction_mask, suction_scores)
+        '''mask the action-value'''
+        self.q_value[:,0]*=self.gripper_grasp_mask
+        self.q_value[:,1]*=self.suction_grasp_mask
+        self.q_value[:,2]*=self.gripper_shift_mask
+        self.q_value[:,2]*=self.suction_shift_mask
 
-        # if view_sampled_suction:
-        #     target_mask = get_spatial_mask(data)
-        #     estimate_suction_direction(data.cpu().numpy().squeeze(), view=True, view_mask=target_mask,score=suction_score_pred)
-        # if view_sampled_griper:
-        #     dense_grasps_visualization(pc_with_normals.clone(), poses.clone(),grasp_score_pred.clone(),target_mask)
-        # suction_score_pred[suction_score_pred < suction_limit] = -1
-        # grasp_score_pred[grasp_score_pred<gripper_limit]=-1
+        '''count available actions'''
+        self.n_grasps=torch.count_nonzero(self.q_value[:,0:2])
+        self.n_shifts=torch.count_nonzero(self.q_value[:,2:4])
 
-        '''Release candidates'''
-        self.candidates= prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask)
-        self.gripper_scores=gripper_scores
-        self.suction_scores=suction_scores
-        self.voxel_pc=voxel_pc
+        print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
 
-        return self.candidates, gripper_scores, suction_scores, voxel_pc
+    def view(self):
+        view_mask(self.voxel_pc, self.gripper_grasp_mask, pivot=0.5)
+        view_mask(self.voxel_pc, self.suction_grasp_mask, pivot=0.5)
+        view_mask(self.voxel_pc, self.gripper_shift_mask, pivot=0.5)
+        view_mask(self.voxel_pc, self.suction_shift_mask, pivot=0.5)
 
-    def execute(self):
+    def gripper_grasp_processing(self,action_obj,  view=False):
+        target_point = self.voxel_pc[action_obj.point_index]
+        relative_pose_5 = self.gripper_poses[action_obj.point_index]
+        T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
+
+        activate_exploration = True if np.random.rand() < exploration_probabilty else False
+
+        T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
+                                                                      exploration_attempts=5,
+                                                                      explore_if_collision=False,
+                                                                      view_if_sucess=view_masked_grasp_pose,
+                                                                      explore=activate_exploration)
+        action_obj.is_executable= collision_intensity == 0
+        action_obj.width=width
+        action_obj.transformation=T_d
+
+        if view: vis_scene(T_d, width, npy=self.voxel_pc)
+
+    def gripper_shift_processing(self,action_obj, view=False):
+        normal = self.normals[action_obj.point_index]
+        target_point = self.voxel_pc[action_obj.point_index]
+
+        v0 = np.array([1, 0, 0])
+        a = trimesh.transformations.angle_between_vectors(v0, -normal)
+        b = trimesh.transformations.vector_product(v0, -normal)
+        T_d = trimesh.transformations.rotation_matrix(a, b)
+        T_d[:3, 3] = target_point.T
+
+        width = np.array([0])
+        action_obj.transformation=T_d
+        action_obj.is_executable=True
+
+        if view: vis_scene(T_d, width, npy=self.voxel_pc)
+
+
+    def suction_processing(self,action_obj):
+        normal = self.normals[action_obj.point_index]
+        target_point = self.voxel_pc[action_obj.point_index]
+
+        v0 = np.array([1, 0, 0])
+        a = trimesh.transformations.angle_between_vectors(v0, -normal)
+        b = trimesh.transformations.vector_product(v0, -normal)
+        T = trimesh.transformations.rotation_matrix(a, b)
+        T[:3, 3] = target_point.T
+        
+        action_obj.transformation=T
+        action_obj.is_executable=True
+
+    
+    def process_action(self,action_obj):
+        if action_obj.is_grasp:
+            if action_obj.use_gripper_arm:
+                self.gripper_grasp_processing(action_obj )
+            else:
+                self.suction_processing(action_obj)
+        else:
+            '''shift action'''
+            if action_obj.use_gripper_arm:
+                self.gripper_shift_processing(action_obj)
+            else:
+                self.suction_processing(action_obj)
+
+    def mask_arm_occupancy(self,action_obj):
+        '''mask occupied arm'''
+        if action_obj.use_gripper_arm:
+            self.trace_mask[:, [0, 2]] = self.trace_mask[:, [0, 2]] * 0 + 1
+        else:
+            self.trace_mask[:, [1, 3]] = self.trace_mask[:, [1, 3]] * 0 + 1
+
+        '''mask occupied space'''
+        approach = action_obj.transformation[0:3, 0]
+        normal = approach.copy()
+        normal[2] *= -1
+        bounding_box_point_1 = self.voxel_pc[action_obj.point_index]
+        safety_margin = 0.2
+        bounding_box_point_2 = bounding_box_point_1 + normal * safety_margin
+        if action_obj.use_gripper_arm:
+            max_y = np.max(bounding_box_point_1[1], bounding_box_point_2[1])
+            occupied_space_mask = self.voxel_pc < max_y
+        else:
+            mn_y = np.min(bounding_box_point_1[1], bounding_box_point_2[1])
+            occupied_space_mask = self.voxel_pc > mn_y
+
+        self.trace_mask[occupied_space_mask] = self.trace_mask[occupied_space_mask] * 0 + 1
+
+    def pick_action(self):
+        first_action_obj=None
+        second_action_obj=None
+
+        '''first action'''
+        available_actions_size=int((self.q_value>0.0).sum())
+        for i in range(available_actions_size):
+            point_index, action_index=self.next_action(epsilon=0.0)
+            action_obj=Action(point_index, action_index)
+            self.process_action(action_obj)
+            if action_obj.is_executable:
+                first_action_obj=action_obj
+                self.mask_arm_occupancy(action_obj)
+                break
+
+        '''second action'''
+        available_actions_size=int(((self.q_value*(1-self.trace_mask))>0.0).sum())
+        for i in range(available_actions_size):
+            point_index, action_index=self.next_action(epsilon=0.0)
+            action_obj = Action(point_index, action_index)
+            self.process_action(action_obj)
+            if action_obj.is_executable:
+                second_action_obj=action_obj
+                break
+
+        return first_action_obj,second_action_obj
+
+    def execute(self,first_action_obj,second_action_obj):
         state_ = ''
         self.n_candidates = len(self.candidates)
         T=np.eye(4)

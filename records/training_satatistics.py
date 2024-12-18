@@ -146,7 +146,7 @@ class TrainingTracker:
         self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
         self.loss_moving_average_=self.load_loss_moving_average()
-        self.loss_update_counter=0
+        self.decay_rate=0.001
 
     @property
     def running_loss(self):
@@ -154,11 +154,9 @@ class TrainingTracker:
 
     @running_loss.setter
     def running_loss(self,new_value):
+        instance_value=new_value-self.running_loss_
         self.running_loss_=new_value
-        self.loss_update_counter+=1
-        adaptive_decay = (self.loss_update_counter / (self.loss_update_counter + 10000)) ** 2
-        adaptive_decay =max(0.0001, min(adaptive_decay, 0.1))
-        self.loss_moving_average_=adaptive_decay * (self.running_loss_/self.loss_update_counter) + self.loss_moving_average_ * (1 - adaptive_decay)
+        self.loss_moving_average_=self.decay_rate * instance_value+ self.loss_moving_average_ * (1 - self.decay_rate)
 
     def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
         if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent

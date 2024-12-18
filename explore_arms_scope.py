@@ -15,7 +15,7 @@ from lib.grasp_utils import get_pose_matrixes
 from lib.math_utils import seeds
 from lib.models_utils import initialize_model_state
 from lib.statistics import random_with_exponent_decay
-from models.scope_net import scope_net_vanilla, gripper_scope_model_state_path, suction_scope_model_state_path
+from models.scope_net import scope_net_vanilla
 
 execute_suction_bash = './bash/run_robot_suction.sh'
 execute_grasp_bash = './bash/run_robot_grasp.sh'

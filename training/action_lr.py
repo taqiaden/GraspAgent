@@ -270,7 +270,7 @@ class TrainActionNet:
                 bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-                    background_loss += balanced_bce_loss(background_class_predictions,label)
+                    background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=1.2,negative_weight=1)
 
                     self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
 
@@ -296,8 +296,11 @@ class TrainActionNet:
                     shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)
 
             decay_= lambda scores:torch.clamp(scores-torch.zeros_like(scores),0).mean()
+            # reversed_decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
+
             decay_loss=decay_(griper_collision_classifier)+decay_(suction_quality_classifier)+decay_(shift_affordance_classifier)
             decay_loss*=0.3
+            # reversed_decay_loss=reversed_decay_(background_class)*0.3
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 

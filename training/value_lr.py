@@ -15,6 +15,7 @@ from models.action_net import ActionNet, action_module_key
 from models.value_net import ValueNet, value_module_key
 from records.training_satatistics import TrainingTracker
 from lib.report_utils import  progress_indicator
+
 # from action_lr import module_key as action_module_key
 
 instances_per_sample=1
@@ -26,6 +27,7 @@ normal_weight = 10
 print=custom_print
 
 mes_loss=nn.MSELoss()
+bce_loss=nn.BCELoss()
 
 
 class TrainValueNet:
@@ -122,14 +124,14 @@ class TrainValueNet:
                 label_ = score[j:j + 1]
                 if is_gripper[j] == 1:
                     prediction_ = griper_grasp_score[j, :, pix_A, pix_B]
-                    l=binary_smooth_l1(prediction_, label_)**2
+                    l=bce_loss(prediction_, label_)**2
                     # print(f'g {prediction_.item()}, {label_}')
                     gripper_grasp_loss += l
                     self.gripper_grasp_statistics.running_loss+=l.item()
                     self.gripper_grasp_statistics.update_confession_matrix(label_,prediction_.detach())
                 else:
                     prediction_ = suction_grasp_score[j, :, pix_A, pix_B]
-                    l=binary_smooth_l1(prediction_, label_)**2
+                    l=bce_loss(prediction_, label_)**2
                     suction_grasp_loss += l
                     # print(f's {prediction_.item()}, {label_}')
 
@@ -139,8 +141,8 @@ class TrainValueNet:
 
             loss = (gripper_grasp_loss+suction_grasp_loss)/b
 
-            decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
-            decay_loss=decay_(griper_grasp_score)+decay_(suction_grasp_score)
+            reversed_decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
+            decay_loss=reversed_decay_(griper_grasp_score)+reversed_decay_(suction_grasp_score)
             decay_loss*=0.1
 
             loss=loss+decay_loss

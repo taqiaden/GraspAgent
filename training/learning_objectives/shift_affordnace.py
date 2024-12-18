@@ -6,7 +6,10 @@ from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_length=0.035
+shift_effective_length=0.035
+shift_execution_length=0.1
+
+
 shift_elevation_threshold = 0.001
 shift_contact_margin = 0.003
 interference_allowance=0.003
@@ -29,7 +32,7 @@ def get_shift_parameteres(shift_target_point):
     target = np.copy(bin_center)
     target[2] = np.copy(start_point[2])
     direction = target - start_point
-    end_point = start_point + ((direction * shift_length) / np.linalg.norm(direction))
+    end_point = start_point + ((direction * shift_effective_length) / np.linalg.norm(direction))
     shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
     return direction,start_point,end_point,shifted_start_point
 
@@ -66,8 +69,8 @@ def estimate_weighted_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_
         collision_score = torch.clip(collision_score, 0, 1.0)
 
         '''distance weighting'''
-        dist_weight = (shift_length - np.linalg.norm(shifted_start_point[np.newaxis] - direct_collision_points,
-                                                     axis=-1)) / shift_length
+        dist_weight = (shift_effective_length - np.linalg.norm(shifted_start_point[np.newaxis] - direct_collision_points,
+                                                     axis=-1)) / shift_effective_length
         assert np.all(dist_weight < 1),f'{dist_weight}'
 
         dist_weight = dist_weight ** 2

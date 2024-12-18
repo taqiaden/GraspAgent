@@ -35,8 +35,10 @@ class AbstractQualityRegressor(nn.Module):
     def __init__(self, in_c2, out_c):
         super().__init__()
         self.att_block = att_res_mlp_LN2(in_c1=64, in_c2=in_c2, out_c=out_c).to('cuda')
+        self.sig=nn.Sigmoid()
     def forward(self, features,pose_2d ):
         output_2d = self.att_block(features,pose_2d)
+        output_2d=self.sig(output_2d)
         return output_2d
 
 class QValue(nn.Module):

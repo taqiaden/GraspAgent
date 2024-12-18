@@ -19,9 +19,13 @@ while True:
         depth=get_scene_depth()
         # rgb=get_scene_RGB()
         random_rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
-        '''inference and execution'''
+        '''infer dense action value pairs'''
         grasp_agent.model_inference(depth,random_rgb)
-        actions, states, data = grasp_agent.execute()
+        grasp_agent.view()
+        '''make decision'''
+        first_action_obj,second_action_obj=grasp_agent.pick_action()
+        '''execute action/s'''
+        actions, states, data = grasp_agent.execute(first_action_obj,second_action_obj)
         if grasp_agent.mode.simulation: get_new_perception()
         for action_, state_, data_ in zip(actions, states, data):
             if empty_bin_check(state_):

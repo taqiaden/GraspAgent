@@ -12,13 +12,26 @@ from trimesh.path.creation import circle
 from lib.cuda_utils import cuda_memory_report
 
 if __name__ == "__main__":
+    x=torch.randn((7,5))
+    x[x<0]*=0
+    i=torch.nonzero(x)
+    print(i.shape)
+    while True:
+        pick=np.random.random_integers(0,i.shape[0]-1)
+        print(pick)
+
+        print(x[i[pick][0],i[pick][1]]>0)
+        assert (x[i[pick][0],i[pick][1]]>0)==True
+        # point_index = math.floor(j / 4)
+        # action_index = j - int(4 * point_index)
+        # print(x[point_index,action_index]>0)
+    exit()
     class TrainingTracker:
         def __init__(self):
             self.x_ = 0.
 
             self.mx = 0
-            self.decay_rate = 0.1
-            self.counter=0
+            self.decay_rate = 0.001
 
         @property
         def x(self):
@@ -26,18 +39,16 @@ if __name__ == "__main__":
 
         @x.setter
         def x(self, new_value):
-            self.counter+=1
+            instance_value=new_value-self.x_
             self.x_ = new_value
-            adaptive_decay=(self.counter/(self.counter+100))**2
-            adaptive_decay=max(0.0001,min(adaptive_decay,0.1))
-            self.mx = adaptive_decay * new_value/self.counter + self.mx * (1 - adaptive_decay)
+            self.mx = self.decay_rate * instance_value + self.mx * (1 - self.decay_rate)
 
     t=TrainingTracker()
     for i in range(5000):
         t.x+=0.01
         if i%100==0:
-            print((t.counter/(t.counter+10000))**2)
-            # print(t.mx)
+            # print((t.counter/(t.counter+10000))**2)
+            print(t.mx)
             # print(t.x_)
 
 

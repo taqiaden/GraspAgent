@@ -34,13 +34,14 @@ def train():
         statistics=TrainingTracker(name=gripper_scope_module_key,iterations_per_epoch=len(data_loader),samples_size=len(dataset))
 
         for i, batch in enumerate(data_loader, 0):
-            transformation,label,target_index=batch
-            transformation=transformation.to('cuda').float()
+            input,label,target_index=batch
+            input=input.to('cuda').float()
             label=label.to('cuda').float()
 
             gripper_scope.model.zero_grad()
 
-            predictions=gripper_scope.model(transformation)
+
+            predictions=gripper_scope.model(input)
 
             '''update confession matrix'''
             statistics.update_confession_matrix(label,predictions)

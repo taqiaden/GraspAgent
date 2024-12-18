@@ -54,6 +54,7 @@ def construct_gripper_mesh_2(width,T_d):
     global parallel_jaw_mesh_o3d
     if parallel_jaw_mesh_o3d is None:
         parallel_jaw_mesh_o3d = o3d.io.read_triangle_mesh(parallel_jaw_model)
+
     mesh = copy.deepcopy(parallel_jaw_mesh_o3d)
 
     '''adjust the width'''
