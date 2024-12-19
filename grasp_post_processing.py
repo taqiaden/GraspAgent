@@ -15,7 +15,11 @@ pre_grasp_data_path = config.home_dir + 'pre_grasp_data_tmp.npy'
 suction_data_path = config.home_dir + 'suction_data_tmp.npy'
 pre_suction_data_path = config.home_dir + 'pre_suction_data_tmp.npy'
 
-def  gripper_grasp_processing(action_obj,point_clouds,poses,check_collision=True,isvis=False):
+
+
+
+
+def  gripper_grasp_processing(index,point_clouds,poses,check_collision=True,isvis=False):
     target_point = point_clouds[index]
     relative_pose_5=poses[index]
     T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
@@ -39,7 +43,7 @@ def  gripper_grasp_processing(action_obj,point_clouds,poses,check_collision=True
     return True, width, T_d
 
 
-def gripper_shift_processing(action_obj, point_clouds, normals, isvis=False):
+def gripper_shift_processing(index, point_clouds, normals, isvis=False):
     normal=normals[index]
     target_point=point_clouds[index]
 
@@ -56,7 +60,7 @@ def gripper_shift_processing(action_obj, point_clouds, normals, isvis=False):
 
     return True,  width, T_d
 
-def suction_processing(action_obj,point_data,normals,isvis=False):
+def suction_processing(index,point_data,normals,isvis=False):
     normal=normals[index]
     target_point=point_data[index]
 

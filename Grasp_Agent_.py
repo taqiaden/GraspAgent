@@ -1,6 +1,5 @@
 import math
 import subprocess
-import time
 import numpy as np
 import torch
 import trimesh
@@ -12,9 +11,8 @@ from Configurations.run_config import simulation_mode, view_grasp_suction_points
     chances_ref, shuffling_probability, view_action, report_result, use_gripper, use_suction
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from grasp_post_processing import suction_processing, gripper_grasp_processing, gripper_shift_processing, \
-    exploration_probabilty, view_masked_grasp_pose
-from lib.ROS_communication import wait_for_feedback, ROS_communication_file
+from grasp_post_processing import  exploration_probabilty, view_masked_grasp_pose
+from lib.ROS_communication import wait_for_feedback, deploy_action
 from lib.bbox import convert_angles_to_transformation_form
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.gripper_exploration import local_exploration
@@ -24,31 +22,18 @@ from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.value_net import ValueNet, value_module_key
 from pose_object import vectors_to_ratio_metrics
-from process_perception import get_new_perception, get_side_bins_images
+from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
 from visualiztion import view_npy_open3d, vis_scene
 
-execute_suction_bash = './bash/run_robot_suction.sh'
-execute_grasp_bash = './bash/run_robot_grasp.sh'
+execute_suction_grasp_bash = './bash/run_robot_suction.sh'
+execute_gripper_grasp_bash = './bash/run_robot_grasp.sh'
+execute_suction_shift_bash = './bash/run_robot_suction_shift.sh'
+execute_gripper_shift_bash = './bash/run_robot_gripper_shift.sh'
+execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
 
-class Mode():
-    def __init__(self):
-        self.simulation=simulation_mode
-        self.report_result=report_result
 
-class Setting():
-    def __init__(self):
-        self.use_gripper=use_gripper
-        self.use_suction=use_suction
-        self.chances=chances_ref
-        self.shuffling_probability=shuffling_probability
-
-class View():
-    def __init__(self):
-        self.grasp_points=view_grasp_suction_points
-        self.scores=view_score_gradient
-        self.action=view_action
 
 class Action():
     def __init__(self,point_index,action_index):
@@ -58,31 +43,19 @@ class Action():
         self.is_grasp=action_index<=1
         self.use_gripper_arm=(action_index==0) or (action_index==2)
         self.use_suction_arm=(action_index==1) or (action_index==3)
+
+        self.target_point=None
         
         self.transformation=None
         self.width=None
         
         self.is_executable=None
+
+        self.robot_feedback=None
+
+        self.grasp_result=None
+        self.shift_result=None
         
-        
-        
-        
-def prioritize_candidates(gripper_scores, suction_scores, gripper_mask, suction_mask):
-    index_suction_cls = [i for i in range(len(suction_mask)) if suction_mask[i]]
-    index_grasp_cls = [j for j in range(len(gripper_mask)) if gripper_mask[j]]
-
-    score_grasp_value_ind = list((item * 1, index_grasp_cls[index], 0) for index, item in
-                                 enumerate(gripper_scores[gripper_mask]))
-    score_suction_value_ind_ = list((item * 1, index_suction_cls[index], 1) for index, item in
-                                    enumerate(suction_scores[suction_mask]))
-
-    candidates = score_grasp_value_ind + score_suction_value_ind_
-
-    if len(candidates) > 1:
-        candidates = sorted(candidates, reverse=True)
-
-    return candidates
-
 
 def get_shift_end_points(start_points):
     targets=torch.zeros_like(start_points)
@@ -103,10 +76,6 @@ def view_mask(voxel_pc, score, pivot=0.5):
 
 class GraspAgent():
     def __init__(self):
-        '''configurations'''
-        self.mode=Mode()
-        self.view_options=View()
-        self.setting=Setting()
 
         '''models'''
         self.action_net = None
@@ -408,136 +377,67 @@ class GraspAgent():
                 second_action_obj=action_obj
                 break
 
+        first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
+        if second_action_obj is not None: second_action_obj.target_point=self.voxel_pc[second_action_obj.point_index]
+
         return first_action_obj,second_action_obj
 
+
     def execute(self,first_action_obj,second_action_obj):
-        state_ = ''
-        self.n_candidates = len(self.candidates)
-        T=np.eye(4)
-        width=0
-        normal=[1,0,0]
-        if self.n_candidates== 0:
-            self.actions.append(state_)
-            self.states.append('No Object')
-            self.data.append((width, T, normal, [0, 0, 0]))
-            return self.actions, self.states, self.data
-        # global chances_ref
-        chances = self.setting.chances
+        deploy_action( first_action_obj)
+        deploy_action(second_action_obj)
 
-        if self.n_candidates > 100:
-            if shuffling_probability == 0.0:
-                chunk_size = math.floor(0.01 * self.n_candidates)
-            else:
-                chunk_size = math.floor(0.1 * self.n_candidates)
-        else:
-            chunk_size = 100
-
-        for i in range(0, self.n_candidates, chunk_size):
-
-            end_index = min(i + chunk_size, self.n_candidates)
-            sub_candidates = self.candidates[i:end_index]
-
-            for candidate_ in sub_candidates:
-
-                t = time.time()
-                print(f'target candidate {candidate_}')
-                with open(config.home_dir + ROS_communication_file, 'w') as f:
-                    f.write('Wait')
-                state_ = 'Wait'
-
-                '''Gripper grasp'''
-                if candidate_[-1] == 0:  # grasp
-
-                    index = int(candidate_[1])
-
-                    success, width, distance, T, target_point = \
-                        gripper_processing(index, self.voxel_pc, self.gripper_poses, self.view.action)
-
-                    print(f'prediction time = {time.time() - t}')
-
-                    if not success:
-                        if simulation_mode:
-                            if chances == 0:
-                                return self.actions, self.states, self.data
-                            chances -= 1
-                        continue
-
-                    print('***********************use grasp***********************')
-                    print('Gripper score = ', self.gripper_scores[index])
-
-                    if simulation_mode:
-                        if chances == 0:
-                            return self.actions, self.states, self.data
-                        chances -= 1
-                        continue
-
-                    action_ = 'grasp'
-
-                    subprocess.run(execute_grasp_bash)
-                    chances -= 1
-
-
+        if not simulation_mode:
+            if second_action_obj is not None and (first_action_obj.is_grasp and second_action_obj.is_grasp):
+                '''grasp with the two arms'''
+                subprocess.run(execute_both_grasp_bash)
+            elif first_action_obj.is_grasp:
+                '''grasp'''
+                if first_action_obj.use_gripper:
+                    subprocess.run(execute_gripper_grasp_bash)
                 else:
-                    '''Suction grasp'''
-                    index = int(candidate_[1])
+                    '''suction'''
+                    subprocess.run(execute_suction_grasp_bash)
+            elif first_action_obj.is_shift:
+                '''shift'''
+                if first_action_obj.use_gripper:
+                    subprocess.run(execute_gripper_shift_bash)
+                else:
+                    '''suction'''
+                    subprocess.run(execute_suction_shift_bash)
 
-                    success, target_point, normal = suction_processing(index, self.voxel_pc, self.normals, self.view.action)
+        '''get robot feedback'''
+        robot_feedback_ = wait_for_feedback()
 
+        first_action_obj.robot_feedback(robot_feedback_)
+        if second_action_obj is not None: second_action_obj.robot_feedback(robot_feedback_)
 
-                    if not success: continue
-                    print('***********************use suction***********************')
-                    print('Suction score = ', self.suction_scores[index])
+        return first_action_obj,second_action_obj
 
-                    if simulation_mode:
-                        if chances == 0:
-                            return self.actions, self.states, self.data
-                        chances -= 1
-                        continue
-
-                    action_ = 'suction'
-                    subprocess.run(execute_suction_bash)
-                    chances -= 1
-
-                '''get robot feedback'''
-                state_ = wait_for_feedback(state_)
-                if action_ == 'grasp':
-                    self.actions.append(action_)
-                    self.states.append(state_)
-                    self.data.append((width, T, normal, target_point))
-                if action_ == 'suction':
-                    self.actions.append(action_)
-                    self.states.append(state_)
-                    self.data.append((0, np.eye(4), normal, target_point))
-
-                if state_ == 'Succeed' or state_ == 'reset' or chances == 0:
-                    return self.actions, self.states, self.data
-
-        else:
-            print(Fore.RED, 'No feasible pose is found in the current forward pass', Fore.RESET)
-            return self.actions, self.states, self.data
-
-    def process_feedback(self,action_, state_, data_, img_grasp_pre, img_suction_pre):
-        if state_ == 'Succeed' or state_ == 'reset': get_new_perception()
+    def process_feedback(self,first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre):
+        if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset': trigger_new_perception()
         if not self.mode.report_result: return
 
         img_suction_after, img_grasp_after = get_side_bins_images()
 
-        if action_ == 'grasp' and state_ == 'Succeed':
-            award = check_image_similarity(img_grasp_pre, img_grasp_after)
-            if award is not None:
-                save_grasp_sample(rgb=self.rgb,depth=self.depth,width=data_[0],transformation=data_[1],normal=data_[2],target_point=data_[3]
-                                  ,use_gripper=True,use_suction=False,success=award)
+        '''report change if robot moves'''
+        if first_action_obj.robot_feedback == 'Succeed':
+            if first_action_obj.use_gripper:
+                gripper_action=first_action_obj
+                suction_action=second_action_obj
+            else:
+                gripper_action = second_action_obj
+                suction_action = first_action_obj
 
-        elif action_ == 'suction' and state_ == 'Succeed':
-            award = check_image_similarity(img_suction_pre, img_suction_after)
-            if award is not None:
-                save_grasp_sample(rgb=self.rgb, depth=self.depth, width=data_[0], transformation=data_[1],
-                                  normal=data_[2], target_point=data_[3]
-                                  , use_gripper=False, use_suction=True, success=award)
+            '''check changes in side bins'''
+            gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
+            suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
 
-        elif state_ == 'reset' or state_ == 'Failed':
-            print(action_)
+            '''save action instance'''
+            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action)
 
-        else:
-            print('No movement is executed, State: ', state_, ' ， Action： ', action_)
+
+
+
+
 

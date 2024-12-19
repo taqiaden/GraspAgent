@@ -24,7 +24,7 @@ rgb_path='Frame_0.ppm'
 last_rgb=None
 last_depth=None
 
-def get_new_perception():
+def trigger_new_perception():
 
     if simulation_mode and offline_point_cloud == True:
         # get new data from data pool
@@ -40,7 +40,6 @@ def get_new_perception():
 
     subprocess.run(get_point_bash)
     subprocess.run(get_rgb_bash)
-    # os.system(get_point_bash)
     wait = wi('Waiting for new perception data')
     i=0
     while (os.path.getctime(rgb_path)==ctime_stamp_rgb or

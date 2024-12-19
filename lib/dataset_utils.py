@@ -20,12 +20,18 @@ where_am_i = re.sub(r"[\n\t\s]*", "", where_am_i)
 
 if where_am_i=='chaoyun-server': # server
     online_data_dir = r'/home/taqiaden/online_data/'
+    online_data_dir2 = r'/home/taqiaden/online_data2/'
+
 elif where_am_i=='yumi': #edge unit
     online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
+    online_data_dir2=ip_address+r'\taqiaden_hub\online_data2//'
+
 else:
     # online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
     # online_data_dir=r'/home/taqiaden/online_data/'
     online_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
+    online_data_dir2=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data2/'
+
 
 online_data_local_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
 
@@ -243,6 +249,10 @@ class training_data(data_pool):
 class online_data(data_pool):
     def __init__(self):
         super(online_data,self).__init__(dir=online_data_dir,is_local=True,dataset_name='online')
+
+class online_data2(data_pool):
+    def __init__(self):
+        super(online_data2,self).__init__(dir=online_data_dir2,is_local=True,dataset_name='online2')
 
 class online_data_local(data_pool):
     def __init__(self):

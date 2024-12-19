@@ -4,7 +4,7 @@ import numpy as np
 use_xyz= True
 
 home_dir = '/home/shenxiaofei/'
-solution_name='Never_stop_learning'
+solution_name='GraspAgent'
 ip_address=r'\\10.5.12.167'
 
 untested_model_stamp= 'untested'
@@ -13,7 +13,7 @@ check_points_extension='.pth.tar'
 
 check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
-# check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/Never_stop_learning/check_points/'
+# check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
 
 while os.path.split(os.getcwd())[-1]!=solution_name:
     os.chdir('../')

@@ -1,6 +1,6 @@
 import subprocess
 import time
-from process_perception import get_new_perception
+from process_perception import trigger_new_perception
 
 
 def empty_bin_check(state):
@@ -10,6 +10,6 @@ def empty_bin_check(state):
         # os.system('./testUSBCAN')
 
         time.sleep(5)
-        get_new_perception()
+        trigger_new_perception()
         return True
     else:return False

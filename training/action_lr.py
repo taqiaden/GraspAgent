@@ -270,7 +270,7 @@ class TrainActionNet:
                 bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-                    background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=1.2,negative_weight=1)
+                    background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=1.5,negative_weight=1)
 
                     self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
 
