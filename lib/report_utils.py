@@ -1,10 +1,13 @@
 import datetime
 import math
 import time
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
 from lib.IO_utils import custom_print
-import matplotlib.pyplot as plt
+
 print=custom_print
 
 def save_error_log(msg):

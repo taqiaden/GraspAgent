@@ -1,5 +1,6 @@
 import numpy as np
 from torch.utils import data
+
 from label_unpack import LabelObj
 from lib.image_utils import depth_to_gray_scale
 

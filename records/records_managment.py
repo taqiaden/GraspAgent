@@ -1,5 +1,7 @@
 import os
+
 from lib.report_utils import save_new_data_point
+
 base_directory=r'records/'
 
 def try_remove(file):

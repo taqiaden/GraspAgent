@@ -1,5 +1,6 @@
 import numpy as np
 from torch.utils import data
+
 from label_unpack import LabelObj
 
 training_buffer_dir='dataset/GQ_training_buffer/'

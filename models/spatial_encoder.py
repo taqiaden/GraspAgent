@@ -1,7 +1,9 @@
 from torch import nn
+
 from lib.depth_map import depth_to_mesh_grid
 from lib.models_utils import reshape_for_layer_norm
 from registration import camera
+
 
 def depth_xy_spatial_data( batch_size):
     xymap = depth_to_mesh_grid(camera)

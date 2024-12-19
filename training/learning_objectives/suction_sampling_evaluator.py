@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from analytical_suction_sampler import estimate_suction_direction
 
+from analytical_suction_sampler import estimate_suction_direction
 
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
 

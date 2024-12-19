@@ -1,10 +1,11 @@
 import random
-from lib.report_utils import  progress_indicator
+
 from Online_data_audit.dictionary_utils import load_dict, save_dict
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
-from lib.statistics import moving_momentum
+from lib.report_utils import progress_indicator
 from lib.report_utils import progress_indicator as pi
+from lib.statistics import moving_momentum
 
 dictionary_directory=r'Online_data_audit/'
 gripper_grasp_tracker=r'gripper_grasp_dict'

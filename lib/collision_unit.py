@@ -1,11 +1,14 @@
 import copy
 import math
+
 import numpy as np
 import trimesh
+
 from Configurations import config
 from Configurations.ENV_boundaries import dist_allowance
-from lib.grasp_utils import   shift_a_distance
+from lib.grasp_utils import shift_a_distance
 from lib.mesh_utils import construct_gripper_mesh
+
 
 def grasp_collision_detection(T_d_,width,point_data, visualize=False):
     T_d=np.copy(T_d_)

@@ -1,8 +1,8 @@
+import torch.nn.functional as F
 from torch import nn
 
 from lib.models_utils import reshape_for_layer_norm
 from models.resunet import res_unet
-import torch.nn.functional as F
 from registration import standardize_depth, camera
 
 suction_sampler_model_state_path=r'suction_sampler_model_state'

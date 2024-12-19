@@ -1,4 +1,4 @@
-import os
+# import os
 import numpy as np
 
 use_xyz= True
@@ -15,8 +15,9 @@ check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
 
-while os.path.split(os.getcwd())[-1]!=solution_name:
-    os.chdir('../')
+# while os.path.split(os.getcwd())[-1]!=solution_name:
+#     print(os.path.split(os.getcwd())[-1])
+#     os.chdir('../')
 
 theta_scope=90. # previous scope 60.
 theta_scope_rad=(theta_scope/180)*np.pi

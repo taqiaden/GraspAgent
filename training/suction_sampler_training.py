@@ -1,18 +1,18 @@
 import torch
 from colorama import Fore
 from torch import nn
-from Online_data_audit.data_tracker import sample_random_buffer, suction_grasp_tracker, sample_positive_buffer
+
+from Online_data_audit.data_tracker import suction_grasp_tracker, sample_positive_buffer
+from analytical_suction_sampler import estimate_suction_direction
 from dataloaders.suction_sampler_dl import suction_sampler_dataset
 from lib.IO_utils import custom_print
-from lib.dataset_utils import  online_data
+from lib.dataset_utils import online_data
 from lib.depth_map import depth_to_point_clouds
 from lib.models_utils import initialize_model, export_model_state
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
 from registration import transform_to_camera_frame, camera
-from analytical_suction_sampler import estimate_suction_direction
-from visualiztion import view_npy_open3d
 
 suction_sampler_optimizer_path = r'suction_sampler_optimizer'
 training_buffer = online_data()

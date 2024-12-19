@@ -1,7 +1,9 @@
 import torch
-from torch import nn
-from models.resunet import batch_norm_relu
 import torch.nn.functional as F
+from torch import nn
+
+from models.resunet import batch_norm_relu
+
 
 class res_block(nn.Module):
     def __init__(self,in_c,medium_c,out_c,Batch_norm=True,Instance_norm=False):

@@ -1,15 +1,17 @@
 import os
 import subprocess
+
 import cv2
+import cv2 as cv
+import numpy as np
 from colorama import Fore
+
+from Configurations import config
 from Configurations.config import home_dir
 from Configurations.run_config import simulation_mode, offline_point_cloud
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth
 from lib.pc_utils import refine_point_cloud, random_down_sampling, closest_point, scene_point_clouds_mask
 from lib.report_utils import wait_indicator as wi
-import numpy as np
-from Configurations import config
-import cv2 as cv
 from registration import crop_scene_image, camera
 
 sensory_pc_path = home_dir+'pc_tmp_data.npy'

@@ -1,5 +1,6 @@
 import torch
 from colorama import Fore
+
 from Configurations.config import check_points_extension
 from lib.models_utils import load_optimizer_state, export_model_state
 

@@ -1,7 +1,8 @@
 import copy
+
 import numpy as np
-import trimesh
 import open3d as o3d
+import trimesh
 
 parallel_jaw_model= 'new_gripper.ply'
 

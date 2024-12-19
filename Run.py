@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
+
 import numpy as np
 import torch
+
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale
-from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth,get_scene_RGB
+from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth
 
 configure_smbclient()
 grasp_agent = GraspAgent()

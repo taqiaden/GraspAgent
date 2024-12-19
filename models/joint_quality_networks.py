@@ -1,9 +1,9 @@
-import torch
 from torch import nn
+
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import att_res_mlp_LN, res_block_mlp_LN
+from models.decoders import att_res_mlp_LN
 from models.resunet import res_unet
-from models.spatial_encoder import  depth_xy_spatial_data
+from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera, standardize_depth
 
 use_bn=False

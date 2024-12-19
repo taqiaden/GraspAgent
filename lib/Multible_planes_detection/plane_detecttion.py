@@ -1,11 +1,13 @@
 import os
-import numpy as np
 import random
 import time
+
+import numpy as np
+
 from lib.IO_utils import save_pickle, load_pickle
+from lib.Multible_planes_detection.utils import *
 from lib.math_utils import angle_between_vectors_cross
 from lib.pc_utils import refine_point_cloud
-from lib.Multible_planes_detection.utils import *
 from visualiztion import view_npy_open3d
 
 '''Note: Plane detection method is borrowed from (https://github.com/yuecideng/Multiple_Planes_Detection)'''

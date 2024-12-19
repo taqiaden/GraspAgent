@@ -1,28 +1,29 @@
+import numpy as np
 import torch
 from colorama import Fore
+from filelock import FileLock
 from torch import nn
 from torch.utils import data
+
 from Configurations.config import workers
-from Online_data_audit.data_tracker import sample_positive_buffer,  gripper_grasp_tracker
+from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
-from lib.IO_utils import   custom_print
+from lib.IO_utils import custom_print
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
+from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, Critic, action_module_key
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
-from lib.report_utils import  progress_indicator
-from filelock import FileLock
 from training.learning_objectives.grasp_sampling_evalutor import gripper_sampler_loss
 from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
-from training.learning_objectives.shift_affordnace import  shift_affordance_loss
+from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_sampling_evaluator import suction_sampler_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
-import numpy as np
 
 lock = FileLock("file.lock")
 instances_per_sample=1

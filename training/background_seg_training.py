@@ -2,17 +2,14 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
-from torch.nn.functional import smooth_l1_loss
+
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.background_seg_dl import BackgroundSegDataset
-from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
-from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, view_statistics
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.dataset_utils import online_data
 from lib.depth_map import depth_to_point_clouds
-from lib.loss.D_loss import binary_smooth_l1, binary_l1
-from lib.loss.focal_loss import FocalLoss
 from lib.report_utils import progress_indicator
 from models.background_seg import BackgroundSegNet
 from records.training_satatistics import TrainingTracker

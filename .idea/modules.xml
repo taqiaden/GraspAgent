@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Never_stop_learning.iml" filepath="$PROJECT_DIR$/.idea/Never_stop_learning.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/GraspAgent.iml" filepath="$PROJECT_DIR$/.idea/GraspAgent.iml" />
     </modules>
   </component>
 </project>

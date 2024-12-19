@@ -1,6 +1,7 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
+
 from Configurations.config import theta_scope, phi_scope
 from lib.custom_activations import GripperGraspRegressor
 from lib.models_utils import reshape_for_layer_norm

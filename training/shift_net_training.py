@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
+
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.shift_net_dl import ShiftNetDataset
@@ -17,7 +18,7 @@ from records.training_satatistics import TrainingTracker, MovingMetrics
 from registration import transform_to_camera_frame, camera
 from training.joint_quality_lr import model_dependent_sampling
 from training.learning_objectives.shift_affordnace import get_shift_parameteres, get_shift_mask, estimate_shift_score
-from visualiztion import vis_scene, view_npy_open3d, view_shift_pose, view_score, view_score2
+from visualiztion import view_shift_pose, view_score2
 
 instances_per_sample=10
 module_key = r'shift_net'

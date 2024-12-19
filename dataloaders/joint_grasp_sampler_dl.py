@@ -1,6 +1,8 @@
 import numpy as np
 from torch.utils import data
+
 from label_unpack import LabelObj
+
 
 class GraspSamplerDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):

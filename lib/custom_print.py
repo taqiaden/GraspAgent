@@ -5,6 +5,7 @@ class my_print():
         self.rank=0
         self.space=''
         self.size=100
+
     def seperator(self):
         s='-'
         s=s*self.size

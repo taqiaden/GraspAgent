@@ -1,8 +1,6 @@
 import torch
 from torch import nn
 
-from records.training_satatistics import confession_mask
-
 
 class BalancedBCELoss(nn.Module):
     '''

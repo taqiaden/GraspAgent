@@ -1,27 +1,28 @@
+import numpy as np
 import torch
 from colorama import Fore
+from filelock import FileLock
 from torch import nn
 from torch.utils import data
-from Configurations.config import  workers
-from Online_data_audit.data_tracker import  suction_grasp_tracker, sample_random_buffer
+
+from Configurations.config import workers
+from Online_data_audit.data_tracker import suction_grasp_tracker, sample_random_buffer
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from dataloaders.joint_quality_dl import JointQualityDataset
 from interpolate_bin import estimate_object_mask
-from lib.IO_utils import   custom_print
+from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
-from lib.depth_map import  transform_to_camera_frame, depth_to_point_clouds
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from models.joint_grasp_sampler import GraspSampler
 from models.joint_quality_networks import JointQualityNet
 from records.training_satatistics import TrainingTracker
 from registration import camera
-from filelock import FileLock
 from training.joint_grasp_sampler_tr import module_key as grasp_sampler_key
 from training.joint_quality_lr import model_dependent_sampling
 from training.learning_objectives.gripper_collision import gripper_collision_loss
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
-from training.learning_objectives.suction_seal import  suction_seal_loss
-from visualiztion import view_npy_open3d, view_suction_zone, view_score2
-import numpy as np
+from training.learning_objectives.suction_seal import suction_seal_loss
+from visualiztion import view_suction_zone, view_score2
 
 lock = FileLock("file.lock")
 instances_per_sample=1

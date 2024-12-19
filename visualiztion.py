@@ -1,17 +1,16 @@
 import math
-import torch
-import trimesh
 import random
 
-from Configurations import config
-from Configurations.ENV_boundaries import bin_center
+import matplotlib.pyplot as plt
+import torch
+import trimesh
+
 from lib.depth_map import depth_to_point_clouds, CameraInfo
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
-import matplotlib.pyplot as plt
 from lib.report_utils import distribution_summary
-from masks import  static_spatial_mask
-from pose_object import approach_vec_to_theta_phi, output_processing, pose_7_to_transformation
+from masks import static_spatial_mask
+from pose_object import pose_7_to_transformation
 
 parallel_jaw_model= 'new_gripper.ply'
 

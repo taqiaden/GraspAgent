@@ -1,24 +1,26 @@
-import os
 import datetime
+import os
+
 import torch
+import torch.multiprocessing as mp
 from colorama import Fore
+from filelock import FileLock
 from torch import nn
-from Configurations.config import  untested_model_stamp
+from torch.distributed import init_process_group, destroy_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+
+from Configurations.config import untested_model_stamp
 from Online_data_audit.data_tracker import sample_random_buffer, suction_grasp_tracker
-from dataloaders.suction_quality_dl import  suction_quality_dataset
-from lib.IO_utils import   custom_print
+from dataloaders.suction_quality_dl import suction_quality_dataset
+from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
-from lib.loss.D_loss import binary_l1, binary_smooth_l1, smooth_l1_loss
+from lib.loss.D_loss import binary_l1
 from lib.models_utils import initialize_model, export_model_state, delete_check_point, model_exist_check
 from lib.optimizer import load_opt, export_optm
 from lib.report_utils import progress_indicator
 from models.suction_quality import suction_quality_net, suction_quality_model_state_path
 from models.suction_sampler import suction_sampler_net, suction_sampler_model_state_path
-import torch.multiprocessing as mp
-from torch.utils.data.distributed import DistributedSampler
-from torch.distributed import init_process_group,destroy_process_group
-from torch.nn.parallel import DistributedDataParallel as DDP
-from filelock import FileLock
 from records.training_satatistics import TrainingTracker, MovingMetrics
 
 # from torch.utils.tensorboard import SummaryWriter

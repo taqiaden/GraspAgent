@@ -1,20 +1,22 @@
 import random
+
 import torch
 from colorama import Fore
 from torch import nn
 from torch.utils import data
+
 from Configurations.config import workers
-from Online_data_audit.data_tracker import  gripper_grasp_tracker, sample_all_positive_and_negatives, suction_grasp_tracker
+from Online_data_audit.data_tracker import gripper_grasp_tracker, sample_all_positive_and_negatives, \
+    suction_grasp_tracker
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from dataloaders.value_dl import ValueDataset
-from lib.IO_utils import   custom_print
+from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
-from lib.loss.D_loss import binary_smooth_l1
+from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, action_module_key
 from models.value_net import ValueNet, value_module_key
 from records.training_satatistics import TrainingTracker
-from lib.report_utils import  progress_indicator
 
 # from action_lr import module_key as action_module_key
 

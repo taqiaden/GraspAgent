@@ -1,5 +1,7 @@
 from configparser import ConfigParser
+
 from filelock import FileLock
+
 lock = FileLock("file.lock")
 config = ConfigParser()
 

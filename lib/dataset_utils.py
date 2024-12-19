@@ -4,11 +4,13 @@ import os
 import re
 import sys
 from datetime import datetime
+
 import cv2
 import numpy as np
 import smbclient
 
 from Configurations.config import ip_address
+
 from lib.report_utils import counter_progress
 from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
 from Configurations import config

@@ -1,7 +1,5 @@
-import numpy as np
 from Configurations import ENV_boundaries
-from Configurations.run_config import score_threshold
-from lib.report_utils import save_error_log
+
 
 def static_spatial_mask(pc):
     x = pc[ :, 0]

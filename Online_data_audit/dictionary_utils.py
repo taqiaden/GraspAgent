@@ -1,6 +1,8 @@
 import os.path
 import pickle
+
 from colorama import Fore
+
 
 def save_dict( dictionary, file_path):
     with open(file_path, 'wb') as file:

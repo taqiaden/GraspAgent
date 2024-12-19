@@ -1,6 +1,7 @@
 import numpy as np
-import torch
 import open3d as o3d
+import torch
+
 from lib.mask_utils import cubic_mask
 from visualiztion import vis_depth_map
 

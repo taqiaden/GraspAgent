@@ -1,6 +1,7 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
+
 from Configurations.config import theta_cos_scope
 from lib.collision_unit import grasp_collision_detection
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds

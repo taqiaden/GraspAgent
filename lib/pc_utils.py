@@ -3,7 +3,9 @@ import open3d as o3d
 import torch
 from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
+
 from Configurations.ENV_boundaries import ref_pc_center
+
 
 def closest_point(point_data, center_point, radius=0.0025,warning_limit=0.005):
     # Find the neighbour points of the center_point
@@ -27,7 +29,6 @@ def point_index(point_data, center_point):
     return None
 
 def refine_point_cloud(point_cloud):
-    from visualiztion import view_o3d
     pcd = numpy_to_o3d(point_cloud)
     # print(np.max(point_cloud))
     # view_o3d(pcd, view_coordinate=True)

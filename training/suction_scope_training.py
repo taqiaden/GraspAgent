@@ -1,14 +1,14 @@
+import torch
+from torch import nn
+from torch.utils.data.distributed import DistributedSampler
+
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.scope_dataloader import suction_scope_dataset
+from lib.IO_utils import custom_print
 from lib.loss.D_loss import binary_l1
 from lib.report_utils import progress_indicator
 from models.scope_net import scope_net_vanilla, suction_scope_module_key
-import torch
-from torch import nn
-from lib.IO_utils import   custom_print
-from torch.utils.data.distributed import DistributedSampler
 from records.training_satatistics import TrainingTracker
-
 
 print=custom_print
 weight_decay = 0.000001

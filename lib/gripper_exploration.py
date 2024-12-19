@@ -1,7 +1,9 @@
 import copy
+
 import numpy as np
 import torch
 from colorama import Fore
+
 from Configurations import config
 from lib.bbox import transformation_to_relative_angle_form, convert_angles_to_transformation_form
 from lib.collision_unit import get_distance_step, grasp_collision_detection

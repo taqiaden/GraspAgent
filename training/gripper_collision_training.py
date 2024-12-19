@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
+
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.gripper_collision_dl import GripperCollisionDataset
@@ -14,11 +15,10 @@ from lib.models_utils import initialize_model
 from lib.optimizer import exponential_decay_lr_
 from lib.report_utils import progress_indicator
 from models.Grasp_GAN import gripper_sampler_net, gripper_sampler_path
-from models.gripper_collision_net import gripper_collision_net_path, GripperCollisionNet
+from models.gripper_collision_net import GripperCollisionNet
 from pose_object import pose_7_to_transformation
 from records.training_satatistics import TrainingTracker
 from registration import transform_to_camera_frame, camera
-from visualiztion import vis_scene
 
 instances_per_sample=16
 module_key = 'gripper_collision'

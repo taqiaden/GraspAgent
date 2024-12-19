@@ -1,19 +1,23 @@
 import math
 import subprocess
+
 import numpy as np
 import torch
 import trimesh
 from colorama import Fore
-from Configurations import config
+
 from Configurations.ENV_boundaries import bin_center
-from Configurations.run_config import simulation_mode, view_grasp_suction_points, \
-    suction_factor, gripper_factor, view_score_gradient, \
-    chances_ref, shuffling_probability, view_action, report_result, use_gripper, use_suction
+from Configurations.config import distance_scope
+from Configurations.run_config import simulation_mode, \
+    suction_factor, gripper_factor, report_result, use_gripper, use_suction
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
+
 from grasp_post_processing import  exploration_probabilty, view_masked_grasp_pose
 from lib.ROS_communication import wait_for_feedback, deploy_action
 from lib.bbox import convert_angles_to_transformation_form
+from lib.custom_print import my_print
+
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.gripper_exploration import local_exploration
 from lib.image_utils import check_image_similarity
@@ -33,7 +37,7 @@ execute_suction_shift_bash = './bash/run_robot_suction_shift.sh'
 execute_gripper_shift_bash = './bash/run_robot_gripper_shift.sh'
 execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
 
-
+pr=my_print()
 
 class Action():
     def __init__(self,point_index,action_index):
@@ -64,7 +68,6 @@ def get_shift_end_points(start_points):
     directions = targets - start_points
     end_points = start_points + ((directions * shift_execution_length) / torch.linalg.norm(directions,axis=-1,keepdims=True))
     return end_points
-
 
 def view_mask(voxel_pc, score, pivot=0.5):
     mask_=score.cpu().numpy()>pivot
@@ -158,7 +161,7 @@ class GraspAgent():
     def get_gripper_grasp_reachability(self,positions,poses):
         gripper_approach=(poses[:,0:3]).clone()
         gripper_approach[:,2]*=-1
-        distance=poses[:,-2:-1]*config.distance_scope
+        distance=poses[:,-2:-1]*distance_scope
         transition=positions+distance*gripper_approach
         gripper_scope=self.gripper_arm_reachability_net(torch.cat([transition, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         return gripper_scope
@@ -190,6 +193,7 @@ class GraspAgent():
 
 
     def model_inference(self,depth,rgb):
+        pr.title('model inference')
         self.depth=depth
         self.rgb=rgb
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
@@ -227,10 +231,10 @@ class GraspAgent():
         '''grasp actions'''
         self.gripper_grasp_mask=((background_class<0.5)*(gripper_grasp_scope>0.5)
                                *(griper_collision_classifier>0.5)
-                               *(griper_grasp_score*gripper_factor>0.5)* int(self.setting.use_gripper))
+                               *(griper_grasp_score*gripper_factor>0.5)* int(use_gripper))
         self.suction_grasp_mask=((background_class<0.5)*(suction_grasp_scope>0.5)
                                *(suction_seal_classifier>0.5)
-                               *(suction_grasp_score*suction_factor>0.5)* int(self.setting.use_suction))
+                               *(suction_grasp_score*suction_factor>0.5)* int(use_suction))
         self.suction_grasp_mask=self.suction_grasp_mask.squeeze()
         self.gripper_grasp_mask=self.gripper_grasp_mask.squeeze()
 
@@ -315,7 +319,6 @@ class GraspAgent():
         action_obj.transformation=T
         action_obj.is_executable=True
 
-    
     def process_action(self,action_obj):
         if action_obj.is_grasp:
             if action_obj.use_gripper_arm:
@@ -353,6 +356,7 @@ class GraspAgent():
         self.trace_mask[occupied_space_mask] = self.trace_mask[occupied_space_mask] * 0 + 1
 
     def pick_action(self):
+        pr.title('pick action/s')
         first_action_obj=None
         second_action_obj=None
 
@@ -384,6 +388,7 @@ class GraspAgent():
 
 
     def execute(self,first_action_obj,second_action_obj):
+        pr.title('execute action')
         deploy_action( first_action_obj)
         deploy_action(second_action_obj)
 
@@ -415,8 +420,9 @@ class GraspAgent():
         return first_action_obj,second_action_obj
 
     def process_feedback(self,first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre):
+        pr.title('process feedback')
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset': trigger_new_perception()
-        if not self.mode.report_result: return
+        if not report_result: return
 
         img_suction_after, img_grasp_after = get_side_bins_images()
 
@@ -435,9 +441,3 @@ class GraspAgent():
 
             '''save action instance'''
             save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action)
-
-
-
-
-
-

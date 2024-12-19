@@ -1,19 +1,19 @@
 import torch
 from colorama import Fore
+from filelock import FileLock
 from torch import nn
 from torch.utils import data
-from Configurations.config import  workers
+
+from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.joint_grasp_sampler_dl import GraspSamplerDataset
-from lib.IO_utils import   custom_print
+from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from models.joint_grasp_sampler import GraspSampler, Critic
 from registration import camera
-from filelock import FileLock
-
 from visualiztion import view_npy_open3d
 
 lock = FileLock("file.lock")

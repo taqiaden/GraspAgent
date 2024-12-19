@@ -1,8 +1,9 @@
 import cv2
+import numpy as np
 import torch
 from PIL import Image
-import numpy as np
 from colorama import Fore
+
 
 def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize=False):
     processed_gray_image=np.copy(depth)

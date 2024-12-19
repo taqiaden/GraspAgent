@@ -1,26 +1,25 @@
 import torch
+import torch.nn.functional as F
 from colorama import Fore
+from filelock import FileLock
 from torch import nn
 from torch.utils import data
+
 from Configurations.config import theta_cos_scope, workers
 from Configurations.dynamic_config import save_key, get_float
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.joint_grasp_sampler_dl import GraspSamplerDataset
-from lib.IO_utils import   custom_print
+from lib.IO_utils import custom_print
 from lib.collision_unit import grasp_collision_detection
 from lib.dataset_utils import online_data
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
 from lib.optimizer import exponential_decay_lr_
+from lib.report_utils import progress_indicator
 from models.joint_grasp_sampler import GraspSampler, Critic
-from pose_object import  pose_7_to_transformation
+from pose_object import pose_7_to_transformation
 from registration import camera
-import torch.nn.functional as F
-from lib.report_utils import  progress_indicator
-from filelock import FileLock
-
-from visualiztion import view_npy_open3d
 
 lock = FileLock("file.lock")
 

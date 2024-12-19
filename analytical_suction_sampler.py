@@ -1,8 +1,9 @@
 import numpy as np
-import torch
 import open3d as o3d
+import torch
 
 from lib.pc_utils import get_npy_norms, numpy_to_o3d
+
 
 def masked_pcd(pc,mask,normal=None):
     masked_pc=pc[mask]

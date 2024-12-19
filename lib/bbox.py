@@ -1,11 +1,13 @@
+import math
+
 import numpy as np
 import torch
-import math
 from scipy.spatial.transform import Rotation
-from Configurations import config
-from lib.grasp_utils import shift_a_distance,  remove_dist
 
+from Configurations import config
+from lib.grasp_utils import shift_a_distance, remove_dist
 from lib.math_utils import asCartesian, rotation_matrix_from_vectors, asSpherical
+
 
 def rotate_matrix_around_axis(rotation_degrees, rotation_axis=np.array([0, 0, 1])):
     rotation_radians = np.radians(rotation_degrees)
