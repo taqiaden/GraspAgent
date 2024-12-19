@@ -76,7 +76,6 @@ def view_mask(voxel_pc, score, pivot=0.5):
         colors[~mask_] /= 1.5
         view_npy_open3d(voxel_pc, color=colors)
 
-
 class GraspAgent():
     def __init__(self):
 
