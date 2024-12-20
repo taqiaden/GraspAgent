@@ -5,6 +5,9 @@ chances_ref = 5
 use_gripper =True
 use_suction = True
 
+activate_grasp=True
+activate_shift=False
+
 view_grasp_suction_points = True
 view_action= True
 view_score_gradient= True

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import torch
+
+from Configurations.run_config import simulation_mode
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale
@@ -23,7 +25,7 @@ while True:
         grasp_agent.dense_view()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
-        if first_action_obj is not None:
+        if first_action_obj is not None and not simulation_mode:
             '''execute action/s'''
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
             '''report result'''

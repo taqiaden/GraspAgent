@@ -40,10 +40,10 @@ def get_distance_step(distance):
     distance_step = 0.00375 # in meter
 
     if np.random.rand() > ((distance) / (config.distance_scope)) ** 2:
-        print('------Try to increase distance')
+        # print('------Try to increase distance')
         distance_step = distance_step
     else:
-        print('------Try to decrease distance')
+        # print('------Try to decrease distance')
         distance_step = -distance_step
 
     return distance_step

@@ -45,9 +45,12 @@ class GripperPartSampler(nn.Module):
 
     def forward(self,representation_2d,spatial_data_2d, alpha=0.,random_tensor=None):
         '''Approach'''
-        approach=self.get_approach(representation_2d,spatial_data_2d)
-        if alpha>0.:
-            approach=randomize_approach(approach, alpha=alpha,random_tensor=random_tensor)
+        if alpha==1.:
+            approach=random_approach_tensor(representation_2d.shape[0]) if random_tensor is None else random_tensor.clone()
+        else:
+            approach = self.get_approach(representation_2d, spatial_data_2d)
+            if alpha > 0.:
+                approach = randomize_approach(approach, alpha=alpha, random_tensor=random_tensor)
 
         '''Beta, distance, and width'''
         position_approach=torch.cat([spatial_data_2d,approach],dim=1)

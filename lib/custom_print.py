@@ -26,13 +26,15 @@ class my_print():
         self.rank=1
     def print(self,msg):
         print(self.rank*'   ',msg)
-    def step_f(self,msg):
+    def step_f(self,msg=None):
         self.rank+=1
         self.rank=max(self.rank,0)
-        self.print(msg)
-    def step_b(self,msg):
+        if msg is not None:
+            self.print(msg)
+    def step_b(self,msg=None):
         self.rank -= 1
-        self.print(msg)
+        if msg is not None:
+            self.print(msg)
     def step(self,x):
         self.rank += 1
         self.rank = max(self.rank, 0)

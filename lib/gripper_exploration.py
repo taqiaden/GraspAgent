@@ -160,8 +160,8 @@ def local_exploration(T_d, width, distance ,point_data, exploration_attempts=5,e
         grasp_collision_detection(best_T_d,best_width, point_data, visualize=True)
 
     '''Report and final check'''
-    if evaluation_metric==0 and prediction_has_collision: print('Grasp pose has been modified after exploration')
-    if depth_is_altered:print('Approach distance has been altered')
+    # if evaluation_metric==0 and prediction_has_collision: print('Grasp pose has been modified after exploration')
+    # if depth_is_altered:print('Approach distance has been altered')
     if evaluation_metric==0:
         collision_intensity = grasp_collision_detection(best_T_d,best_width, point_data, visualize=False)
         if evaluation_metric==0 and collision_intensity>0:print(Fore.RED,f'Conflict in the collision detection unit, type B, recorded metric={evaluation_metric}, actual metric={collision_intensity}',Fore.RESET)
