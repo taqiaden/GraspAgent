@@ -9,11 +9,12 @@ from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
+from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.report_utils import progress_indicator
-from models.action_net import ActionNet, Critic
+from models.action_net import ActionNet, Critic, random_approach_tensor
 from records.training_satatistics import TrainingTracker
 from registration import camera
 # from training.action_lr import model_dependent_sampling
@@ -69,7 +70,7 @@ def loop():
         '''generate grasps'''
         with torch.no_grad():
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = gan.generator(
-                depth.clone())
+                depth.clone(),alpha=0.5)
 
         '''Evaluate generated grasps'''
         # collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,

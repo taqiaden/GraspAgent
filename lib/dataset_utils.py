@@ -269,15 +269,15 @@ def export_suction_labels(from_dataset,to_dataset):
         to_dataset.save_labeled_data(pc, label, idx)
 
 if __name__ == '__main__':
-
-    online_data=online_data_local()
-
-    label_names=online_data.label.get_names()
-    COUNTER = 0
-    print(len(label_names))
-    l=28
-    for i in range(len(label_names)):
-        label=online_data.label.load_numpy(label_names[i])
-        assert label.shape[0]==l
-        l=label.shape[0]
-        print(label.shape)
+    pass
+    # online_data=online_data_local()
+    #
+    # label_names=online_data.label.get_names()
+    # COUNTER = 0
+    # print(len(label_names))
+    # l=28
+    # for i in range(len(label_names)):
+    #     label=online_data.label.load_numpy(label_names[i])
+    #     assert label.shape[0]==l
+    #     l=label.shape[0]
+    #     print(label.shape)

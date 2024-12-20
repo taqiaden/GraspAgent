@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-
 from Configurations.config import theta_scope, phi_scope
 from lib.custom_activations import GripperGraspRegressor2
 from lib.models_utils import reshape_for_layer_norm
@@ -14,19 +13,25 @@ use_bn=False
 use_in=True
 action_module_key='action_net'
 
-def randomize_approach(approach,randomization_ratio=0.0):
-    random_tensor=torch.rand_like(approach)
-
+def random_approach_tensor(size):
+    # random_tensor = torch.rand_like(approach)
+    random_tensor = torch.rand(size=(size,3),device='cuda')
     '''fit to scope'''
-    assert theta_scope==90. and phi_scope==360.
-    random_tensor[:,0:2]=(random_tensor[:,0:2]*2)-1
+    assert theta_scope == 90. and phi_scope == 360.
+    random_tensor[:, 0:2] = (random_tensor[:, 0:2] * 2) - 1
 
+    return random_tensor
+
+def randomize_approach(approach,alpha=0.0,random_tensor=None):
+    random_tensor_=random_approach_tensor(approach.shape[0]) if random_tensor is None else random_tensor.clone()
     '''scale to the size of the base vector'''
-    norm=torch.norm(approach,dim=-1).detach()
-    random_tensor*=norm
+    norm=torch.norm(approach,dim=-1,keepdim=True).detach()
+    random_norm=torch.norm(random_tensor_,dim=-1,keepdim=True).detach()
+
+    random_tensor_*=(norm/random_norm)
 
     '''add the randomization'''
-    randomized_approach=approach*(1-randomization_ratio)+random_tensor*randomization_ratio
+    randomized_approach=approach*(1-alpha)+random_tensor_*alpha
 
     return randomized_approach
 
@@ -38,11 +43,11 @@ class GripperPartSampler(nn.Module):
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
-    def forward(self,representation_2d,spatial_data_2d, approach_randomness_ratio=0.):
+    def forward(self,representation_2d,spatial_data_2d, alpha=0.,random_tensor=None):
         '''Approach'''
         approach=self.get_approach(representation_2d,spatial_data_2d)
-        if approach_randomness_ratio>0.:
-            approach=randomize_approach(approach, randomization_ratio=approach_randomness_ratio)
+        if alpha>0.:
+            approach=randomize_approach(approach, alpha=alpha,random_tensor=random_tensor)
 
         '''Beta, distance, and width'''
         position_approach=torch.cat([spatial_data_2d,approach],dim=1)
@@ -118,7 +123,7 @@ class ActionNet(nn.Module):
         self.sigmoid=nn.Sigmoid()
 
 
-    def forward(self, depth,approach_randomness_ratio=0.0):
+    def forward(self, depth,alpha=0.0,random_tensor=None):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -133,7 +138,7 @@ class ActionNet(nn.Module):
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         '''gripper parameters'''
-        gripper_pose=self.gripper_sampler(features,self.spatial_encoding,approach_randomness_ratio=approach_randomness_ratio)
+        gripper_pose=self.gripper_sampler(features,self.spatial_encoding,alpha=alpha,random_tensor=random_tensor)
 
         '''suction direction'''
         suction_direction=self.suction_sampler(features)

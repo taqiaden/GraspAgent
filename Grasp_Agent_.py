@@ -264,11 +264,15 @@ class GraspAgent():
 
         print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
 
-    def view(self):
+    def dense_view(self):
         view_mask(self.voxel_pc, self.gripper_grasp_mask, pivot=0.5)
         view_mask(self.voxel_pc, self.suction_grasp_mask, pivot=0.5)
         view_mask(self.voxel_pc, self.gripper_shift_mask, pivot=0.5)
         view_mask(self.voxel_pc, self.suction_shift_mask, pivot=0.5)
+
+    def actions_view(self,first_action_obj,second_action_obj):
+
+        pass
 
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]

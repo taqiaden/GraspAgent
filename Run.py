@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
-
 import numpy as np
 import torch
-
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale
@@ -22,7 +20,7 @@ while True:
         random_rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
         '''infer dense action value pairs'''
         grasp_agent.model_inference(depth,random_rgb)
-        grasp_agent.view()
+        grasp_agent.dense_view()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
         if first_action_obj is not None:

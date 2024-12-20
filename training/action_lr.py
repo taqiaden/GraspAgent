@@ -4,11 +4,11 @@ from colorama import Fore
 from filelock import FileLock
 from torch import nn
 from torch.utils import data
-
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
+from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
@@ -16,7 +16,7 @@ from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.report_utils import progress_indicator
-from models.action_net import ActionNet, Critic, action_module_key
+from models.action_net import ActionNet, Critic, action_module_key, random_approach_tensor
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
 from training.learning_objectives.grasp_sampling_evalutor import gripper_sampler_loss
@@ -187,7 +187,9 @@ class TrainActionNet:
 
             '''generate grasps'''
             with torch.no_grad():
-                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone())
+                size = depth.shape[0] * depth.shape[1] * depth.shape[2] * depth.shape[3]
+                random_approach = random_approach_tensor(size)
+                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.5,random_tensor=random_approach)
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
                 for j in range(b):
@@ -231,7 +233,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = self.gan.generator(
-                depth.clone())
+                depth.clone(),alpha=0.5,random_tensor=random_approach)
 
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,
@@ -366,15 +368,15 @@ class TrainActionNet:
 if __name__ == "__main__":
 
     for i in range(1000):
-        # train_action_net = TrainActionNet(batch_size=2, n_samples=10, learning_rate=5e-5)
+        #cuda_memory_report()
+
+        lr=1e-5
+        # train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
         # train_action_net.begin()
-        # lr=1e-5/(1+min(9,i))
-        lr=1e-6
         try:
             cuda_memory_report()
             train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
             train_action_net.begin()
         except Exception as error_message:
-            del train_action_net
             torch.cuda.empty_cache()
             print(error_message)

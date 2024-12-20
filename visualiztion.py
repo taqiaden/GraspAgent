@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import trimesh
 
+from lib.collision_unit import grasp_collision_detection
 from lib.depth_map import depth_to_point_clouds, CameraInfo
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
@@ -186,8 +187,14 @@ def vis_scene(T_d_stack,width_stack, npy=None):
         width_stack = np.array([[width_stack]])
 
     for i in range(T_d_stack.shape[0]):
+        has_collision = grasp_collision_detection(T_d_stack[i], width_stack[i], npy, visualize=False)>0
+
         mesh=construct_gripper_mesh_2(width_stack[i], T_d_stack[i])
-        mesh.paint_uniform_color([0.6,0.6, 0.6])
+        if has_collision:
+            mesh.paint_uniform_color([0.9, 0.5, 0.5])
+        else:
+            mesh.paint_uniform_color([0.5,0.9, 0.5])
+
         scene_list.append(mesh)
 
     '''add point cloud'''
