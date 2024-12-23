@@ -45,7 +45,6 @@ def angles_to_rotation_matrix(theta, phi, beta):
     matr = apply_rotation_on_matrix(matrix=matr, rotation_degree=beta)
 
     target_vector = asCartesian(spherical_coordinate)
-    # test
     target_vector = target_vector / np.linalg.norm(target_vector)
     matr = transform_to_vec(matr, target_vector)
 
@@ -134,13 +133,14 @@ def convert_angles_to_transformation_form(relative_pose_5,center_point):
     '''clip and reshape'''
     assert relative_pose_5.shape==(1,5) or relative_pose_5.shape==(5,), f'{relative_pose_5.shape}'
     relative_pose_5=torch.clip(relative_pose_5,0.,1.)
+
     relative_pose_5=relative_pose_5.squeeze().detach().cpu().numpy()
 
     '''convert to real scope'''
-    theta2,phi2,beta2,distance,width=unit_metrics_to_real_scope(relative_pose_5)
+    theta,phi,beta,distance,width=unit_metrics_to_real_scope(relative_pose_5)
 
     '''angles to rotation matrix'''
-    rotation_matrix=angles_to_rotation_matrix(theta2, phi2, beta2).reshape(3,3)
+    rotation_matrix=angles_to_rotation_matrix(theta, phi, beta).reshape(3,3)
 
     '''transformation matrix'''
     T_0=construct_transformation(center_point, rotation_matrix)

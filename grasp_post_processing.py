@@ -2,11 +2,8 @@ import numpy as np
 import trimesh
 
 from Configurations import config
-from Configurations.run_config import simulation_mode
 from lib.ROS_communication import  save_suction_data
-from lib.bbox import convert_angles_to_transformation_form
 from lib.grasp_utils import get_pose_matrixes
-from lib.gripper_exploration import local_exploration
 from visualiztion import vis_scene, visualize_suction_pose
 
 exploration_probabilty=0.0

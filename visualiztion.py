@@ -117,12 +117,9 @@ def o3d_line(start, end, colors_=None):
 
 def view_shift_pose(start,end,pc,target_normal,pc_colors=None):
     start=np.copy(start)
-    end=np.copy(end)
-
     end2=np.copy(start)
     end2+=target_normal*0.1
     vertical_line=o3d_line(start,end2,colors_=[0,0.5,0])
-
 
     pcd = numpy_to_o3d(pc,  color=pc_colors)
 
@@ -179,7 +176,6 @@ def highlight_background(npy):
     return pcd
 
 def vis_scene(T_d_stack,width_stack, npy=None):
-
     '''prepare mesh for each grasp'''
     scene_list = []
     if T_d_stack.ndim==2:
@@ -374,6 +370,7 @@ def view_score2(data_,score):
     scene.show()
 
 if __name__ == '__main__':
+    draw_arrow_implementation_example()
     x=np.random.random((10000,3))
     s=np.random.random((10000))
     score_visualization(x,s)

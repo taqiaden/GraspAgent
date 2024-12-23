@@ -189,7 +189,7 @@ class TrainActionNet:
             with torch.no_grad():
                 size = depth.shape[0] * depth.shape[1] * depth.shape[2] * depth.shape[3]
                 random_approach = random_approach_tensor(size)
-                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.5,random_tensor=random_approach)
+                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.0,random_tensor=random_approach)
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
                 for j in range(b):
@@ -233,7 +233,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = self.gan.generator(
-                depth.clone(),alpha=0.5,random_tensor=random_approach)
+                depth.clone(),alpha=0.0,random_tensor=random_approach)
 
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,
@@ -307,7 +307,7 @@ class TrainActionNet:
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
-            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss*10+suction_sampling_loss*50+decay_loss+background_loss*30
+            loss=suction_loss+gripper_loss+shift_loss+gripper_sampling_loss*30+suction_sampling_loss*100+decay_loss+background_loss*50
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
@@ -370,7 +370,7 @@ if __name__ == "__main__":
     for i in range(1000):
         #cuda_memory_report()
 
-        lr=1e-5
+        lr=1e-6
         # train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
         # train_action_net.begin()
         try:

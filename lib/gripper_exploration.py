@@ -106,8 +106,6 @@ def local_exploration(T_d, width, distance ,point_data, exploration_attempts=5,e
     '''set the distance perturbation step'''
     distance_step = get_distance_step(distance)
 
-    prediction_has_collision=True
-    depth_is_altered=False
     evaluation_metric=None
     for i in range(exploration_attempts):
         if explore:print('- Exploration attempt ', i + 1)

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import torch
-
 from Configurations.run_config import simulation_mode
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
@@ -22,9 +21,10 @@ while True:
         random_rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
         '''infer dense action value pairs'''
         grasp_agent.model_inference(depth,random_rgb)
-        grasp_agent.dense_view()
+        # grasp_agent.dense_view()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
+        grasp_agent.actions_view(first_action_obj,second_action_obj)
         if first_action_obj is not None and not simulation_mode:
             '''execute action/s'''
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)

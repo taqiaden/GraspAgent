@@ -1,9 +1,7 @@
 import numpy as np
 from torch.utils import data
-
 from explore_arms_scope import scope_data_dir
 from lib.dataset_utils import modality_pool
-
 
 class gripper_scope_dataset(data.Dataset):
     def __init__(self):

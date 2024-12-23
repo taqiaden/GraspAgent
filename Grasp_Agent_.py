@@ -1,26 +1,26 @@
 import math
 import subprocess
-
 import numpy as np
 import torch
 import trimesh
 from colorama import Fore
-
+import open3d as o3d
 from Configurations.ENV_boundaries import bin_center
 from Configurations.config import distance_scope
 from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-
 from grasp_post_processing import  exploration_probabilty, view_masked_grasp_pose
 from lib.ROS_communication import wait_for_feedback, deploy_action
 from lib.bbox import convert_angles_to_transformation_form
+from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
-
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.gripper_exploration import local_exploration
 from lib.image_utils import check_image_similarity
+from lib.mesh_utils import construct_gripper_mesh_2
+from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
@@ -29,7 +29,7 @@ from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
-from visualiztion import view_npy_open3d, vis_scene
+from visualiztion import view_npy_open3d, vis_scene, get_arrow
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
 execute_gripper_grasp_bash = './bash/run_robot_grasp.sh'
@@ -66,27 +66,91 @@ class Action():
         self.grasp_result=None
         self.shift_result=None
 
+
     @property
     def is_valid(self):
         return self.use_gripper_arm is not None or self.use_suction_arm is not None
-
+    @property
     def arm_name(self):
         if self.use_gripper_arm:
             return 'gripper'
         elif self.use_suction_arm:
             return 'suction'
 
+    @property
     def action_name(self):
         if self.is_grasp:
             return 'grasp'
         elif self.is_shift:
             return 'shift'
 
+    def check_collision(self,point_cloud):
+        if self.is_valid and self.is_grasp and self.use_gripper_arm:
+            return grasp_collision_detection(self.transformation, self.width, point_cloud, visualize=False) > 0
+        else:
+            return None
+
+    def get_gripper_mesh(self,color=None):
+        if self.is_valid and self.use_gripper_arm:
+            mesh = construct_gripper_mesh_2(self.width, self.transformation)
+            mesh.paint_uniform_color([0.5, 0.9, 0.5]) if color is None else mesh.paint_uniform_color(color)
+            return mesh
+        else:
+            return None
+
+    @property
+    def approach(self):
+        if self.transformation is not None:
+            return self.transformation[0:3, 0]
+        else:
+            return None
+
+    @property
+    def normal(self):
+        if self.transformation is not None:
+            normal = self.approach*-1
+            return normal
+        else:
+            return None
+
+    def get_approach_mesh(self):
+        if self.is_valid and self.transformation is not None:
+            arrow_emerge_point=self.target_point-self.approach*0.05
+            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.0)
+            return arrow_mesh
+        else:
+            return None
+
+    def pose_mesh(self):
+        if self.is_valid:
+            if self.use_gripper_arm and self.is_grasp:
+                return self.get_gripper_mesh()
+            else:
+                arrow_mesh=self.get_approach_mesh()
+                if self.is_grasp:
+                    arrow_mesh.paint_uniform_color([0.5, 0.9, 0.5])
+                return arrow_mesh
+        else:
+            return None
+
+    def view(self,point_clouds,mask=None):
+        scene_list = []
+        pose_mesh=self.pose_mesh()
+        # o3d_line(start, end2, colors_=[0, 0.5, 0])
+        if pose_mesh is not None:
+            scene_list.append(pose_mesh)
+            masked_colors = np.ones_like(point_clouds) * [0.5, 0.9, 0.5]
+            if mask is not None:
+                masked_colors[mask]=(masked_colors[mask]*0)+[0.9, 0.5, 0.5]
+            pcd = numpy_to_o3d(pc=point_clouds, color=masked_colors)
+            scene_list.append(pcd)
+            o3d.visualization.draw_geometries(scene_list)
+
     def print(self):
         if  self.is_valid:
             pr.print('Action details:')
             pr.step_f()
-            pr.print(f'{self.action_name()} using {self.arm_name()} arm')
+            pr.print(f'{self.action_name} using {self.arm_name} arm')
             if self.target_point is not None:
                 pr.print(f'target point {self.target_point}')
 
@@ -100,7 +164,6 @@ class Action():
                 pr.print(f'Shift result : {self.shift_result}')
 
             pr.step_b()
-        
 
 def get_shift_end_points(start_points):
     targets=torch.zeros_like(start_points)
@@ -111,7 +174,7 @@ def get_shift_end_points(start_points):
     return end_points
 
 def masked_color(voxel_pc, score, pivot=0.5):
-    mask_=score.cpu().numpy()>pivot
+    mask_=score.cpu().numpy()>pivot if torch.is_tensor(score) else score>pivot
     colors = np.zeros_like(voxel_pc)
     colors[mask_]+= [0.5, 0.9, 0.5]
     colors[~mask_] += [0.52, 0.8, 0.92]
@@ -154,7 +217,8 @@ class GraspAgent():
         self.rgb=None
 
         '''dense candidates'''
-        self.gripper_poses=None
+        self.gripper_poses_5=None
+        self.gripper_poses_7=None
         self.gripper_grasp_mask=None
         self.suction_grasp_mask=None
         self.gripper_shift_mask=None
@@ -171,6 +235,18 @@ class GraspAgent():
         self.actions=[]
         self.states=[]
         self.data=[]
+
+        self.first_action_mask=None
+
+    @property
+    def gripper_approach(self):
+        approach=self.gripper_poses_7[:,0:3].clone()
+        approach[:,2]*=-1
+        return approach
+
+    @property
+    def suction_approach(self):
+        return self.normals*-1
 
     def initialize_check_points(self):
         pi = progress_indicator('Loading check points  ', max_limit=5)
@@ -204,14 +280,12 @@ class GraspAgent():
         pi.end()
 
     def get_suction_grasp_reachability(self,positions,normals):
-        approach=normals.clone()
-        approach[:,2]*=-1
+        approach=-normals.clone()
         suction_scope = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         return suction_scope
 
     def get_suction_shift_reachability(self,positions,normals):
-        approach=normals.clone()
-        approach[:,2]*=-1
+        approach=-normals.clone()
         suction_scope_a = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         shift_end_positions=get_shift_end_points(positions)
         suction_scope_b = self.suction_arm_reachability_net(torch.cat([shift_end_positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
@@ -311,7 +385,8 @@ class GraspAgent():
         self.suction_shift_mask=((shift_appealing>0.5)*(suction_shift_scope>0.5)* int(use_suction)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
 
         '''gripper pose convention'''
-        self.gripper_poses = vectors_to_ratio_metrics(poses)
+        self.gripper_poses_7=poses
+        self.gripper_poses_5 = vectors_to_ratio_metrics(poses.clone())
 
         '''initiate random policy'''
         self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
@@ -325,36 +400,48 @@ class GraspAgent():
         self.valid_actions_mask[:,3][self.suction_shift_mask]+=1
 
         '''count available actions'''
-        self.n_grasps=torch.count_nonzero(self.q_value[:,0:2])
-        self.n_shifts=torch.count_nonzero(self.q_value[:,2:4])
+        self.n_grasps=torch.count_nonzero(self.valid_actions_mask[:,0:2])
+        self.n_shifts=torch.count_nonzero(self.valid_actions_mask[:,2:4])
 
         '''to numpy'''
         self.normals=self.normals.cpu().numpy()
 
     def dense_view(self):
         print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
-        multi_mask_view(self.voxel_pc,[self.gripper_grasp_mask,self.suction_grasp_mask,self.gripper_shift_mask,self.suction_shift_mask])
+        self.view_valid_actions_mask()
+        # multi_mask_view(self.voxel_pc,[self.gripper_grasp_mask,self.suction_grasp_mask,self.gripper_shift_mask,self.suction_shift_mask])
         # view_mask(self.voxel_pc, self.gripper_grasp_mask, pivot=0.5)
         # view_mask(self.voxel_pc, self.suction_grasp_mask, pivot=0.5)
         # view_mask(self.voxel_pc, self.gripper_shift_mask, pivot=0.5)
         # view_mask(self.voxel_pc, self.suction_shift_mask, pivot=0.5)
 
     def actions_view(self,first_action_obj,second_action_obj):
-
-        pass
+        scene_list = []
+        first_pose_mesh=first_action_obj.pose_mesh()
+        if first_pose_mesh is not None: scene_list.append(first_pose_mesh)
+        second_pose_mesh=second_action_obj.pose_mesh()
+        if second_pose_mesh is not None: scene_list.append(second_pose_mesh)
+        masked_colors = np.ones_like(self.voxel_pc) * [0.52, 0.8, 0.92]
+        if self.first_action_mask is not None:
+            masked_colors[self.first_action_mask] /=1.1
+        pcd = numpy_to_o3d(pc=self.voxel_pc, color=masked_colors)
+        scene_list.append(pcd)
+        o3d.visualization.draw_geometries(scene_list)
 
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
-        relative_pose_5 = self.gripper_poses[action_obj.point_index]
+        relative_pose_5 = self.gripper_poses_5[action_obj.point_index]
         T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
 
-        activate_exploration = True if np.random.rand() < exploration_probabilty else False
+        # activate_exploration = True if np.random.rand() < exploration_probabilty else False
 
-        T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
-                                                                      exploration_attempts=5,
-                                                                      explore_if_collision=False,
-                                                                      view_if_sucess=view_masked_grasp_pose,
-                                                                      explore=activate_exploration)
+        collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
+
+        # T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
+        #                                                               exploration_attempts=5,
+        #                                                               explore_if_collision=False,
+        #                                                               view_if_sucess=view_masked_grasp_pose,
+        #                                                               explore=activate_exploration)
         action_obj.is_executable= collision_intensity == 0
         action_obj.width=width
         action_obj.transformation=T_d
@@ -411,21 +498,32 @@ class GraspAgent():
             self.valid_actions_mask[:, [1, 3]] *=  0 
 
         '''mask occupied space'''
-        approach = action_obj.transformation[0:3, 0]
-        normal = approach.copy()
-        normal[2] *= -1
-        bounding_box_point_1 = self.voxel_pc[action_obj.point_index]
-        safety_margin = 0.2
-        bounding_box_point_2 = bounding_box_point_1 + normal * safety_margin
+        arm_knee_margin = 0.2
+        normal=action_obj.normal
+        action_obj.target_point=self.voxel_pc[action_obj.point_index]
+        arm_knee_extreme=(action_obj.target_point + normal * arm_knee_margin)[1]
+        minimum_safety_margin=0.05
+        x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
+        y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])
+        dist_mask=(x_dist<minimum_safety_margin) & (y_dist<minimum_safety_margin)
 
         if action_obj.use_gripper_arm:
-            max_y = max(bounding_box_point_1[1], bounding_box_point_2[1])
-            occupied_space_mask = self.voxel_pc[:,1] < max_y
-        else:
-            min_y = min(bounding_box_point_1[1], bounding_box_point_2[1])
-            occupied_space_mask = self.voxel_pc[:,1] > min_y
+            other_arm_approach=self.suction_approach
+            minimum_margin = action_obj.target_point[1] - minimum_safety_margin
+            second_arm_extreme=(self.voxel_pc-other_arm_approach*arm_knee_margin)[:,1]
 
-        self.valid_actions_mask[occupied_space_mask] *=  0 
+
+            occupancy_mask = (self.voxel_pc[:,1] < minimum_margin) | (arm_knee_extreme>second_arm_extreme) | dist_mask
+        else:
+            other_arm_approach=self.gripper_approach.cpu().numpy()
+            second_arm_extreme=(self.voxel_pc-other_arm_approach*arm_knee_margin)[:,1]
+            minimum_margin = action_obj.target_point[1] + minimum_safety_margin
+
+            occupancy_mask = (self.voxel_pc[:,1] > minimum_margin) | (second_arm_extreme>arm_knee_extreme) |  dist_mask
+
+        self.first_action_mask=occupancy_mask
+
+        self.valid_actions_mask[occupancy_mask] *=  0
 
 
     def view_valid_actions_mask(self):
@@ -439,7 +537,7 @@ class GraspAgent():
         for i in range(4):
             mask_i = (self.valid_actions_mask[:, i] > 0.5).cpu().numpy()
             (colors[i])[~mask_i] *= 0.
-            (colors[i])[~mask_i] += [0.9, 0.5, 0.5]
+            (colors[i])[~mask_i] += [0.9, 0.9, 0.9]
         four_pc_stack = np.concatenate([four_pc_stack[0], four_pc_stack[1], four_pc_stack[2], four_pc_stack[3]], axis=0)
         colors = np.concatenate([colors[0], colors[1], colors[2], colors[3]], axis=0)
         view_npy_open3d(four_pc_stack, color=colors)
@@ -448,6 +546,7 @@ class GraspAgent():
         pr.title('pick action/s')
         first_action_obj=Action()
         second_action_obj=Action()
+        self.first_action_mask=None
 
         '''first action'''
         available_actions_size=int(((self.q_value* self.valid_actions_mask)>0.0).sum())
@@ -457,7 +556,8 @@ class GraspAgent():
             self.process_action(action_obj)
             if action_obj.is_executable:
                 first_action_obj=action_obj
-                self.mask_arm_occupancy(action_obj)
+                if action_obj.is_grasp:
+                    self.mask_arm_occupancy(action_obj)
                 break
 
         self.valid_actions_mask[:,2:]*=0 # simultaneous operation of both arms are for grasp actions only
@@ -465,7 +565,8 @@ class GraspAgent():
 
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
-        self.view_valid_actions_mask()
+        # first_action_obj.view(self.voxel_pc)
+        # self.view_valid_actions_mask()
 
         '''second action'''
         available_actions_size=int(((self.q_value*self.valid_actions_mask)>0.0).sum())
@@ -540,3 +641,13 @@ class GraspAgent():
 
             '''save action instance'''
             save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action)
+
+
+'''conventions'''
+# normal is a vector emerge out of the surface
+# approach direction is a vector pointing to the surface
+# approach = -1 * normal
+# the gripper sampler first three parameters are approach[0] and approach [1] and -1* approach[2]
+# the suction sampler outputs the normal direction
+# T_0 refers to a gripper head transformation matrix with zero penetration while T_d embeds distance term
+
