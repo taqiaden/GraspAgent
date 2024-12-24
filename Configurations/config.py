@@ -35,6 +35,8 @@ beta_scope_rad=(beta_scope/180)*np.pi
 distance_scope=0.05
 width_scope= 0.05
 
+gripper_width_during_shift=0.1*width_scope
+
 #dataset and dataloader
 num_points= 50000*1 #16384
 

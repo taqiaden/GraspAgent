@@ -1,9 +1,8 @@
+from models.spatial_encoder import depth_xy_spatial_data
 import numpy as np
 
 if __name__ == "__main__":
-    x=[1,None,[1,2]]
-    x=np.array(x)
-    print(x[0])
-    print(x[1])
-    print(x[2])
-
+    s=depth_xy_spatial_data(1)
+    print(s.shape)
+    print(s[0,0,0])
+    np.random.random_integers(0,711)

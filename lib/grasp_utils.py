@@ -19,6 +19,13 @@ def get_target_point_2(T,distance):
     center_point= transition - approach * distance
     return center_point
 
+def adjust_final_matrix(base_transformation,x_correction):
+    rot1 = [[0, 0, 1, -x_correction],
+            [-1, 0, 0, 0],
+            [0, -1, 0, 0],
+            [0, 0, 0, 1]]
+    final_matrix = np.dot(base_transformation, rot1)
+    return final_matrix
 
 def get_pose_matrixes(T,k_end_effector,k_pre_grasp):
     rot1 = [[0, 0, 1, -k_end_effector],

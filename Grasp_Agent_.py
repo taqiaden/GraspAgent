@@ -6,18 +6,16 @@ import trimesh
 from colorama import Fore
 import open3d as o3d
 from Configurations.ENV_boundaries import bin_center
-from Configurations.config import distance_scope
+from Configurations.config import distance_scope, gripper_width_during_shift
 from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from grasp_post_processing import  exploration_probabilty, view_masked_grasp_pose
 from lib.ROS_communication import wait_for_feedback, deploy_action
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
-from lib.gripper_exploration import local_exploration
 from lib.image_utils import check_image_similarity
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
@@ -65,6 +63,8 @@ class Action():
 
         self.grasp_result=None
         self.shift_result=None
+
+        self.shift_end_point=None
 
 
     @property
@@ -116,19 +116,24 @@ class Action():
     def get_approach_mesh(self):
         if self.is_valid and self.transformation is not None:
             arrow_emerge_point=self.target_point-self.approach*0.05
-            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.0)
+            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.3)
             return arrow_mesh
         else:
             return None
 
     def pose_mesh(self):
         if self.is_valid:
-            if self.use_gripper_arm and self.is_grasp:
-                return self.get_gripper_mesh()
+            if self.use_gripper_arm:
+                if self.is_grasp:
+                    return self.get_gripper_mesh()
+                else:
+                    return self.get_gripper_mesh(color=[0.5, 0.5, 0.5])
             else:
                 arrow_mesh=self.get_approach_mesh()
                 if self.is_grasp:
                     arrow_mesh.paint_uniform_color([0.5, 0.9, 0.5])
+                else:
+                    arrow_mesh.paint_uniform_color([0.5, 0.5, 0.5])
                 return arrow_mesh
         else:
             return None
@@ -207,7 +212,6 @@ class GraspAgent():
         '''models'''
         self.action_net = None
         self.value_net = None
-
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
 
@@ -216,7 +220,7 @@ class GraspAgent():
         self.depth=None
         self.rgb=None
 
-        '''dense candidates'''
+        '''dense records'''
         self.gripper_poses_5=None
         self.gripper_poses_7=None
         self.gripper_grasp_mask=None
@@ -226,17 +230,30 @@ class GraspAgent():
         self.voxel_pc=None
         self.normals=None
         self.q_value=None
+        self.biased_q_value=None
+        self.shift_end_points=None
         self.valid_actions_mask=None
-
         self.n_grasps=0
         self.n_shifts=0
-
-        '''execution results'''
-        self.actions=[]
-        self.states=[]
-        self.data=[]
-
         self.first_action_mask=None
+
+    def clear(self):
+        self.gripper_poses_5=None
+        self.gripper_poses_7=None
+        self.gripper_grasp_mask=None
+        self.suction_grasp_mask=None
+        self.gripper_shift_mask=None
+        self.suction_shift_mask=None
+        self.voxel_pc=None
+        self.normals=None
+        self.q_value=None
+        self.biased_q_value=None
+        self.shift_end_points=None
+        self.valid_actions_mask=None
+        self.n_grasps=0
+        self.n_shifts=0
+        self.first_action_mask=None
+
 
     @property
     def gripper_approach(self):
@@ -287,8 +304,9 @@ class GraspAgent():
     def get_suction_shift_reachability(self,positions,normals):
         approach=-normals.clone()
         suction_scope_a = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
-        shift_end_positions=get_shift_end_points(positions)
-        suction_scope_b = self.suction_arm_reachability_net(torch.cat([shift_end_positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        if self.shift_end_points is None:
+            self.shift_end_points = get_shift_end_points(positions)
+        suction_scope_b = self.suction_arm_reachability_net(torch.cat([self.shift_end_points, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         result=torch.stack([suction_scope_a,suction_scope_b],dim=-1)
         result,_=torch.min(result,dim=-1)
         return result
@@ -305,21 +323,23 @@ class GraspAgent():
         gripper_approach=normals.clone()
         gripper_approach[:,2]*=-1
         gripper_scope_a=self.gripper_arm_reachability_net(torch.cat([positions, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
-        shift_end_positions = get_shift_end_points(positions)
-        gripper_scope_b=self.gripper_arm_reachability_net(torch.cat([shift_end_positions, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
+        if self.shift_end_points is None:
+            self.shift_end_points = get_shift_end_points(positions)
+        gripper_scope_b=self.gripper_arm_reachability_net(torch.cat([self.shift_end_points, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         result = torch.stack([gripper_scope_a, gripper_scope_b], dim=-1)
         result, _ = torch.min(result, dim=-1)
         return result
 
     def next_action(self, epsilon=0.0):
-        masked_q_value=self.q_value*self.valid_actions_mask
+        masked_q_value=self.biased_q_value*self.valid_actions_mask
+
         if np.random.rand()>epsilon:
             flattened_index=torch.argmax(masked_q_value).item()
             point_index = math.floor(flattened_index / 4)
             action_index = flattened_index - int(4 * point_index)
 
             max_val=masked_q_value[point_index,action_index]
-            if max_val<=0: return None,None
+            if max_val==0: return None,None
 
         else:
             available_indexes=torch.nonzero(masked_q_value)
@@ -375,7 +395,6 @@ class GraspAgent():
                                *(suction_seal_classifier>0.5)
                                *(suction_grasp_score*suction_factor>0.5)* int(use_suction)* int(activate_grasp))>0.5
 
-
         '''shift reachability'''
         gripper_shift_scope=self.get_gripper_shift_reachability( positions,self.normals)
         suction_shift_scope=self.get_suction_shift_reachability(positions,self.normals)
@@ -390,8 +409,12 @@ class GraspAgent():
 
         '''initiate random policy'''
         self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
-        self.valid_actions_mask=torch.zeros_like(self.q_value)
+        # self.q_value=q_value.squeeze().permute(1,2,0)[mask]
+        self.biased_q_value=self.q_value.clone()
+        min_q_value=torch.min(self.biased_q_value).item()
+        self.biased_q_value+=(1-min(min_q_value,0.))
 
+        self.valid_actions_mask=torch.zeros_like(self.q_value)
 
         '''initialize valid actions mask'''
         self.valid_actions_mask[:,0][self.gripper_grasp_mask]+=1
@@ -448,7 +471,7 @@ class GraspAgent():
 
         if view: vis_scene(T_d, width, npy=self.voxel_pc)
 
-    def gripper_shift_processing(self,action_obj, view=False):
+    def gripper_shift_processing(self,action_obj):
         normal = self.normals[action_obj.point_index]
         target_point = self.voxel_pc[action_obj.point_index]
 
@@ -458,11 +481,9 @@ class GraspAgent():
         T_d = trimesh.transformations.rotation_matrix(a, b)
         T_d[:3, 3] = target_point.T
 
-        width = np.array([0])
+        action_obj.width=gripper_width_during_shift
         action_obj.transformation=T_d
         action_obj.is_executable=True
-
-        if view: vis_scene(T_d, width, npy=self.voxel_pc)
 
     def suction_processing(self,action_obj):
         normal = self.normals[action_obj.point_index]
@@ -485,6 +506,7 @@ class GraspAgent():
                 self.suction_processing(action_obj)
         else:
             '''shift action'''
+            action_obj.shift_end_point=self.shift_end_points[action_obj.point_index]
             if action_obj.use_gripper_arm:
                 self.gripper_shift_processing(action_obj)
             else:
@@ -525,7 +547,6 @@ class GraspAgent():
 
         self.valid_actions_mask[occupancy_mask] *=  0
 
-
     def view_valid_actions_mask(self):
         four_pc_stack = np.stack([self.voxel_pc, self.voxel_pc, self.voxel_pc, self.voxel_pc])
         four_pc_stack[1, :, 0] += 0.5
@@ -549,7 +570,7 @@ class GraspAgent():
         self.first_action_mask=None
 
         '''first action'''
-        available_actions_size=int(((self.q_value* self.valid_actions_mask)>0.0).sum())
+        available_actions_size=int((self.valid_actions_mask>0.0).sum())
         for i in range(available_actions_size):
             point_index, action_index=self.next_action(epsilon=0.0)
             action_obj=Action(point_index, action_index)
@@ -569,7 +590,7 @@ class GraspAgent():
         # self.view_valid_actions_mask()
 
         '''second action'''
-        available_actions_size=int(((self.q_value*self.valid_actions_mask)>0.0).sum())
+        available_actions_size=int((self.valid_actions_mask>0.0).sum())
         for i in range(available_actions_size):
             point_index, action_index=self.next_action(epsilon=0.0)
             action_obj = Action(point_index, action_index)
@@ -598,14 +619,14 @@ class GraspAgent():
                 subprocess.run(execute_both_grasp_bash)
             elif first_action_obj.is_grasp:
                 '''grasp'''
-                if first_action_obj.use_gripper:
+                if first_action_obj.use_gripper_arm:
                     subprocess.run(execute_gripper_grasp_bash)
                 else:
                     '''suction'''
                     subprocess.run(execute_suction_grasp_bash)
             elif first_action_obj.is_shift:
                 '''shift'''
-                if first_action_obj.use_gripper:
+                if first_action_obj.use_gripper_arm:
                     subprocess.run(execute_gripper_shift_bash)
                 else:
                     '''suction'''
@@ -614,8 +635,8 @@ class GraspAgent():
         '''get robot feedback'''
         robot_feedback_ = wait_for_feedback()
 
-        first_action_obj.robot_feedback(robot_feedback_)
-        second_action_obj.robot_feedback(robot_feedback_)
+        first_action_obj.robot_feedback=robot_feedback_
+        second_action_obj.robot_feedback=robot_feedback_
 
         return first_action_obj,second_action_obj
 
@@ -628,7 +649,7 @@ class GraspAgent():
 
         '''report change if robot moves'''
         if first_action_obj.robot_feedback == 'Succeed':
-            if first_action_obj.use_gripper:
+            if first_action_obj.use_gripper_arm:
                 gripper_action=first_action_obj
                 suction_action=second_action_obj
             else:

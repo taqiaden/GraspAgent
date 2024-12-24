@@ -1,5 +1,6 @@
 import random
 
+import numpy as np
 import torch
 from colorama import Fore
 from torch import nn
@@ -144,10 +145,33 @@ class TrainValueNet:
             loss = (gripper_grasp_loss+suction_grasp_loss)/b
 
             reversed_decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
-            decay_loss=reversed_decay_(griper_grasp_score)+reversed_decay_(suction_grasp_score)
-            decay_loss*=0.1
+            decay_loss=reversed_decay_(griper_grasp_score)+reversed_decay_(suction_grasp_score)+reversed_decay_(shift_affordance_classifier)
+            decay_loss*=0.3
 
-            loss=loss+decay_loss
+            '''q value initialization'''
+            q_value_loss=torch.tensor([0.],device=q_value.device)
+            for j in range(b):
+                grasp_q_values=q_value[j,0:2]
+                shift_q_values=q_value[j,2:]
+
+                '''initialize lower q-value for shift compared to grasp'''
+                q_value_loss+=(torch.clamp(shift_q_values-grasp_q_values.mean(),0.)**2).mean()
+
+                x1=np.random.randint(0,711)
+                x2=np.random.randint(0,711)
+
+                max_index=max(x1,x2)
+                min_index=min(x1,x2)
+
+                '''grasp q-value initialization'''
+                q_value_loss+=(torch.clamp(grasp_q_values[0,:,max_index].mean()-grasp_q_values[0,:,min_index].mean(),0.)**2).mean()
+                q_value_loss+=(torch.clamp(grasp_q_values[1,:,min_index].mean()-grasp_q_values[1,:,max_index].mean(),0.)**2).mean()
+
+                '''shift q-value initialization'''
+                q_value_loss+=(torch.clamp(shift_q_values[0,:,max_index].mean()-shift_q_values[0,:,min_index].mean(),0.)**2).mean()
+                q_value_loss+=(torch.clamp(shift_q_values[1,:,min_index].mean()-shift_q_values[1,:,max_index].mean(),0.)**2).mean()
+
+            loss=loss+decay_loss+q_value_loss
             loss.backward()
             self.value_net.optimizer.step()
 
@@ -173,6 +197,7 @@ class TrainValueNet:
         self.suction_grasp_statistics.save()
 
 if __name__ == "__main__":
+    # with torch.no_grad():
     train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-4)
     train_value_net.begin()
     for i in range(10000):

@@ -30,3 +30,5 @@ while True:
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
             '''report result'''
             grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre)
+        '''clear dense data'''
+        grasp_agent.clear()

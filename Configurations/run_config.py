@@ -6,7 +6,7 @@ use_gripper =True
 use_suction = True
 
 activate_grasp=True
-activate_shift=False
+activate_shift=True
 
 view_grasp_suction_points = True
 view_action= True
@@ -27,3 +27,4 @@ gripper_factor=1.0
 score_threshold=0.5
 
 scope_threshold=0.5
+

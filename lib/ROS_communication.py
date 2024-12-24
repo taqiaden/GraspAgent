@@ -3,20 +3,23 @@ import trimesh
 
 from Configurations import config
 from Configurations.config import home_dir
-from lib.grasp_utils import get_pose_matrixes
+from lib.grasp_utils import get_pose_matrixes, adjust_final_matrix
 from lib.report_utils import wait_indicator as wi
 
 ROS_communication_file="ros_execute.txt"
 
 gripper_grasp_data_path = config.home_dir + 'gripper_grasp_data_tmp.npy'
-pre_gripper_grasp_data_path = config.home_dir + 'pre_gripper_grasp_data_tmp.npy'
+gripper_pre_grasp_data_path = config.home_dir + 'gripper_pre_grasp_data_tmp.npy'
 suction_grasp_data_path = config.home_dir + 'suction_grasp_data_tmp.npy'
-pre_suction_grasp_data_path = config.home_dir + 'pre_suction_grasp_data_tmp.npy'
+suction_pre_grasp_data_path = config.home_dir + 'suction_pre_grasp_data_tmp.npy'
 
+gripper_pre_shift_data_path = config.home_dir + 'gripper_pre_shift_data_tmp.npy'
 gripper_shift_data_path = config.home_dir + 'gripper_shift_data_tmp.npy'
-pre_gripper_shift_data_path = config.home_dir + 'pre_gripper_shift_data_tmp.npy'
+gripper_end_shift_data_path = config.home_dir + 'gripper_end_shift_data_tmp.npy'
+
 suction_shift_data_path = config.home_dir + 'suction_shift_data_tmp.npy'
-pre_suction_shift_data_path = config.home_dir + 'pre_suction_shift_data_tmp.npy'
+suction_pre_shift_data_path = config.home_dir + 'suction_pre_shift_data_tmp.npy'
+suction_end_shift_data_path = config.home_dir + 'suction_end_shift_data_tmp.npy'
 
 
 def deploy_action( action):
@@ -35,24 +38,40 @@ def deploy_action( action):
             deploy_suction_shift_command(action)
 
 def deploy_gripper_grasp_command( action):
-    pre_mat, end_mat = get_pose_matrixes(action.transformation, k_end_effector=0.169, k_pre_grasp=0.23)
+    pre_mat = adjust_final_matrix(action.transformation, x_correction=0.23)
+    end_mat = adjust_final_matrix(action.transformation, x_correction=0.169)
     save_gripper_data(end_mat, action.width, gripper_grasp_data_path)
-    save_gripper_data(pre_mat, action.width, pre_gripper_grasp_data_path)
+    save_gripper_data(pre_mat, action.width, gripper_pre_grasp_data_path)
 
 def deploy_suction_grasp_command( action):
-    pre_mat, end_mat = get_pose_matrixes(action.transformation, k_end_effector=0.184, k_pre_grasp=0.25)
+    pre_mat = adjust_final_matrix(action.transformation, x_correction=0.25)
+    end_mat = adjust_final_matrix(action.transformation, x_correction=0.184)
     save_suction_data(end_mat, suction_grasp_data_path)
-    save_suction_data(pre_mat, pre_suction_grasp_data_path)
+    save_suction_data(pre_mat, suction_pre_grasp_data_path)
 
 def deploy_gripper_shift_command( action):
-    pre_mat, end_mat = get_pose_matrixes(action.transformation, k_end_effector=0.169, k_pre_grasp=0.23)
+    pre_mat=adjust_final_matrix(action.transformation, x_correction=0.23)
+    end_mat=adjust_final_matrix(action.transformation, x_correction=0.169)
+
+    shift_end_mat = np.copy(action.transformation)
+    shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
+    shift_end_mat=adjust_final_matrix(shift_end_mat, x_correction=0.169)
+
+    save_gripper_data(pre_mat, action.width, gripper_pre_shift_data_path)
     save_gripper_data(end_mat, action.width, gripper_shift_data_path)
-    save_gripper_data(pre_mat, action.width, pre_gripper_shift_data_path)
+    save_gripper_data(shift_end_mat, action.width, gripper_end_shift_data_path)
 
 def deploy_suction_shift_command( action):
-    pre_mat, end_mat = get_pose_matrixes(action.transformation, k_end_effector=0.184, k_pre_grasp=0.25)
+    pre_mat = adjust_final_matrix(action.transformation, x_correction=0.25)
+    end_mat = adjust_final_matrix(action.transformation, x_correction=0.184)
+
+    shift_end_mat = np.copy(action.transformation)
+    shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
+    shift_end_mat = adjust_final_matrix(shift_end_mat, x_correction=0.184)
+
+    save_suction_data(pre_mat, suction_pre_shift_data_path)
     save_suction_data(end_mat, suction_shift_data_path)
-    save_suction_data(pre_mat, pre_suction_shift_data_path)
+    save_suction_data(shift_end_mat, suction_end_shift_data_path)
 
 
 def save_suction_data(end_effecter_mat, file_path):
