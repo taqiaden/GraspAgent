@@ -1,8 +1,8 @@
 from configparser import ConfigParser
 
-from filelock import FileLock
+# from filelock import FileLock
 
-lock = FileLock("file.lock")
+# lock = FileLock("file.lock")
 config = ConfigParser()
 
 config_file_path='Configurations/config.ini'

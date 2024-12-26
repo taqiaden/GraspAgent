@@ -408,8 +408,8 @@ class GraspAgent():
         self.gripper_poses_5 = vectors_to_ratio_metrics(poses.clone())
 
         '''initiate random policy'''
-        self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
-        # self.q_value=q_value.squeeze().permute(1,2,0)[mask]
+        # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
+        self.q_value=q_value.squeeze().permute(1,2,0)[mask]
         self.biased_q_value=self.q_value.clone()
         min_q_value=torch.min(self.biased_q_value).item()
         self.biased_q_value+=(1-min(min_q_value,0.))
@@ -445,6 +445,7 @@ class GraspAgent():
         second_pose_mesh=second_action_obj.pose_mesh()
         if second_pose_mesh is not None: scene_list.append(second_pose_mesh)
         masked_colors = np.ones_like(self.voxel_pc) * [0.52, 0.8, 0.92]
+
         if self.first_action_mask is not None:
             masked_colors[self.first_action_mask] /=1.1
         pcd = numpy_to_o3d(pc=self.voxel_pc, color=masked_colors)
@@ -568,6 +569,7 @@ class GraspAgent():
         first_action_obj=Action()
         second_action_obj=Action()
         self.first_action_mask=None
+
 
         '''first action'''
         available_actions_size=int((self.valid_actions_mask>0.0).sum())

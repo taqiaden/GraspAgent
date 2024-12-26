@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Never_stop_learning" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Never_stop_learning" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="GraspAgent" project-jdk-type="Python SDK" />
 </project>

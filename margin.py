@@ -1,8 +1,5 @@
 from models.spatial_encoder import depth_xy_spatial_data
 import numpy as np
-
+import open3d as o3d
 if __name__ == "__main__":
-    s=depth_xy_spatial_data(1)
-    print(s.shape)
-    print(s[0,0,0])
-    np.random.random_integers(0,711)
+    print(open3d.version)

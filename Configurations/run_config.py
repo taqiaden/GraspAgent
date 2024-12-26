@@ -13,7 +13,7 @@ view_action= True
 view_score_gradient= True
 simulation_mode = True
 offline_point_cloud= True
-
+use_real_rgb=False
 report_result=False
 
 view_sampled_griper=False

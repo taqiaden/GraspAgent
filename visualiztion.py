@@ -1,7 +1,8 @@
 import math
 import random
-
+from packaging.version import Version
 import matplotlib.pyplot as plt
+import open3d
 import torch
 import trimesh
 
@@ -305,8 +306,13 @@ def get_arrow(end, origin=np.array([0, 0, 0]), scale=1):
         cone_height=size*0.2 * scale,
         cylinder_radius=size/30 * scale,
         cylinder_height=size*(1 - 0.2*scale))
-    mesh.rotate(Ry, center=np.array([0, 0, 0]))
-    mesh.rotate(Rz, center=np.array([0, 0, 0]))
+
+    if  Version(open3d.__version__)>Version('0.15.2'):
+        mesh.rotate(Ry, center=np.array([0, 0, 0]))
+        mesh.rotate(Rz, center=np.array([0, 0, 0]))
+    else:
+        mesh.rotate(Ry, center=False)
+        mesh.rotate(Rz, center=False)
 
     mesh.translate(origin)
     return(mesh)

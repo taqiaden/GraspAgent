@@ -24,7 +24,7 @@ execute_grasp_bash = './bash/run_robot_grasp.sh'
 gripper_scope_data_path='./dataset/scope_data/gripper/'
 suction_scope_data_path='./dataset/scope_data/suction/'
 # scope_data_dir='./dataset/scope_data/'
-scope_data_dir=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/scope_data/'
+scope_data_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/scope_data/'
 
 
 configure_smbclient()

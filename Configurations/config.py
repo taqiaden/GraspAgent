@@ -1,11 +1,15 @@
-# import os
 import os
-
+import re
 import numpy as np
 
+where_am_i = os.popen('hostname').read()
+where_am_i = re.sub(r"[\n\t\s]*", "", where_am_i)
 use_xyz= True
 
-home_dir = '/home/shenxiaofei/'
+home_dir = '/home/taqiaden/'
+if where_am_i=='yumi':
+    home_dir = '/home/yumi/'
+
 solution_name='GraspAgent'
 ip_address=r'\\10.5.12.167'
 
@@ -14,8 +18,8 @@ untested_model_stamp= 'untested'
 check_points_extension='.pth.tar'
 
 check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
-# check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
-# check_points_directory=r'/media/shenxiaofei/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
+# check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
+# check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
 
 counter=0
 while os.path.split(os.getcwd())[-1]!=solution_name:
