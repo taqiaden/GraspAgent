@@ -213,7 +213,7 @@ class TrainActionNet:
             self.gan.generator.zero_grad()
 
             '''train critic'''
-            self.critic_statistics.running_loss += self.train_critic(self.gan, gripper_pose, b, pixel_index,
+            self.critic_statistics.loss = self.train_critic(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
                                            collision_state_list, out_of_scope_list, firmness_state_list)
 
@@ -239,8 +239,8 @@ class TrainActionNet:
             gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,
                                               collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
                                                                           suction_direction,pcs,masks)
-            self.gripper_sampler_statistics.running_loss+=gripper_sampling_loss.item()
-            self.suction_sampler_statistics.running_loss+=suction_sampling_loss.item()
+            self.gripper_sampler_statistics.loss=gripper_sampling_loss.item()
+            self.suction_sampler_statistics.loss=suction_sampling_loss.item()
 
             '''loss computation'''
             suction_loss=torch.tensor(0.0,device=gripper_pose.device)
@@ -313,10 +313,10 @@ class TrainActionNet:
             self.gan.generator_optimizer.zero_grad()
 
             with torch.no_grad():
-                self.suction_head_statistics.running_loss += suction_loss.item()
-                self.gripper_head_statistics.running_loss += gripper_loss.item()
-                self.shift_head_statistics.running_loss += shift_loss.item()
-                self.background_detector_statistics.running_loss+=background_loss.item()
+                self.suction_head_statistics.loss = suction_loss.item()
+                self.gripper_head_statistics.loss = gripper_loss.item()
+                self.shift_head_statistics.loss = shift_loss.item()
+                self.background_detector_statistics.loss=background_loss.item()
 
             self.swiped_samples+=b
             if i%100==0 and i!=0:
@@ -329,6 +329,7 @@ class TrainActionNet:
         self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
 
         self.export_check_points()
+        self.clear()
 
     def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times):
         with torch.no_grad():
@@ -364,6 +365,15 @@ class TrainActionNet:
         self.shift_head_statistics.save()
         self.critic_statistics.save()
         # self.background_detector_statistics.save()
+
+    def clear(self):
+        self.suction_head_statistics.clear()
+        self.gripper_head_statistics.clear()
+        self.shift_head_statistics.clear()
+        self.gripper_sampler_statistics.clear()
+        self.suction_sampler_statistics.clear()
+        self.critic_statistics.clear()
+        self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
 

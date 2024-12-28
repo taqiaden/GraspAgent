@@ -236,6 +236,10 @@ class GraspAgent():
         self.n_grasps=0
         self.n_shifts=0
         self.first_action_mask=None
+        self.target_object_mask=None
+
+        '''track task sequence'''
+        self.task_episode=0
 
     def clear(self):
         self.gripper_poses_5=None
@@ -253,6 +257,7 @@ class GraspAgent():
         self.n_grasps=0
         self.n_shifts=0
         self.first_action_mask=None
+        self.target_object_mask=None
 
 
     @property
@@ -362,11 +367,14 @@ class GraspAgent():
         gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
             , background_class, depth_features = self.action_net(depth_torch.clone())
 
+        '''target mask'''
+        self.target_object_mask=background_class.detach() <= 0.5
+
         '''value net output'''
         griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value = self.value_net(rgb_torch,
                                                                                                              depth_features,
                                                                                                              gripper_pose,
-                                                                                                             suction_direction)
+                                                                                                             suction_direction,self.target_object_mask)
 
         '''depth to point clouds'''
         self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
@@ -382,6 +390,7 @@ class GraspAgent():
         background_class=background_class.squeeze()[mask]
         shift_appealing=shift_appealing.squeeze()[mask]
         positions = torch.from_numpy(self.voxel_pc).to('cuda').float()
+        self.target_object_mask=self.target_object_mask.squeeze()[mask]
 
         '''grasp reachability'''
         suction_grasp_scope = self.get_suction_grasp_reachability(positions,self.normals)
@@ -663,7 +672,8 @@ class GraspAgent():
             suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
 
             '''save action instance'''
-            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action)
+            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action,self.task_episode)
+            self.task_episode+=1
 
 
 '''conventions'''

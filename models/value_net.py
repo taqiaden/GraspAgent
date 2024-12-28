@@ -59,7 +59,7 @@ class QValue(nn.Module):
 class ValueNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.rgb_back_bone = res_unet(in_c=3, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.rgb_back_bone = res_unet(in_c=4, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
         self.rgb_d_unified_representation=RGBDRepresentation()
 
         self.q_value=QValue().to('cuda')
@@ -71,9 +71,10 @@ class ValueNet(nn.Module):
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-    def forward(self, rgb,depth_features,gripper_pose,suction_direction):
+    def forward(self, rgb,depth_features,gripper_pose,suction_direction,target_object_mask):
         '''backbone'''
-        rgb_features = self.rgb_back_bone(rgb)
+        rgb_mask=torch.cat([rgb,target_object_mask],dim=1)
+        rgb_features = self.rgb_back_bone(rgb_mask)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
         depth_features=reshape_for_layer_norm(depth_features, camera=camera, reverse=False)
 

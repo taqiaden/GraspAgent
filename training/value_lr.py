@@ -55,6 +55,8 @@ class TrainValueNet:
                                                        iterations_per_epoch=len(self.data_loader),
                                                        samples_size=self.size, track_prediction_balance=True)
 
+        self.swiped_samples =0
+
     def prepare_data_loader(self):
         gripper_positive_labels,gripper_negative_labels=sample_all_positive_and_negatives(gripper_grasp_tracker, shuffle=True, disregard_collision_samples=True)
         suction_positive_labels,suction_negative_labels=sample_all_positive_and_negatives(suction_grasp_tracker, shuffle=True, disregard_collision_samples=False)
@@ -108,6 +110,7 @@ class TrainValueNet:
             with torch.no_grad():
                 gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier \
                     ,background_class,depth_features= self.action_net.generator(depth.clone())
+                target_object_mask = background_class.detach() <= 0.5
                 '''process label'''
                 for j in range(b):
                     pix_A = pixel_index[j, 0]
@@ -115,7 +118,7 @@ class TrainValueNet:
                     gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
                     suction_direction[j, :, pix_A, pix_B] = normal[j]
 
-            griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction)
+            griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction,target_object_mask)
 
             '''learning objectives'''
             gripper_grasp_loss = torch.tensor([0.],device=griper_grasp_score.device)
@@ -130,7 +133,7 @@ class TrainValueNet:
                     l=bce_loss(prediction_, label_)**2
                     # print(f'g {prediction_.item()}, {label_}')
                     gripper_grasp_loss += l
-                    self.gripper_grasp_statistics.running_loss+=l.item()
+                    self.gripper_grasp_statistics.loss=l.item()
                     self.gripper_grasp_statistics.update_confession_matrix(label_,prediction_.detach())
                 else:
                     prediction_ = suction_grasp_score[j, :, pix_A, pix_B]
@@ -138,7 +141,7 @@ class TrainValueNet:
                     suction_grasp_loss += l
                     # print(f's {prediction_.item()}, {label_}')
 
-                    self.suction_grasp_statistics.running_loss += l.item()
+                    self.suction_grasp_statistics.loss = l.item()
                     self.suction_grasp_statistics.update_confession_matrix(label_,prediction_.detach())
 
 
@@ -150,7 +153,14 @@ class TrainValueNet:
 
             '''q value initialization'''
             q_value_loss=torch.tensor([0.],device=q_value.device)
+
+
             for j in range(b):
+                target_object_mask_j=target_object_mask[j,0]
+                permuted_q_value=q_value[j,0:2].permute(1,2,0)
+                q_value_loss += (torch.clamp(
+                    permuted_q_value[~target_object_mask_j] - permuted_q_value[target_object_mask_j].mean(), 0.) ** 2).mean()
+
                 grasp_q_values=q_value[j,0:2]
                 shift_q_values=q_value[j,2:]
 
@@ -175,6 +185,7 @@ class TrainValueNet:
             loss.backward()
             self.value_net.optimizer.step()
 
+            self.swiped_samples += b
             if i%100==0 and i!=0:
                 self.export_check_points()
                 self.view()
@@ -184,10 +195,11 @@ class TrainValueNet:
 
         self.export_check_points()
         self.view()
+        self.clear()
 
     def view(self):
-        self.gripper_grasp_statistics.print()
-        self.suction_grasp_statistics.print()
+        self.gripper_grasp_statistics.print(self.swiped_samples)
+        self.suction_grasp_statistics.print(self.swiped_samples)
 
     def export_check_points(self):
         self.value_net.export_model()
@@ -196,14 +208,18 @@ class TrainValueNet:
         self.gripper_grasp_statistics.save()
         self.suction_grasp_statistics.save()
 
+    def clear(self):
+        self.gripper_grasp_statistics.clear()
+        self.suction_grasp_statistics.clear()
+
 if __name__ == "__main__":
     # with torch.no_grad():
-    train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-4)
+    train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-5)
     train_value_net.begin()
     for i in range(10000):
         try:
             cuda_memory_report()
-            train_value_net=TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-4)
+            train_value_net=TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-5)
             train_value_net.begin()
         except Exception as error_message:
             print(error_message)

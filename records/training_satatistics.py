@@ -131,7 +131,7 @@ class TrainingTracker:
         self.iterations_per_epoch=iterations_per_epoch
         self.samples_size=samples_size
 
-        self.running_loss_ = 0.
+        self.running_loss_ = None
 
         '''confession matrix'''
         self.confession_matrix=ConfessionMatrix()
@@ -148,15 +148,25 @@ class TrainingTracker:
         self.loss_moving_average_=self.load_loss_moving_average()
         self.decay_rate=0.001
 
-    @property
-    def running_loss(self):
-        return self.running_loss_
 
-    @running_loss.setter
-    def running_loss(self,new_value):
-        instance_value=new_value-self.running_loss_
-        self.running_loss_=new_value
-        self.loss_moving_average_=self.decay_rate * instance_value+ self.loss_moving_average_ * (1 - self.decay_rate)
+    # @property
+    # def running_loss(self):
+    #     return self.running_loss_
+
+    @property
+    def loss(self):
+        return None
+
+    @loss.setter
+    def loss(self,value):
+        self.running_loss_= value if self.running_loss_ is None else self.running_loss_+ value
+        self.loss_moving_average_ = self.decay_rate * value + self.loss_moving_average_ * (1 - self.decay_rate)
+
+    # @running_loss.setter
+    # def running_loss(self,new_value):
+    #     instance_value=new_value-self.running_loss_
+    #     self.running_loss_=new_value
+    #     self.loss_moving_average_=self.decay_rate * instance_value+ self.loss_moving_average_ * (1 - self.decay_rate)
 
     def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
         if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent
@@ -196,10 +206,11 @@ class TrainingTracker:
     def print(self,swiped_samples=None):
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
         size=swiped_samples if swiped_samples is not None else self.iterations_per_epoch
-        if size is not None:
-            print(f'Average loss = {self.running_loss/size}')
-        else:
-            print(f'Running loss = {self.running_loss}')
+        if self.running_loss_ is not None:
+            if size is not None:
+                print(f'Average loss = {self.running_loss_/size}')
+            else:
+                print(f'Running loss = {self.running_loss_}')
 
         print(f'Loss (moving average) = {self.loss_moving_average_}')
 
@@ -228,3 +239,10 @@ class TrainingTracker:
         save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
         save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
         save_key('loss_moving_average', self.loss_moving_average_, section=self.name)
+
+    def clear(self):
+        self.running_loss_=0
+        self.positive_loss=0.0
+        self.negative_loss=0.0
+        self.confession_matrix=ConfessionMatrix()
+        self.labels_with_zero_loss = 0

@@ -6,17 +6,27 @@ import open3d
 import torch
 import trimesh
 
+from Configurations import ENV_boundaries
 from lib.collision_unit import grasp_collision_detection
 from lib.depth_map import depth_to_point_clouds, CameraInfo
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import distribution_summary
-from masks import static_spatial_mask
 from pose_object import pose_7_to_transformation
 
 parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
+
+def static_spatial_mask(pc):
+    x = pc[ :, 0]
+    y = pc[:, 1]
+    z = pc[ :, 2]
+    x_mask = (x > ENV_boundaries.x_limits[0]) & (x < ENV_boundaries.x_limits[1])
+    y_mask = (y > ENV_boundaries.y_limits[0]) & (y <ENV_boundaries.y_limits[1])
+    z_mask = (z > ENV_boundaries.z_limits[0]) & (z < ENV_boundaries.z_limits[1])
+    spatial_mask = x_mask & y_mask & z_mask
+    return spatial_mask
 
 def visualize_vox(npy):
     points_list = []

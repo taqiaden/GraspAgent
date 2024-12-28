@@ -10,7 +10,7 @@ from colorama import Fore
 from Configurations import config, ENV_boundaries
 from Configurations.dynamic_config import counters_file_path, get_int, save_key
 from grasp_post_processing import grasp_data_path, pre_grasp_data_path, suction_data_path, pre_suction_data_path
-from lib.ROS_communication import wait_for_feedback, save_grasp_data, save_suction_data, ROS_communication_file
+from lib.ROS_communication import wait_for_feedback, save_suction_data, ROS_communication_file
 from lib.bbox import convert_angles_to_transformation_form
 from lib.dataset_utils import configure_smbclient, modality_pool
 from lib.grasp_utils import get_pose_matrixes
