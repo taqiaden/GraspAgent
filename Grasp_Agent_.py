@@ -365,7 +365,7 @@ class GraspAgent():
 
         '''action net output'''
         gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
-            , background_class, depth_features = self.action_net(depth_torch.clone())
+            , background_class, depth_features = self.action_net(depth_torch.clone(),clip=True)
 
         '''target mask'''
         self.target_object_mask=background_class.detach() <= 0.5

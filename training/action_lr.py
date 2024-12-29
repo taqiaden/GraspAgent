@@ -3,12 +3,10 @@ import torch
 from colorama import Fore
 from filelock import FileLock
 from torch import nn
-from torch.utils import data
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
-from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
@@ -24,6 +22,8 @@ from training.learning_objectives.gripper_collision import gripper_collision_los
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_sampling_evaluator import suction_sampler_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
+
+detach_backbone=True
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -233,7 +233,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = self.gan.generator(
-                depth.clone(),alpha=0.0,random_tensor=random_approach)
+                depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone)
 
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.train_generator(self.gan, depth, b,pixel_index,

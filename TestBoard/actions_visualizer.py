@@ -70,7 +70,7 @@ def loop():
         '''generate grasps'''
         with torch.no_grad():
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = gan.generator(
-                depth.clone(),alpha=0.0)
+                depth.clone(),alpha=0.0,clip=True)
 
         '''Evaluate generated grasps'''
         # collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,

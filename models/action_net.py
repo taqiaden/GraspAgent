@@ -43,7 +43,7 @@ class GripperPartSampler(nn.Module):
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
-    def forward(self,representation_2d,spatial_data_2d, alpha=0.,random_tensor=None):
+    def forward(self,representation_2d,spatial_data_2d, alpha=0.,random_tensor=None,clip=False):
         '''Approach'''
         if alpha==1.:
             approach=random_approach_tensor(representation_2d.shape[0]) if random_tensor is None else random_tensor.clone()
@@ -58,7 +58,7 @@ class GripperPartSampler(nn.Module):
 
         '''Regress'''
         output_2d = torch.cat([approach, beta_dist_width], dim=1)
-        output_2d=self.gripper_regressor_layer(output_2d)
+        output_2d=self.gripper_regressor_layer(output_2d,clip=clip)
         return output_2d
 
 class SuctionPartSampler(nn.Module):
@@ -125,8 +125,7 @@ class ActionNet(nn.Module):
 
         self.sigmoid=nn.Sigmoid()
 
-
-    def forward(self, depth,alpha=0.0,random_tensor=None):
+    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -134,6 +133,7 @@ class ActionNet(nn.Module):
         features = self.back_bone(depth)
         depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
+        if detach_backbone: features=features.detach()
 
         '''Spatial data'''
         if self.spatial_encoding.shape[0] != depth.shape[0]:
@@ -141,7 +141,7 @@ class ActionNet(nn.Module):
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         '''gripper parameters'''
-        gripper_pose=self.gripper_sampler(features,self.spatial_encoding,alpha=alpha,random_tensor=random_tensor)
+        gripper_pose=self.gripper_sampler(features,self.spatial_encoding,alpha=alpha,random_tensor=random_tensor,clip=clip)
 
         '''suction direction'''
         suction_direction=self.suction_sampler(features)
