@@ -73,13 +73,13 @@ class TrainActionNet:
         self.data_loader=self.prepare_data_loader()
 
         '''initialize statistics records'''
-        self.suction_head_statistics = TrainingTracker(name=action_module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.gripper_head_statistics = TrainingTracker(name=action_module_key+'_gripper_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.shift_head_statistics = TrainingTracker(name=action_module_key+'_shift_head', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.gripper_sampler_statistics = TrainingTracker(name=action_module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.suction_sampler_statistics = TrainingTracker(name=action_module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.critic_statistics = TrainingTracker(name=action_module_key+'_critic', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=True)
-        self.background_detector_statistics = TrainingTracker(name=action_module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), samples_size=self.size,track_label_balance=False)
+        self.suction_head_statistics = TrainingTracker(name=action_module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.gripper_head_statistics = TrainingTracker(name=action_module_key+'_gripper_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.shift_head_statistics = TrainingTracker(name=action_module_key+'_shift_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.gripper_sampler_statistics = TrainingTracker(name=action_module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.suction_sampler_statistics = TrainingTracker(name=action_module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.critic_statistics = TrainingTracker(name=action_module_key+'_critic', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.background_detector_statistics = TrainingTracker(name=action_module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
 
         self.swiped_samples=0
 

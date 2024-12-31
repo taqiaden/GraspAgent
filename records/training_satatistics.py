@@ -115,15 +115,7 @@ class MovingRate():
             self.moving_rate = (1 - self.decay_rate) * self.moving_rate
 
     def set_decay_rate(self):
-        if self.counter<100:
-            self.decay_rate=0.1
-        elif self.counter<300:
-            self.decay_rate=0.01
-        elif self.counter<700:
-            self.decay_rate=0.001
-        else:
-            self.decay_rate=0.0001
-
+        self.decay_rate=max(1/(10*(1+self.counter)),0.0001)
         self.truncate_factor = 10 / self.decay_rate
 
     def save(self):
@@ -142,19 +134,18 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker:
-    def __init__(self,name='',iterations_per_epoch=None,samples_size=None,track_label_balance=False,track_prediction_balance=False):
+    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False):
         self.name=name
         self.iterations_per_epoch=iterations_per_epoch
-        self.samples_size=samples_size
 
         self.running_loss_ = None
 
         '''confession matrix'''
         self.confession_matrix=ConfessionMatrix()
-        self.labels_with_zero_loss = 0
 
         '''balance indicator'''
         self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
+        self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
         self.loss_moving_average_=self.load_loss_moving_average()
         self.decay_rate=0.001
@@ -164,14 +155,7 @@ class TrainingTracker:
         self.set_decay_rate()
 
     def set_decay_rate(self):
-        if self.counter<100:
-            self.decay_rate=0.1
-        elif self.counter<300:
-            self.decay_rate=0.01
-        elif self.counter<700:
-            self.decay_rate=0.001
-        else:
-            self.decay_rate=0.0001
+        self.decay_rate = max(1 / (10 * (1 + self.counter)), 0.0001)
 
     @property
     def loss(self):
@@ -188,10 +172,14 @@ class TrainingTracker:
         with torch.no_grad():
             TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
             if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
+            if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(label)
             return TP_mask,FP_mask,FN_mask,TN_mask
 
     def load_label_balance_indicator(self):
         return get_float('label_balance_indicator',section=self.name)
+
+    def load_prediction_balance_indicator(self):
+        return get_float('prediction_balance_indicator',section=self.name)
 
     def load_loss_moving_average(self):
         return get_float('loss_moving_average',section=self.name)
@@ -204,6 +192,12 @@ class TrainingTracker:
             self.label_balance_indicator=(1-self.decay_rate)*self.label_balance_indicator+self.decay_rate
         else:
             self.label_balance_indicator = (1 - self.decay_rate) * self.label_balance_indicator - self.decay_rate
+
+    def update_prediction_balance_indicator(self,prediction,pivot_value=0.5):
+        if prediction>pivot_value:
+            self.prediction_balance_indicator=(1-self.decay_rate)*self.prediction_balance_indicator+self.decay_rate
+        else:
+            self.prediction_balance_indicator = (1 - self.decay_rate) * self.prediction_balance_indicator - self.decay_rate
 
     def print(self,swiped_samples=None):
         self.set_decay_rate()
@@ -220,19 +214,18 @@ class TrainingTracker:
         if self.confession_matrix.total_classification()>0:
             self.confession_matrix.view()
 
-        if self.labels_with_zero_loss>0:
-            print(f'Number of labels with zero loss = {self.labels_with_zero_loss}')
-
-        if self.samples_size is not None:
-            print(f'Total number of samples= {self.samples_size}')
-
         if self.label_balance_indicator is not None:
             print(f'label balance indicator = {self.label_balance_indicator}')
+
+        if self.prediction_balance_indicator is not None:
+            print(f'prediction balance indicator = {self.prediction_balance_indicator}')
 
         print(Fore.RESET)
 
     def save(self):
         save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
+        save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
+
         save_key('loss_moving_average', self.loss_moving_average_, section=self.name)
         save_key('counter', self.counter, section=self.name)
 
@@ -240,4 +233,3 @@ class TrainingTracker:
     def clear(self):
         self.running_loss_=0
         self.confession_matrix=ConfessionMatrix()
-        self.labels_with_zero_loss = 0
