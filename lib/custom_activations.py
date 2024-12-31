@@ -54,3 +54,11 @@ class GripperGraspRegressor2(nn.Module):
 
         normalized_output = torch.cat([approach, beta, dist, width], dim=1)
         return normalized_output
+
+class GrowingCosineUnit(nn.Module):
+    def __init__(self):
+        super(GrowingCosineUnit, self).__init__()
+
+    def forward(self, input):
+        cos_=torch.cos(input)
+        return input*cos_

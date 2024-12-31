@@ -1,9 +1,6 @@
 import torch
 from colorama import Fore
-
 from Configurations.dynamic_config import save_key, get_float
-from lib.loss.D_loss import binary_l1
-
 
 def confession_mask(label,prediction_,pivot_value=0.5):
     TP_mask = (label > pivot_value) & (prediction_ > pivot_value)
@@ -48,8 +45,7 @@ class ConfessionMatrix():
 
     def view(self):
         total=self.total_classification()
-        print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%')
-        print(f'FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
+        print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingMetrics():
     def __init__(self,name='000',decay_rate=0.001):
@@ -93,19 +89,24 @@ class MovingMetrics():
         print(Fore.RESET)
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.001):
+    def __init__(self,name='000'):
         self.name=name
         self.sub_name=name+'_moving_rate'
         self.balance_indicator=0.0
 
-        self.decay_rate=decay_rate
+        self.decay_rate = 0.001
 
-        self.moving_rate=0.0
+        self.counter = 0
 
-        self.truncate_factor=10/self.decay_rate
+
 
         '''load latest'''
         self.upload()
+
+        self.moving_rate=0.0
+
+        self.set_decay_rate()
+        self.truncate_factor=10/self.decay_rate
 
     def update(self,value,pivot_value=0.5):
         if value>pivot_value:
@@ -113,13 +114,28 @@ class MovingRate():
         else:
             self.moving_rate = (1 - self.decay_rate) * self.moving_rate
 
+    def set_decay_rate(self):
+        if self.counter<100:
+            self.decay_rate=0.1
+        elif self.counter<300:
+            self.decay_rate=0.01
+        elif self.counter<700:
+            self.decay_rate=0.001
+        else:
+            self.decay_rate=0.0001
+
+        self.truncate_factor = 10 / self.decay_rate
+
     def save(self):
         save_key(self.sub_name, self.moving_rate, section=self.name)
+        save_key('counter_'+self.sub_name, self.counter, section=self.name)
 
     def upload(self):
         self.moving_rate=get_float(self.sub_name,section=self.name)
+        self.counter = get_float('counter_'+self.sub_name, section=self.name)
 
     def view(self):
+        self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,end='')
         truncated_moving_rate=float(int(self.moving_rate* self.truncate_factor)) / self.truncate_factor
         print(f'{self.sub_name} = {truncated_moving_rate}',end='')
@@ -137,21 +153,25 @@ class TrainingTracker:
         self.confession_matrix=ConfessionMatrix()
         self.labels_with_zero_loss = 0
 
-        '''track_discrimination_loss'''
-        self.positive_loss=0.0
-        self.negative_loss=0.0
-
         '''balance indicator'''
         self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
-        self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
         self.loss_moving_average_=self.load_loss_moving_average()
         self.decay_rate=0.001
 
+        self.counter=self.load_counter()
 
-    # @property
-    # def running_loss(self):
-    #     return self.running_loss_
+        self.set_decay_rate()
+
+    def set_decay_rate(self):
+        if self.counter<100:
+            self.decay_rate=0.1
+        elif self.counter<300:
+            self.decay_rate=0.01
+        elif self.counter<700:
+            self.decay_rate=0.001
+        else:
+            self.decay_rate=0.0001
 
     @property
     def loss(self):
@@ -161,24 +181,14 @@ class TrainingTracker:
     def loss(self,value):
         self.running_loss_= value if self.running_loss_ is None else self.running_loss_+ value
         self.loss_moving_average_ = self.decay_rate * value + self.loss_moving_average_ * (1 - self.decay_rate)
+        self.counter+=1
 
-    # @running_loss.setter
-    # def running_loss(self,new_value):
-    #     instance_value=new_value-self.running_loss_
-    #     self.running_loss_=new_value
-    #     self.loss_moving_average_=self.decay_rate * instance_value+ self.loss_moving_average_ * (1 - self.decay_rate)
-
-    def update_cumulative_discrimination_loss(self,prediction,label,exponent=2.0):
-        if label > 0.5: self.positive_loss+=binary_l1(prediction, label).item()**exponent
-        else:self.negative_loss+=binary_l1(prediction, label).item()**exponent
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
         with torch.no_grad():
             TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
             if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
-            if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
             return TP_mask,FP_mask,FN_mask,TN_mask
-
 
     def load_label_balance_indicator(self):
         return get_float('label_balance_indicator',section=self.name)
@@ -186,24 +196,17 @@ class TrainingTracker:
     def load_loss_moving_average(self):
         return get_float('loss_moving_average',section=self.name)
 
-    def load_prediction_balance_indicator(self):
-        return get_float('prediction_balance_indicator',section=self.name)
+    def load_counter(self):
+        return get_float('counter',section=self.name)
 
-    def update_label_balance_indicator(self,label,pivot_value=0.5,decay_rate=0.001,use_momentum=False):
-        adapted_decay_rate=max(decay_rate,self.label_balance_indicator*decay_rate) if use_momentum else decay_rate
+    def update_label_balance_indicator(self,label,pivot_value=0.5):
         if label>pivot_value:
-            self.label_balance_indicator=(1-adapted_decay_rate)*self.label_balance_indicator+adapted_decay_rate
+            self.label_balance_indicator=(1-self.decay_rate)*self.label_balance_indicator+self.decay_rate
         else:
-            self.label_balance_indicator = (1 - adapted_decay_rate) * self.label_balance_indicator - adapted_decay_rate
-
-    def update_prediction_balance_indicator(self,prediction,pivot_value=0.5,decay_rate=0.001,use_momentum=False):
-        adapted_decay_rate=max(decay_rate,self.prediction_balance_indicator*decay_rate) if use_momentum else decay_rate
-        if prediction>pivot_value:
-            self.prediction_balance_indicator=(1-adapted_decay_rate)*self.prediction_balance_indicator+adapted_decay_rate
-        else:
-            self.prediction_balance_indicator = (1 - adapted_decay_rate) * self.prediction_balance_indicator - adapted_decay_rate
+            self.label_balance_indicator = (1 - self.decay_rate) * self.label_balance_indicator - self.decay_rate
 
     def print(self,swiped_samples=None):
+        self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
         size=swiped_samples if swiped_samples is not None else self.iterations_per_epoch
         if self.running_loss_ is not None:
@@ -223,26 +226,18 @@ class TrainingTracker:
         if self.samples_size is not None:
             print(f'Total number of samples= {self.samples_size}')
 
-        if self.positive_loss+self.negative_loss>0.0:
-            print(f'Running positive loss = {self.positive_loss}')
-            print(f'Running negative loss = {self.negative_loss}')
-
         if self.label_balance_indicator is not None:
             print(f'label balance indicator = {self.label_balance_indicator}')
-
-        if self.prediction_balance_indicator is not None:
-            print(f'prediction balance indicator = {self.prediction_balance_indicator}')
 
         print(Fore.RESET)
 
     def save(self):
         save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
-        save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
         save_key('loss_moving_average', self.loss_moving_average_, section=self.name)
+        save_key('counter', self.counter, section=self.name)
+
 
     def clear(self):
         self.running_loss_=0
-        self.positive_loss=0.0
-        self.negative_loss=0.0
         self.confession_matrix=ConfessionMatrix()
         self.labels_with_zero_loss = 0

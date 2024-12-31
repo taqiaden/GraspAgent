@@ -13,10 +13,13 @@ from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.models_utils import view_parameters_value
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, Critic, random_approach_tensor
 from records.training_satatistics import TrainingTracker
 from registration import camera
+from training.action_lr import model_dependent_sampling
+from training.learning_objectives.suction_seal import suction_seal_loss
 # from training.action_lr import model_dependent_sampling
 # from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
 # from training.learning_objectives.shift_affordnace import  shift_affordance_loss
@@ -127,7 +130,7 @@ def loop():
 
             # '''view suction scores'''
             # # for k in range(instances_per_sample):
-            # #     '''gripper head'''
+            #     '''gripper head'''
             #     # gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
             #     # gripper_target_point = pc[gripper_target_index]
             #     # gripper_prediction_ = gripper_head_predictions[gripper_target_index]
@@ -135,9 +138,9 @@ def loop():
             #     # gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,gripper_head_statistics)
             #
             #     '''suction head'''
-            #     # suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,spatial_mask,probability_exponent=10,balance_indicator=-1)
+            #     # suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,objects_mask,probability_exponent=10,balance_indicator=-1)
             #     # suction_prediction_ = suction_head_predictions[suction_target_index]
-            #     # suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_he ad_statistics,spatial_mask,visualize=True)
+            #     # suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,suction_head_statistics,objects_mask,visualize=True)
             #
             #     '''shift head'''
             #     # shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=-1)

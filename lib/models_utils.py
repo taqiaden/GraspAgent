@@ -28,8 +28,9 @@ def view_parameters_value(model,iterations=None):
         if iterations is not None:
             if iterations==i:break
         print(name)
-        print(param.data)
+        print((param.data).abs().max())
         i += 1
+
 def same_models(model1,model2):
     state1=get_model_state(model1).__str__()
     state2=get_model_state(model2).__str__()

@@ -23,7 +23,7 @@ from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_sampling_evaluator import suction_sampler_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
-detach_backbone=True
+detach_backbone=False
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -36,14 +36,15 @@ bce_loss=nn.BCELoss()
 balanced_bce_loss=BalancedBCELoss()
 print=custom_print
 
-def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,objects_mask=None,maximum_iterations=1000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
+def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,objects_mask=None,maximum_iterations=10000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
-        target_index = np.random.randint(0, pc.shape[0])
+        if objects_mask is None:
+            target_index = np.random.randint(0, pc.shape[0])
+        else:
+            idx_nonzero,=np.nonzero(objects_mask)
+            target_index=np.random.choice(idx_nonzero)
         if np.random.random() <  random_sampling_probability:break
         prediction_ = model_predictions[target_index]
-        if objects_mask is not None:
-            if objects_mask[target_index] == 0:
-                continue
         pivot_point=np.sqrt(np.abs(balance_indicator))*np.sign(balance_indicator)
         xa=((model_max_score - prediction_).item() / model_score_range) * pivot_point
         selection_probability = ((1-pivot_point)/2 + xa+0.5*(1-abs(pivot_point)))
@@ -65,9 +66,9 @@ class TrainActionNet:
         '''model wrapper'''
         self.gan=self.prepare_model_wrapper()
 
-        self.moving_collision_rate=MovingRate('collision',decay_rate=0.001)
-        self.moving_firmness=MovingRate('firmness',decay_rate=0.001)
-        self.moving_out_of_scope=MovingRate('out_of_scope',decay_rate=0.001)
+        self.moving_collision_rate=MovingRate('collision')
+        self.moving_firmness=MovingRate('firmness')
+        self.moving_out_of_scope=MovingRate('out_of_scope')
 
         self.data_loader=self.prepare_data_loader()
 
@@ -112,26 +113,18 @@ class TrainActionNet:
             pix_B = pixel_index[j, 1]
             prediction_ = critic_score[j, 0, pix_A, pix_B]
             label_ = critic_score[j + batch_size, 0, pix_A, pix_B]
-            # print(Fore.YELLOW,f'prediction score = {prediction_.item()}, label score = {label_.item()}',Fore.RESET)
 
             collision_state_ = collision_state_list[j]
             out_of_scope = out_of_scope_list[j]
 
             bad_state_grasp = collision_state_ or out_of_scope
-            # w = 10 if out_of_scope else 1
             firmness_state = firmness_state_list[j]
-            # curriculum_loss += (torch.clamp(label_ - prediction_ - m1, 0))**loss_power
             collision_loss += (torch.clamp(prediction_ - label_ + 1, 0) * bad_state_grasp)  # *w
-            # generated_dist = generated_grasps[j, -2, pix_A, pix_B]
-            # activate_firmness_loss=1 if generated_dist<0.2 else 0.0
-            # firmness_loss += (torch.clamp((prediction_ - label_) * (1 - 2 * firmness_state), 0) * (1 - bad_state_grasp))#*activate_firmness_loss
+
             firmness_loss += torch.clamp((prediction_ - label_), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
 
-            # print(f'col_l = {collision_loss}, firmness loss = {firmness_loss}')
 
-        C_loss = collision_loss + firmness_loss
-
-        # print(Fore.GREEN, 'C_loss=', C_loss.item(), Fore.RESET)
+        C_loss = collision_loss**2 + firmness_loss
 
         '''optimizer step'''
         C_loss.backward()
@@ -298,7 +291,7 @@ class TrainActionNet:
                     shift_prediction_=shift_head_predictions[shift_target_index]
                     shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)
 
-            decay_= lambda scores:torch.clamp(scores-torch.zeros_like(scores),0).mean()
+            decay_= lambda scores:torch.clamp(scores,0).mean()
             # reversed_decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
 
             decay_loss=decay_(griper_collision_classifier)+decay_(suction_quality_classifier)+decay_(shift_affordance_classifier)
@@ -320,26 +313,26 @@ class TrainActionNet:
 
             self.swiped_samples+=b
             if i%100==0 and i!=0:
-                self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
+                self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number=i+1)
                 self.export_check_points()
 
             pi.step(i)
         pi.end()
 
-        self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
+        self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number=len(self.data_loader))
 
         self.export_check_points()
         self.clear()
 
-    def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times):
+    def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number):
         with torch.no_grad():
-            self.suction_head_statistics.print(self.swiped_samples)
-            self.gripper_head_statistics.print(self.swiped_samples)
-            self.shift_head_statistics.print(self.swiped_samples)
-            self.gripper_sampler_statistics.print(self.swiped_samples)
-            self.suction_sampler_statistics.print(self.swiped_samples)
-            self.critic_statistics.print(self.swiped_samples)
-            self.background_detector_statistics.print(self.swiped_samples)
+            self.suction_head_statistics.print(batch_number)
+            self.gripper_head_statistics.print(batch_number)
+            self.shift_head_statistics.print(batch_number)
+            self.gripper_sampler_statistics.print(batch_number)
+            self.suction_sampler_statistics.print(batch_number)
+            self.critic_statistics.print(batch_number)
+            self.background_detector_statistics.print(batch_number)
             values = gripper_pose.permute(1, 0, 2, 3).flatten(1).detach()
             std = torch.std(values, dim=-1)
 
@@ -380,9 +373,10 @@ if __name__ == "__main__":
     for i in range(1000):
         #cuda_memory_report()
 
-        lr=1e-6
-        # train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
-        # train_action_net.begin()
+        lr=1e-5
+        # with torch.no_grad():
+        #     train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+        #     train_action_net.begin()
         try:
             cuda_memory_report()
             train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)

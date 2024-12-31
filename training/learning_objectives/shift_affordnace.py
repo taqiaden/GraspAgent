@@ -84,20 +84,23 @@ def estimate_weighted_shift_score(pc,shift_mask,shift_scores,mask,shifted_start_
     else:
         return torch.tensor(0,device=shift_scores.device).float()
 
-def check_collision_for_shift():
-    pass
+def check_collision_for_shift(normals,target_index,pc):
+    target_normal = normals[target_index]
+    target_point = pc[target_index]
+    shifted_pc = pc - target_point[np.newaxis]
+    transformed_pc = transform_point_to_normal_in_plane(target_normal, shifted_pc)
+    transformed_target_point = transformed_pc[target_index]
+    xy_dist = np.linalg.norm(transformed_target_point[np.newaxis, 0:2] - transformed_pc[:, 0:2], axis=-1)
+    signed_distance_mask = (xy_dist < shift_contact_margin) & (
+                transformed_pc[:, 2] > transformed_target_point[2] + interference_allowance)
+    return signed_distance_mask.sum() > 0, signed_distance_mask,target_normal
 
 def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,normals,target_index,visualize=False):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     shift_mask = get_shift_mask(pc, direction, shifted_start_point, end_point, spatial_mask)
 
     '''collision check'''
-    target_normal = normals[target_index]
-    transformed_pc = transform_point_to_normal_in_plane(target_normal, pc)
-    transformed_target_point = transformed_pc[target_index]
-    xy_dist = np.linalg.norm(transformed_target_point[ np.newaxis, 0:2] - transformed_pc[ :, 0:2], axis=-1)
-    signed_distance_mask = (xy_dist < shift_contact_margin) & (transformed_pc[:,2]>transformed_target_point[2]+interference_allowance)
-    collision=signed_distance_mask.sum()>0
+    collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
 
     if shift_mask.sum() > 0 and collision==False:
         label= torch.tensor(1, device=prediction_.device).float()

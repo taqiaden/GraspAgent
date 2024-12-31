@@ -1,4 +1,5 @@
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
@@ -49,6 +50,7 @@ def resize_image(im,size):
     return image
 
 def view_image(image,title=''):
-    cv2.imshow(title, image)
-    cv2.waitKey(0)
-
+    # cv2.imshow(title, image)
+    # cv2.waitKey(0)
+    plt.imshow(image)
+    plt.show()

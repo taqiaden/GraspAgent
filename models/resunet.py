@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+from lib.image_utils import view_image
 from lib.models_utils import number_of_parameters
 
 
@@ -88,7 +89,9 @@ class res_unet(nn.Module):
         """ Encoder 1 """
         x = self.c11(inputs)
         x = self.br1(x)
+
         x = self.c12(x)
+
         s = self.c13(inputs)
         skip1 = x + s
 
@@ -101,8 +104,8 @@ class res_unet(nn.Module):
 
         """ Decoder """
         d1 = self.d1(b, skip3)
-        d2 = self.d2(d1, skip2)
 
+        d2 = self.d2(d1, skip2)
         """ output """
         output = self.d3(d2, skip1)
         return output

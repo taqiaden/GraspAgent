@@ -154,7 +154,6 @@ class TrainValueNet:
             '''q value initialization'''
             q_value_loss=torch.tensor([0.],device=q_value.device)
 
-
             for j in range(b):
                 target_object_mask_j=target_object_mask[j,0]
                 permuted_q_value=q_value[j,0:2].permute(1,2,0)
