@@ -9,9 +9,10 @@ def gripper_sampler_loss(pixel_index,j,collision_state_,out_of_scope,firmness_st
     prediction_score = generated_critic_score[j, 0, pix_A, pix_B]
 
     # loss=torch.clamp(label_score - prediction_score - 1 * (1 - bad_state_grasp), min=0.)
-    if collision_state_ or out_of_scope:
+    if collision_state_ or out_of_scope :
         # return -prediction_score
         return  torch.clamp(critic_score_label-prediction_score,0)
+
     else:
         return prediction_score*0.
         # return torch.tensor([0],device=generated_critic_score.device)

@@ -139,7 +139,7 @@ class TrainActionNet:
             # print(f'p={prediction_}, l={label_}, col={collision_state_}')
 
             firmness_loss += torch.clamp((prediction_ - label_), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
-            # firmness_loss += torch.clamp((label_ - prediction_ ), 0) * (1 - bad_state_grasp) * firmness_state
+            firmness_loss += torch.clamp((label_ - prediction_ ), 0) * (1 - bad_state_grasp) * firmness_state
 
             curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
@@ -169,6 +169,9 @@ class TrainActionNet:
             mask = masks[j]
             gripper_sampling_loss +=  gripper_sampler_loss(pixel_index, j, collision_state_list[j], out_of_scope_list[j],firmness_state_list[j],  generated_critic_score,background_class,critic_score_labels[j],threshold=threshold)
             suction_sampling_loss +=suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
+
+        gripper_sampling_loss=gripper_sampling_loss/batch_size
+        suction_sampling_loss=suction_sampling_loss/batch_size
 
         return gripper_sampling_loss, suction_sampling_loss
 
@@ -223,6 +226,8 @@ class TrainActionNet:
             self.gan.critic.zero_grad()
             self.gan.generator.zero_grad()
 
+            self.swiped_samples+=b
+
             pcs=[]
             masks=[]
             # spatial_masks=[]
@@ -242,15 +247,21 @@ class TrainActionNet:
                                               collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
                                                                           suction_direction,pcs,masks,background_class,critic_score_labels,threshold=self.moving_collision_rate.val)
 
-            self.gripper_sampler_statistics.loss=gripper_sampling_loss.item()/b
-            self.suction_sampler_statistics.loss=suction_sampling_loss.item()/b
+            self.gripper_sampler_statistics.loss=gripper_sampling_loss.item()
+            self.suction_sampler_statistics.loss=suction_sampling_loss.item()
 
             '''loss computation'''
             suction_loss=torch.tensor(0.0,device=gripper_pose.device)
             gripper_loss=torch.tensor(0.0,device=gripper_pose.device)
             shift_loss=torch.tensor(0.0,device=gripper_pose.device)
             background_loss=torch.tensor(0.0,device=gripper_pose.device)
+            decay_loss=torch.tensor(0.0,device=gripper_pose.device)
+
             non_zero_background_loss_counter=0
+
+            n=instances_per_sample*b
+            decay_= lambda scores:torch.clamp(scores,0).mean()*0.1
+
             for j in range(b):
                 pc=pcs[j]
                 mask=masks[j]
@@ -260,6 +271,9 @@ class TrainActionNet:
                 gripper_head_predictions=griper_collision_classifier[j, 0][mask]
                 shift_head_predictions = shift_affordance_classifier[j, 0][mask]
                 background_class_predictions = background_class.permute(0,2, 3, 1)[j, :, :, 0][mask]
+
+                decay_loss += (decay_(gripper_head_predictions) + decay_(suction_head_predictions) + decay_(
+                    shift_head_predictions))/b
 
                 '''limits'''
                 with torch.no_grad():
@@ -280,69 +294,59 @@ class TrainActionNet:
                     self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                     non_zero_background_loss_counter+=1
 
-
                 for k in range(instances_per_sample):
                     '''gripper collision head'''
                     gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.gripper_head_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions[gripper_target_index]
                     gripper_target_pose = gripper_poses[gripper_target_index]
-                    gripper_loss+=gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,self.gripper_head_statistics)
+                    gripper_loss+=gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,self.gripper_head_statistics)/n
 
                     '''suction seal head'''
                     suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.suction_head_statistics.label_balance_indicator)
                     suction_prediction_ = suction_head_predictions[suction_target_index]
-                    suction_loss+=suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,self.suction_head_statistics,objects_mask)
+                    suction_loss+=suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,self.suction_head_statistics,objects_mask)/n
 
                     '''shift affordance head'''
                     shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=self.shift_head_statistics.label_balance_indicator)
                     shift_target_point = pc[shift_target_index]
                     shift_prediction_=shift_head_predictions[shift_target_index]
-                    shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)
-
-            decay_= lambda scores:torch.clamp(scores,0).mean()
-            # reversed_decay_= lambda scores:torch.clamp(torch.ones_like(scores)-scores,0).mean()
-
-            decay_loss=decay_(griper_collision_classifier)+decay_(suction_quality_classifier)+decay_(shift_affordance_classifier)
-            decay_loss*=0.3
-            # reversed_decay_loss=reversed_decay_(background_class)*0.3
+                    shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)/n
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
-
-            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.15+gripper_sampling_loss+suction_sampling_loss+background_loss*2.
+            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
 
             with torch.no_grad():
-                self.suction_head_statistics.loss = suction_loss.item()/b
-                self.gripper_head_statistics.loss = gripper_loss.item()/b
-                self.shift_head_statistics.loss = shift_loss.item()/b
-                self.background_detector_statistics.loss=background_loss.item()/b
+                self.suction_head_statistics.loss = suction_loss.item()
+                self.gripper_head_statistics.loss = gripper_loss.item()
+                self.shift_head_statistics.loss = shift_loss.item()
+                self.background_detector_statistics.loss=background_loss.item()
 
-            self.swiped_samples+=b
             if i%100==0 and i!=0:
-                self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number=i+1)
+                self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
                 self.export_check_points()
 
             pi.step(i)
         pi.end()
 
-        self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number=len(self.data_loader))
+        self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
 
         self.export_check_points()
         self.clear()
 
-    def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times,batch_number):
+    def view_result(self,gripper_pose,collision_times,good_firmness_times,out_of_scope_times):
         with torch.no_grad():
-            self.suction_sampler_statistics.print(batch_number)
-            self.suction_head_statistics.print(batch_number)
-            self.gripper_head_statistics.print(batch_number)
-            self.shift_head_statistics.print(batch_number)
-            self.background_detector_statistics.print(batch_number)
-            self.gripper_sampler_statistics.print(batch_number)
-            self.critic_statistics.print(batch_number)
+            self.suction_sampler_statistics.print()
+            self.suction_head_statistics.print()
+            self.gripper_head_statistics.print()
+            self.shift_head_statistics.print()
+            self.background_detector_statistics.print()
+            self.gripper_sampler_statistics.print()
+            self.critic_statistics.print()
 
             values = gripper_pose.permute(1, 0, 2, 3).flatten(1).detach()
             std = torch.std(values, dim=-1)
@@ -387,10 +391,13 @@ if __name__ == "__main__":
     for i in range(1000):
         #cuda_memory_report()
 
-        lr=1e-5
+        lr=1e-6
         # with torch.no_grad():
         #     train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
         #     train_action_net.begin()
+        cuda_memory_report()
+        train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+        train_action_net.begin()
         try:
             cuda_memory_report()
             train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)

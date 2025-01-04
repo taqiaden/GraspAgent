@@ -54,17 +54,18 @@ class MovingRate():
         self.balance_indicator=0.0
 
         self.decay_rate = 0.001
-
         self.counter = 0
-
         self.moving_rate=0.0
 
         '''load latest'''
         self.upload()
-
-
         self.set_decay_rate()
         self.truncate_factor=10/self.decay_rate
+
+        self.f = lambda x: int(x * 20 + 0.5) / 20
+
+        self.truncated_value=self.f(self.moving_rate)
+
 
     @property
     def val(self):
@@ -76,6 +77,7 @@ class MovingRate():
         else:
             self.moving_rate = (1 - self.decay_rate) * self.moving_rate
         self.counter+=1
+        self.truncated_value=self.f((self.truncated_value+self.moving_rate)/2)
 
 
     def set_decay_rate(self):
@@ -120,6 +122,7 @@ class TrainingTracker:
         self.last_loss=None
 
         self.set_decay_rate()
+        self.tmp_counter=0
 
     def set_decay_rate(self):
         x=0.1*(1-0.003)**self.counter
@@ -139,6 +142,7 @@ class TrainingTracker:
             self.convergence=self.decay_rate * change + self.convergence * (1 - self.decay_rate)
         self.last_loss=value
         self.counter+=1
+        self.tmp_counter+=1
 
 
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
@@ -175,17 +179,13 @@ class TrainingTracker:
         else:
             self.prediction_balance_indicator = (1 - self.decay_rate) * self.prediction_balance_indicator - self.decay_rate
 
-    def print(self,swiped_samples=None):
+    def print(self):
         self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,f'statistics report for {self.name}')
-        size=swiped_samples if swiped_samples is not None else self.iterations_per_epoch
         if self.running_loss_ is not None:
-            if size is not None:
-                print(f'Average loss = {self.running_loss_/size}')
-            else:
-                print(f'Running loss = {self.running_loss_}')
+            print(f'Average loss = {self.running_loss_/self.tmp_counter}, Running loss = {self.running_loss_}')
 
-        print(f'Loss (moving average) = {self.loss_moving_average_}')
+        print(f'Moving average loss= {self.loss_moving_average_}')
 
         if self.confession_matrix.total_classification()>0:
             self.confession_matrix.view()
