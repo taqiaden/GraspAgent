@@ -54,3 +54,4 @@ def view_image(image,title=''):
     # cv2.waitKey(0)
     plt.imshow(image)
     plt.show()
+

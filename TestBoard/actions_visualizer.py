@@ -11,6 +11,7 @@ from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
 from interpolate_bin import alpha
 from lib.IO_utils import custom_print
+from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.models_utils import view_parameters_value
@@ -24,7 +25,7 @@ from training.learning_objectives.suction_seal import suction_seal_loss
 # from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
 # from training.learning_objectives.shift_affordnace import  shift_affordance_loss
 # from training.learning_objectives.suction_seal import suction_seal_loss
-from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualization
+from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualization, view_features
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -51,12 +52,12 @@ def loop():
     dataset = ActionDataset(data_pool=training_buffer,file_ids=file_ids)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=True)
 
-    suction_head_statistics = TrainingTracker(name=module_key+'_suction_head', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
-    gripper_head_statistics = TrainingTracker(name=module_key+'_gripper_head', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
-    shift_head_statistics = TrainingTracker(name=module_key+'_shift_head', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
-    gripper_sampler_statistics = TrainingTracker(name=module_key+'_gripper_sampler', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
-    suction_sampler_statistics = TrainingTracker(name=module_key+'_suction_sampler', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
-    critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(data_loader), samples_size=len(dataset),track_label_balance=True)
+    suction_head_statistics = TrainingTracker(name=module_key+'_suction_head', iterations_per_epoch=len(data_loader), track_label_balance=True)
+    gripper_head_statistics = TrainingTracker(name=module_key+'_gripper_head', iterations_per_epoch=len(data_loader), track_label_balance=True)
+    shift_head_statistics = TrainingTracker(name=module_key+'_shift_head', iterations_per_epoch=len(data_loader), track_label_balance=True)
+    gripper_sampler_statistics = TrainingTracker(name=module_key+'_gripper_sampler', iterations_per_epoch=len(data_loader), track_label_balance=True)
+    suction_sampler_statistics = TrainingTracker(name=module_key+'_suction_sampler', iterations_per_epoch=len(data_loader),track_label_balance=True)
+    critic_statistics = TrainingTracker(name=module_key+'_critic', iterations_per_epoch=len(data_loader),track_label_balance=True)
 
     # collision_times = 0.
     # out_of_scope_times = 0.
@@ -71,10 +72,21 @@ def loop():
         b = depth.shape[0]
 
         '''generate grasps'''
+        # gan.critic.back_bone.load_state_dict(gan.generator.back_bone.state_dict())
+        # view_parameters_value(gan.generator.back_bone,iterations=5)
+        # print('----')
+        # view_parameters_value(gan.critic.back_bone,iterations=5)
+        # gan.export_models()
+        #
+        # exit()
+
         with torch.no_grad():
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = gan.generator(
                 depth.clone(),alpha=0.0,clip=True)
 
+            critic_score = gan.critic(depth.clone(), gripper_pose)
+
+        # view_features(depth_features,reshape=False)
         '''Evaluate generated grasps'''
         # collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
         #                                                                                gripper_pose, pose_7,visualize=False)

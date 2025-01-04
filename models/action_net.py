@@ -1,13 +1,16 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
+from colorama import Fore
 from torch import nn
 from Configurations.config import theta_scope, phi_scope
 from lib.custom_activations import GripperGraspRegressor2
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import att_res_mlp_LN, res_block_mlp_LN
+from models.decoders import att_res_mlp_LN, att_res_mlp_LN3, self_att_res_mlp_LN
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera, standardize_depth
+from visualiztion import view_features
 
 use_bn=False
 use_in=True
@@ -34,40 +37,45 @@ def randomize_approach(approach,alpha=0.0,random_tensor=None):
 
     return randomized_approach
 
+
+
 class GripperPartSampler(nn.Module):
     def __init__(self):
         super().__init__()
-        self.get_approach=nn.Sequential(
-            nn.Linear(64, 32, bias=False),
-            nn.LayerNorm([32]),
-            nn.ReLU(),
-            nn.Linear(32, 16,bias=False),
-            nn.LayerNorm([16]),
-            nn.ReLU(),
-            nn.Linear(16, 3),
-        ).to('cuda')
-        self.get_beta_dist_width=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=4).to('cuda')
+
+        # self.decoder_=nn.Sequential(
+        #     nn.Linear(64, 32, bias=False),
+        #     nn.LayerNorm([32]),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 16,bias=False),
+        #     nn.LayerNorm([16]),
+        #     nn.ReLU(),
+        #     nn.Linear(16, 7),
+        # ).to('cuda')
+
+        self.decoder_=self_att_res_mlp_LN(in_c1=64,out_c=7).to('cuda')
+        self.residual_=att_res_mlp_LN(in_c1=64, in_c2=7, out_c=7).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
-    def forward(self,representation_2d,alpha=0.,random_tensor=None,clip=False):
-        '''Approach'''
-        if alpha==1.:
-            approach=random_approach_tensor(representation_2d.shape[0]) if random_tensor is None else random_tensor.clone()
-        else:
-            approach = self.get_approach(representation_2d)
-            if alpha > 0.:
-                random_tensor_ = random_approach_tensor(
-                    representation_2d.shape[0]) if random_tensor is None else random_tensor.clone()
-                approach = randomize_approach(approach, alpha=alpha, random_tensor=random_tensor_)
+    def forward(self,representation_2d,alpha=0.,random_tensor=None,clip=False,refine_grasp=True):
+        prediction=self.decoder_(representation_2d)
 
-        '''Beta, distance, and width'''
-        beta_dist_width=self.get_beta_dist_width(representation_2d,approach)
+        if alpha > 0.:
+            random_tensor_ = random_approach_tensor(
+                representation_2d.shape[0]) if random_tensor is None else random_tensor.clone()
+            prediction[:,0:3] = randomize_approach(prediction[:,0:3], alpha=alpha, random_tensor=random_tensor_)
 
-        '''Regress'''
-        output_2d = torch.cat([approach, beta_dist_width], dim=1)
-        output_2d=self.gripper_regressor_layer(output_2d,clip=clip)
-        return output_2d
+        # residuals=self.residual_(representation_2d,prediction)
+        # prediction=prediction*residuals
+        # print(residuals)
+        # print(prediction)
+        # a=int(refine_grasp)
+        # prediction=residuals*a+prediction.detach()*a+prediction*(1-a)
+
+        output=self.gripper_regressor_layer(prediction,clip=clip)
+        return output
+
 
 class SuctionPartSampler(nn.Module):
     def __init__(self):
@@ -101,13 +109,16 @@ class ActionNet(nn.Module):
         self.suction_sampler=SuctionPartSampler()
 
         self.gripper_collision = att_res_mlp_LN(in_c1=64, in_c2=7, out_c=1).to('cuda')
+
         self.suction_quality = att_res_mlp_LN(in_c1=64, in_c2=3, out_c=1).to('cuda')
+
         self.shift_affordance = att_res_mlp_LN(in_c1=64, in_c2=5, out_c=1).to('cuda')
+
         self.background_detector=att_res_mlp_LN(in_c1=64, in_c2=2, out_c=1).to('cuda')
 
         self.sigmoid=nn.Sigmoid()
 
-    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False):
+    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,refine_grasp=True):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -116,6 +127,16 @@ class ActionNet(nn.Module):
         depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
         if detach_backbone: features=features.detach()
+        # view_features(features)
+
+        # print(features[0])
+        # exit()
+        '''check exploded values'''
+        if self.training:
+            max_=features.max()
+            if max_>100:
+                print(Fore.RED,f'Warning: Res U net outputs high values up to {max_}',Fore.RESET)
+
 
         '''Spatial data'''
         if self.spatial_encoding.shape[0] != depth.shape[0]:
@@ -123,7 +144,7 @@ class ActionNet(nn.Module):
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         '''gripper parameters'''
-        gripper_pose=self.gripper_sampler(features,alpha=alpha,random_tensor=random_tensor,clip=clip)
+        gripper_pose=self.gripper_sampler(features,alpha=alpha,random_tensor=random_tensor,clip=clip,refine_grasp=refine_grasp)
 
         '''suction direction'''
         suction_direction=self.suction_sampler(features)
@@ -164,8 +185,7 @@ class Critic(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
-        self.att_block = att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
-
+        self.att_block= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
 
     def forward(self, depth,pose):
         '''input standardization'''
@@ -176,6 +196,7 @@ class Critic(nn.Module):
         features_2d=reshape_for_layer_norm(features, camera=camera, reverse=False)
         pose_2d=reshape_for_layer_norm(pose, camera=camera, reverse=False)
 
+        # view_features(features_2d)
         '''decode'''
         output_2d = self.att_block(features_2d,pose_2d)
 

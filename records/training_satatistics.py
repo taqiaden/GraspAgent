@@ -47,47 +47,6 @@ class ConfessionMatrix():
         total=self.total_classification()
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
-class MovingMetrics():
-    def __init__(self,name='000',decay_rate=0.001):
-        self.name=name
-
-        self.balance_indicator=0.0
-
-        '''moving rates'''
-        self.decay_rate=decay_rate
-        self.tpr=1.0
-        self.tnr=1.0
-
-        '''load latest'''
-        self.upload()
-
-
-    def update(self,label,prediction_,pivot_value=0.5):
-        confession_matrix = ConfessionMatrix()
-        confession_matrix.update_confession_matrix(label, prediction_, pivot_value)
-        if confession_matrix.TP==1:
-            self.tpr=(1-self.decay_rate)*self.tpr+self.decay_rate
-        elif confession_matrix.FN==1:
-            self.tpr = (1 - self.decay_rate) * self.tpr
-        elif confession_matrix.TN==1:
-            self.tnr=(1-self.decay_rate)*self.tnr+self.decay_rate
-        else:
-            self.tnr = (1 - self.decay_rate) * self.tnr
-
-    def save(self):
-        save_key("tpr", self.tpr, section=self.name)
-        save_key("tnr", self.tnr, section=self.name)
-
-    def upload(self):
-        self.tpr=get_float('tpr',section=self.name)
-        self.tnr=get_float('tnr',section=self.name)
-
-    def view(self):
-        print(Fore.LIGHTBLUE_EX)
-        print(f'Moving true positive rate = {self.tpr}')
-        print(f'Moving true negative rate = {self.tnr}')
-        print(Fore.RESET)
-
 class MovingRate():
     def __init__(self,name='000'):
         self.name=name
@@ -98,24 +57,30 @@ class MovingRate():
 
         self.counter = 0
 
-
+        self.moving_rate=0.0
 
         '''load latest'''
         self.upload()
 
-        self.moving_rate=0.0
 
         self.set_decay_rate()
         self.truncate_factor=10/self.decay_rate
+
+    @property
+    def val(self):
+        return self.moving_rate
 
     def update(self,value,pivot_value=0.5):
         if value>pivot_value:
             self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate
         else:
             self.moving_rate = (1 - self.decay_rate) * self.moving_rate
+        self.counter+=1
+
 
     def set_decay_rate(self):
-        self.decay_rate=max(1/(10*(1+self.counter)),0.0001)
+        x=0.1*(1-0.003)**self.counter
+        self.decay_rate=max(x,0.005)
         self.truncate_factor = 10 / self.decay_rate
 
     def save(self):
@@ -148,14 +113,18 @@ class TrainingTracker:
         self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
         self.loss_moving_average_=self.load_loss_moving_average()
+        self.convergence=self.load_convergence()
         self.decay_rate=0.001
 
         self.counter=self.load_counter()
+        self.last_loss=None
 
         self.set_decay_rate()
 
     def set_decay_rate(self):
-        self.decay_rate = max(1 / (10 * (1 + self.counter)), 0.0001)
+        x=0.1*(1-0.003)**self.counter
+        self.decay_rate=max(x,0.005)
+
 
     @property
     def loss(self):
@@ -165,6 +134,10 @@ class TrainingTracker:
     def loss(self,value):
         self.running_loss_= value if self.running_loss_ is None else self.running_loss_+ value
         self.loss_moving_average_ = self.decay_rate * value + self.loss_moving_average_ * (1 - self.decay_rate)
+        if self.last_loss is not None:
+            change=value-self.last_loss
+            self.convergence=self.decay_rate * change + self.convergence * (1 - self.decay_rate)
+        self.last_loss=value
         self.counter+=1
 
 
@@ -183,6 +156,9 @@ class TrainingTracker:
 
     def load_loss_moving_average(self):
         return get_float('loss_moving_average',section=self.name)
+
+    def load_convergence(self):
+        return get_float('convergence',section=self.name)
 
     def load_counter(self):
         return get_float('counter',section=self.name)
@@ -220,6 +196,10 @@ class TrainingTracker:
         if self.prediction_balance_indicator is not None:
             print(f'prediction balance indicator = {self.prediction_balance_indicator}')
 
+        if self.convergence is not None:
+            print(f'Convergence = {self.convergence}')
+
+
         print(Fore.RESET)
 
     def save(self):
@@ -227,6 +207,8 @@ class TrainingTracker:
         save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
 
         save_key('loss_moving_average', self.loss_moving_average_, section=self.name)
+        save_key('convergence', self.convergence, section=self.name)
+
         save_key('counter', self.counter, section=self.name)
 
 

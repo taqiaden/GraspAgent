@@ -9,6 +9,7 @@ import trimesh
 from Configurations import ENV_boundaries
 from lib.collision_unit import grasp_collision_detection
 from lib.depth_map import depth_to_point_clouds, CameraInfo
+from lib.image_utils import view_image
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import distribution_summary
@@ -17,6 +18,15 @@ from pose_object import pose_7_to_transformation
 parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
+
+def view_features(x,reshape=True,max_iteration=None):
+    from lib.models_utils import reshape_for_layer_norm
+    from registration import camera
+
+    if reshape: x = reshape_for_layer_norm(x, camera=camera, reverse=True)
+    n=min(max_iteration,x.shape[1]) if max_iteration is not None else x.shape[1]
+    for i in range(n):
+        view_image(x[0, i].cpu().detach().numpy())
 
 def static_spatial_mask(pc):
     x = pc[ :, 0]

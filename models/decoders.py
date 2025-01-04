@@ -4,6 +4,7 @@ from torch import nn
 
 from lib.custom_activations import GrowingCosineUnit
 from models.resunet import batch_norm_relu
+from visualiztion import view_features
 
 
 class res_block(nn.Module):
@@ -55,7 +56,118 @@ class res_block_mlp_LN(nn.Module):
 #             nn.LayerNorm([64]),
 
 class att_res_mlp_LN(nn.Module):
-    def __init__(self,in_c1,in_c2,out_c,drop_out_ratio=0.0):
+    def __init__(self,in_c1,in_c2,out_c):
+        super().__init__()
+        self.key = nn.Sequential(
+            nn.Linear(in_c1, 32)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            nn.Linear(in_c1, 32)
+        ).to('cuda')
+
+        self.query =  nn.Sequential(
+            nn.Linear(in_c2, 32),
+        ).to('cuda')
+
+        self.res=nn.Sequential(
+            nn.Linear(in_c1 + in_c2, 32,bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+        ).to('cuda')
+
+        self.att=nn.Sequential(
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            nn.Linear(64, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 16,bias=False),
+            nn.LayerNorm([16]),
+            nn.ReLU(),
+            nn.Linear(16, out_c),
+        ).to('cuda')
+
+    def forward(self, key_value_input,query_input):
+        '''residual'''
+        inputs=torch.cat([key_value_input,query_input],dim=1)
+        res = self.res(inputs)
+
+        '''key value from input1'''
+        key=self.key(key_value_input)
+        value=self.value(key_value_input)
+        '''Query from input2'''
+        query=self.query(query_input)
+        '''attention score'''
+        att_map=key*query
+        att_map=F.softmax(att_map,dim=-1)
+        x=att_map*value
+
+        x = self.att(x)
+
+        output=self.d(torch.cat([x,res],dim=-1))
+        return output
+
+class self_att_res_mlp_LN(nn.Module):
+    def __init__(self,in_c1,out_c):
+        super().__init__()
+        self.key = nn.Sequential(
+            nn.Linear(in_c1, 32)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            nn.Linear(in_c1, 32)
+        ).to('cuda')
+
+        self.query =  nn.Sequential(
+            nn.Linear(in_c1, 32),
+        ).to('cuda')
+
+        self.res=nn.Sequential(
+            nn.Linear(in_c1, 32,bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+        ).to('cuda')
+
+        self.att=nn.Sequential(
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            nn.Linear(64, 32, bias=False),
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 16,bias=False),
+            nn.LayerNorm([16]),
+            nn.ReLU(),
+            nn.Linear(16, out_c),
+        ).to('cuda')
+
+    def forward(self, x):
+        '''residual'''
+        res = self.res(x)
+
+        '''key value from input1'''
+        key=self.key(x)
+        value=self.value(x)
+        '''Query from input2'''
+        query=self.query(x)
+        '''attention score'''
+        att_map=key*query
+        att_map=F.softmax(att_map,dim=-1)
+        x=att_map*value
+
+        x = self.att(x)
+
+        output=self.d(torch.cat([x,res],dim=-1))
+        return output
+
+class att_res_mlp_LN3(nn.Module):
+    def __init__(self,in_c1,in_c2,out_c):
         super().__init__()
         assert in_c1 >32 and out_c<32 and in_c2<16
 
@@ -84,12 +196,16 @@ class att_res_mlp_LN(nn.Module):
         self.att=nn.Sequential(
             nn.LayerNorm([32]),
             nn.ReLU(),
-            nn.Linear(32, 16,bias=False),
+            nn.Linear(32, 16),
+        ).to('cuda')
+
+        self.att_map_=nn.Sequential(
+            nn.LayerNorm([32]),
+            nn.ReLU(),
+            nn.Linear(32, 32),
         ).to('cuda')
 
         self.final = nn.Sequential(
-            nn.LayerNorm([32]),
-            nn.ReLU(),
             nn.Linear(32, 16,bias=False),
             nn.LayerNorm([16]),
             nn.ReLU(),
@@ -103,17 +219,23 @@ class att_res_mlp_LN(nn.Module):
 
         '''key value from input1'''
         key=self.key(key_value_input)
+
         value=self.value(key_value_input)
 
         '''Query from input2'''
         query=self.query(query_input)
+        query=F.softmax(query,dim=-1)
 
         '''attention score'''
         att_map=key*query
+        att_map=self.att_map_(att_map)
+
         att_map=F.softmax(att_map,dim=-1)
+        # view_features(att_map)
         x=att_map*value
 
         x = self.att(x)
+
         output=self.final(torch.cat([x,res],dim=-1))
 
         return output

@@ -96,6 +96,13 @@ class GANWrapper():
                                                  weight_decay=weight_decay)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
 
+    def critic_rmsprop_optimizer(self, learning_rate=None):
+        if learning_rate is not None: self.learning_rate = learning_rate
+
+        self.critic_optimizer = torch.optim.RMSprop(self.critic.parameters(), lr=self.learning_rate,
+                                                 weight_decay=weight_decay)
+        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
+
     def generator_sgd_optimizer(self, learning_rate=None):
         if learning_rate is not None: self.learning_rate = learning_rate
 

@@ -10,6 +10,7 @@ from lib.IO_utils import save_data_to_server
 from registration import camera
 
 
+
 def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
     if reverse==False:
         channels=tensor.shape[1]
@@ -27,7 +28,7 @@ def view_parameters_value(model,iterations=None):
     for name, param in model.named_parameters():
         if iterations is not None:
             if iterations==i:break
-        print(name)
+        # print(name)
         print((param.data).abs().max())
         i += 1
 
