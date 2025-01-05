@@ -19,14 +19,28 @@ parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
 
-def view_features(x,reshape=True,max_iteration=None):
+def view_features(x,reshape=True,max_iteration=None,view_one_by_one=True):
     from lib.models_utils import reshape_for_layer_norm
     from registration import camera
 
     if reshape: x = reshape_for_layer_norm(x, camera=camera, reverse=True)
     n=min(max_iteration,x.shape[1]) if max_iteration is not None else x.shape[1]
-    for i in range(n):
-        view_image(x[0, i].cpu().detach().numpy())
+    if n==1:
+        view_image(x[0, 0].cpu().detach().numpy())
+    else:
+        if view_one_by_one:
+            for i in range(n):
+                view_image(x[0, i].cpu().detach().numpy())
+        else:
+            a=int(math.sqrt(n))
+            c=math.ceil(n/a)
+            plt.figure(figsize=(10, 10))
+            for i in range(n):
+                img_=x[0, i].cpu().detach().numpy()
+                plt.subplot(a, c, i+1)  # 2 rows, 2 columns, fourth position
+                plt.imshow(img_,cmap='gray')
+                plt.axis('off')  # Hide the axis labels
+            plt.show()
 
 def static_spatial_mask(pc):
     x = pc[ :, 0]

@@ -3,13 +3,16 @@
 # import open3d as o3d
 #
 # from records.training_satatistics import TrainingTracker
+import torch
+import torch.nn.functional as F
 
 if __name__ == "__main__":
-    f=lambda x: int(x*20+0.5)/20
-    a=0.1
-    b=0.14
-    z=f((f(a)+b)/2)
-    d=f((f(b)+a)/2)
-    print(z)
-    print(d)
-    print(f(0.1))
+    z=0.1
+    x=torch.tensor([z,0.])
+    x_s=F.softmax(x)
+    x_l=F.log_softmax(x)
+    print(x_s[0]-x_s[1])
+    print(x_s[0])
+    print()
+    print(x_l[0]-x_l[1])
+    print(x_l[0])
