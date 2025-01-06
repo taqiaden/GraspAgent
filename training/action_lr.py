@@ -23,7 +23,7 @@ from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_sampling_evaluator import suction_sampler_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
-detach_backbone=True
+detach_backbone=False
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -100,9 +100,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        gan.critic_adam_optimizer(learning_rate=self.learning_rate)
+        # gan.critic_adam_optimizer(learning_rate=self.learning_rate)
 
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
@@ -149,13 +149,13 @@ class TrainActionNet:
             collision_loss += (torch.clamp(prediction_ - label_ + collision_threshold, 0) * bad_state_grasp)  # *w
 
             # print(f'p={prediction_}, l={label_}, col={collision_state_}')
-            firmness_loss += torch.clamp((prediction_ - label_-firmness_threshold*collision_threshold), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
-            firmness_loss += torch.clamp((label_ - prediction_ +firmness_threshold*collision_threshold), 0) * (1 - bad_state_grasp) * firmness_state
+            firmness_loss += torch.clamp((prediction_ - label_-firmness_threshold**2), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
+            firmness_loss += torch.clamp((label_ - prediction_ -firmness_threshold**2), 0) * (1 - bad_state_grasp) * firmness_state
 
             # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
 
-        c_loss = collision_loss + firmness_loss #+ curriculum_loss
+        c_loss = (collision_loss + firmness_loss )*(collision_threshold**2)#+ curriculum_loss
 
         '''optimizer step'''
         c_loss.backward()
@@ -215,26 +215,25 @@ class TrainActionNet:
                 collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
                                                                                                gripper_pose, pose_7)
 
-            print('test')
 
-            '''update metrics'''
-            collision_times += sum(collision_state_list)
-            out_of_scope_times += sum(out_of_scope_list)
-            good_firmness_times += sum(firmness_state_list)
-            for k in range(len(collision_state_list)):
-                self.moving_collision_rate.update(collision_state_list[k])
-                self.moving_firmness.update(firmness_state_list[k])
-                self.moving_out_of_scope.update(out_of_scope_list[k])
+                '''update metrics'''
+                collision_times += sum(collision_state_list)
+                out_of_scope_times += sum(out_of_scope_list)
+                good_firmness_times += sum(firmness_state_list)
+                for k in range(len(collision_state_list)):
+                    self.moving_collision_rate.update(collision_state_list[k])
+                    self.moving_firmness.update(firmness_state_list[k])
+                    self.moving_out_of_scope.update(out_of_scope_list[k])
 
             '''zero grad'''
             self.gan.critic.zero_grad()
             self.gan.generator.zero_grad()
 
             '''train critic'''
-
+            t=max(self.moving_collision_rate.val,self.moving_out_of_scope.val)
             l_c ,critic_score_labels= self.step_critic_training(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
-                                           collision_state_list, out_of_scope_list, firmness_state_list,collision_threshold=self.moving_collision_rate.val,firmness_threshold=self.moving_firmness.val)
+                                           collision_state_list, out_of_scope_list, firmness_state_list,collision_threshold=t,firmness_threshold=self.moving_firmness.val)
             self.critic_statistics.loss=l_c/b
             '''zero grad'''
             self.gan.critic.zero_grad()
@@ -403,21 +402,23 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-
+    lr = 1e-5
     for i in range(1000):
         #cuda_memory_report()
 
-        lr=1e-6
+
         # with torch.no_grad():
-        #     train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
-        #     train_action_net.begin()
+        # train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+        # train_action_net.begin()
         # cuda_memory_report()
         # train_action_net = TrainActionNet(batch_size=1, n_samples=None, learning_rate=lr)
         # train_action_net.begin()
         try:
             cuda_memory_report()
-            train_action_net=TrainActionNet(batch_size=1, n_samples=None, learning_rate=lr)
+            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
             train_action_net.begin()
         except Exception as error_message:
             torch.cuda.empty_cache()
             print(error_message)
+
+        lr=max(lr/1.1,1e-6)

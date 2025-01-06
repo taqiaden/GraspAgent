@@ -53,13 +53,13 @@ class GripperPartSampler(nn.Module):
         #     nn.Linear(16, 7),
         # ).to('cuda')
 
-        self.decoder_=self_att_res_mlp_LN(in_c1=64,out_c=7).to('cuda')
+        self.decoder=self_att_res_mlp_LN(in_c1=64,out_c=7).to('cuda')
         self.residual_=att_res_mlp_LN(in_c1=64, in_c2=7, out_c=7).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
     def forward(self,representation_2d,alpha=0.,random_tensor=None,clip=False,refine_grasp=True):
-        prediction=self.decoder_(representation_2d)
+        prediction=self.decoder(representation_2d)
 
         if alpha > 0.:
             random_tensor_ = random_approach_tensor(
@@ -185,7 +185,9 @@ class Critic(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
-        self.att_block= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
+        self.att_block1= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
+        self.att_block2= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
+        self.att_block3= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
 
     def forward(self, depth,pose):
         '''input standardization'''
@@ -198,7 +200,7 @@ class Critic(nn.Module):
 
         # view_features(features_2d)
         '''decode'''
-        output_2d = self.att_block(features_2d,pose_2d)
+        output_2d = self.att_block1(features_2d,pose_2d)*self.att_block2(features_2d,pose_2d)+self.att_block3(features_2d,pose_2d)
 
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
 

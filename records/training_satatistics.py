@@ -78,18 +78,14 @@ class MovingRate():
         self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate*value
         self.momentum=(1-self.decay_rate)*self.moving_rate+self.decay_rate*(value**2)
 
-        t_v=self.f((self.truncated_value + self.moving_rate) / 2)
-        if t_v>self.truncated_value:
-            self.truncated_value+=1/self.truncated_factor
-        elif t_v<self.truncated_value:
-            self.truncated_value -= 1/self.truncated_factor
+        self.truncated_value=self.f((self.truncated_value + self.moving_rate) / 2)
 
         self.truncated_value=self.f(self.truncated_value)
 
 
     def set_decay_rate(self):
-        x=0.1*(1-0.005)**self.counter
-        self.decay_rate=max(x,0.003)
+        x=0.1*(1-0.0045)**self.counter
+        self.decay_rate=max(x,0.001)
         self.truncate_factor = 10 / self.decay_rate
 
     def save(self):
@@ -134,8 +130,8 @@ class TrainingTracker:
         self.tmp_counter=0
 
     def set_decay_rate(self):
-        x=0.1*(1-0.005)**self.counter
-        self.decay_rate=max(x,0.003)
+        x=0.1*(1-0.0045)**self.counter
+        self.decay_rate=max(x,0.001)
 
 
     @property

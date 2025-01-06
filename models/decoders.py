@@ -138,13 +138,13 @@ class self_att_res_mlp_LN(nn.Module):
         ).to('cuda')
 
         self.d = nn.Sequential(
-            nn.Linear(64, 32, bias=False),
+            nn.Linear(64, 48, bias=False),
+            nn.LayerNorm([48]),
+            nn.ReLU(),
+            nn.Linear(48, 32,bias=False),
             nn.LayerNorm([32]),
             nn.ReLU(),
-            nn.Linear(32, 16,bias=False),
-            nn.LayerNorm([16]),
-            nn.ReLU(),
-            nn.Linear(16, out_c),
+            nn.Linear(32, out_c),
         ).to('cuda')
 
     def forward(self, x):
