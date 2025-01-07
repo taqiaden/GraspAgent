@@ -100,9 +100,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate)
 
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
@@ -146,16 +146,18 @@ class TrainActionNet:
             #     x = prediction_ - label_
             # c_loss+=smooth_clamp(x)
 
-            collision_loss += (torch.clamp(prediction_ - label_ + collision_threshold, 0) * bad_state_grasp)  # *w
+            collision_loss += (torch.clamp(prediction_ - label_ +collision_threshold**2, 0) * bad_state_grasp)  # *w
 
-            # print(f'p={prediction_}, l={label_}, col={collision_state_}')
-            firmness_loss += torch.clamp((prediction_ - label_-firmness_threshold**2), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
-            firmness_loss += torch.clamp((label_ - prediction_ -firmness_threshold**2), 0) * (1 - bad_state_grasp) * firmness_state
+            firmness_loss += torch.clamp((prediction_ - label_+0.15-firmness_threshold**2), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
+            firmness_loss += torch.clamp((label_ - prediction_+0.15-firmness_threshold**2 ), 0) * (1 - bad_state_grasp) * firmness_state
 
             # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
+            # print(f'p={prediction_}, l={label_}, col={collision_state_}, threshold={collision_threshold}, loss={(collision_loss + firmness_loss )*(collision_threshold**2)}')
 
-        c_loss = (collision_loss + firmness_loss )*(collision_threshold**2)#+ curriculum_loss
+        c_loss = (collision_loss + firmness_loss )#*(collision_threshold)#+ curriculum_loss
+
+        # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
 
         '''optimizer step'''
         c_loss.backward()
@@ -215,7 +217,6 @@ class TrainActionNet:
                 collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,
                                                                                                gripper_pose, pose_7)
 
-
                 '''update metrics'''
                 collision_times += sum(collision_state_list)
                 out_of_scope_times += sum(out_of_scope_list)
@@ -252,7 +253,7 @@ class TrainActionNet:
                 masks.append(mask)
 
             '''generated grasps'''
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,_ = self.gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
                 depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone,refine_grasp=i%2)
 
             '''train generator'''
@@ -269,7 +270,6 @@ class TrainActionNet:
             shift_loss=torch.tensor(0.0,device=gripper_pose.device)
             background_loss=torch.tensor(0.0,device=gripper_pose.device)
             decay_loss=torch.tensor(0.0,device=gripper_pose.device)
-
             non_zero_background_loss_counter=0
 
             n=instances_per_sample*b
@@ -287,6 +287,7 @@ class TrainActionNet:
 
                 decay_loss += (decay_(gripper_head_predictions) + decay_(suction_head_predictions) + decay_(
                     shift_head_predictions))/b
+
 
                 '''limits'''
                 with torch.no_grad():
@@ -328,7 +329,9 @@ class TrainActionNet:
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
-            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss
+            # regularization = (depth_features.transpose(0,1).reshape(64,-1).mean(dim=0) ** 2).mean()
+
+            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss#+regularization
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()

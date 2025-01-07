@@ -77,10 +77,9 @@ class MovingRate():
     def update(self,value):
         self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate*value
         self.momentum=(1-self.decay_rate)*self.moving_rate+self.decay_rate*(value**2)
-
+        self.counter+=1
         self.truncated_value=self.f((self.truncated_value + self.moving_rate) / 2)
 
-        self.truncated_value=self.f(self.truncated_value)
 
 
     def set_decay_rate(self):

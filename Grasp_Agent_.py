@@ -22,7 +22,7 @@ from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
-from models.value_net import ValueNet, value_module_key
+from models.policy_net import ValueNet, value_module_key
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
@@ -211,7 +211,7 @@ class GraspAgent():
     def __init__(self):
         '''models'''
         self.action_net = None
-        self.value_net = None
+        self.policy_net = None
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
 
@@ -281,9 +281,9 @@ class GraspAgent():
 
         pi.step(2)
 
-        value_net = ModelWrapper(model=ValueNet(), module_key=value_module_key)
-        value_net.ini_model(train=False)
-        self.value_net = value_net.model
+        policy_net = ModelWrapper(model=ValueNet(), module_key=value_module_key)
+        policy_net.ini_model(train=False)
+        self.policy_net = policy_net.model
 
         pi.step(3)
 
@@ -371,7 +371,7 @@ class GraspAgent():
         self.target_object_mask=background_class.detach() <= 0.5
 
         '''value net output'''
-        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value = self.value_net(rgb_torch,
+        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value = self.policy_net(rgb_torch,
                                                                                                              depth_features,
                                                                                                              gripper_pose,
                                                                                                              suction_direction,self.target_object_mask)

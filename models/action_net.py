@@ -16,6 +16,8 @@ use_bn=False
 use_in=True
 action_module_key='action_net'
 
+
+
 def random_approach_tensor(size):
     # random_tensor = torch.rand_like(approach)
     random_tensor = torch.rand(size=(size,3),device='cuda')
@@ -46,15 +48,15 @@ class GripperPartSampler(nn.Module):
         # self.decoder_=nn.Sequential(
         #     nn.Linear(64, 32, bias=False),
         #     nn.LayerNorm([32]),
-        #     nn.ReLU(),
+        #     nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         #     nn.Linear(32, 16,bias=False),
         #     nn.LayerNorm([16]),
-        #     nn.ReLU(),
+        #     nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         #     nn.Linear(16, 7),
         # ).to('cuda')
 
-        self.decoder=self_att_res_mlp_LN(in_c1=64,out_c=7).to('cuda')
-        self.residual_=att_res_mlp_LN(in_c1=64, in_c2=7, out_c=7).to('cuda')
+        self.decoder=self_att_res_mlp_LN(in_c1=64,out_c=7,relu_negative_slope=0.).to('cuda')
+        self.residual_=att_res_mlp_LN(in_c1=64, in_c2=7, out_c=7,relu_negative_slope=0.).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
@@ -83,10 +85,10 @@ class SuctionPartSampler(nn.Module):
         self.decoder= nn.Sequential(
             nn.Linear(64, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.) ,
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.) ,
             nn.Linear(16, 3),
         ).to('cuda')
     def forward(self, representation_2d ):
@@ -108,13 +110,13 @@ class ActionNet(nn.Module):
         self.gripper_sampler=GripperPartSampler()
         self.suction_sampler=SuctionPartSampler()
 
-        self.gripper_collision = att_res_mlp_LN(in_c1=64, in_c2=7, out_c=1).to('cuda')
+        self.gripper_collision = att_res_mlp_LN(in_c1=64, in_c2=7, out_c=1,relu_negative_slope=0.).to('cuda')
 
-        self.suction_quality = att_res_mlp_LN(in_c1=64, in_c2=3, out_c=1).to('cuda')
+        self.suction_quality = att_res_mlp_LN(in_c1=64, in_c2=3, out_c=1,relu_negative_slope=0.).to('cuda')
 
-        self.shift_affordance = att_res_mlp_LN(in_c1=64, in_c2=5, out_c=1).to('cuda')
+        self.shift_affordance = att_res_mlp_LN(in_c1=64, in_c2=5, out_c=1,relu_negative_slope=0.).to('cuda')
 
-        self.background_detector=att_res_mlp_LN(in_c1=64, in_c2=2, out_c=1).to('cuda')
+        self.background_detector=att_res_mlp_LN(in_c1=64, in_c2=2, out_c=1,relu_negative_slope=0.).to('cuda')
 
         self.sigmoid=nn.Sigmoid()
 
@@ -124,7 +126,7 @@ class ActionNet(nn.Module):
 
         '''backbone'''
         features = self.back_bone(depth)
-        depth_features=features.detach().clone()
+        # depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
         if detach_backbone: features=features.detach()
         # view_features(features)
@@ -136,7 +138,6 @@ class ActionNet(nn.Module):
             max_=features.max()
             if max_>100:
                 print(Fore.RED,f'Warning: Res U net outputs high values up to {max_}',Fore.RESET)
-
 
         '''Spatial data'''
         if self.spatial_encoding.shape[0] != depth.shape[0]:
@@ -179,15 +180,15 @@ class ActionNet(nn.Module):
         shift_affordance_classifier = reshape_for_layer_norm(shift_affordance_classifier, camera=camera, reverse=True)
         background_class=reshape_for_layer_norm(background_class, camera=camera, reverse=True)
 
-        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,background_class,depth_features
+        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,background_class,features
 
 class Critic(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
-        self.att_block1= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
-        self.att_block2= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
-        self.att_block3= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1).to('cuda')
+        self.back_bone = res_unet(in_c=1, Batch_norm=use_bn, Instance_norm=use_in,relu_negative_slope=0.01).to('cuda')
+        self.att_block= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1,relu_negative_slope=0.01).to('cuda')
+        # self.att_block2= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1,relu_negative_slope=0.2).to('cuda')
+        # self.att_block3= att_res_mlp_LN(in_c1=64,in_c2=7, out_c=1,relu_negative_slope=0.2).to('cuda')
 
     def forward(self, depth,pose):
         '''input standardization'''
@@ -200,7 +201,7 @@ class Critic(nn.Module):
 
         # view_features(features_2d)
         '''decode'''
-        output_2d = self.att_block1(features_2d,pose_2d)*self.att_block2(features_2d,pose_2d)+self.att_block3(features_2d,pose_2d)
+        output_2d = self.att_block(features_2d,pose_2d)
 
         output = reshape_for_layer_norm(output_2d, camera=camera, reverse=True)
 

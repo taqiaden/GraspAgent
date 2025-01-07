@@ -1,7 +1,6 @@
 # from models.spatial_encoder import depth_xy_spatial_data
 # import numpy as np
 # import open3d as o3d
-#
 # from records.training_satatistics import TrainingTracker
 import numpy as np
 import torch
@@ -17,7 +16,6 @@ if __name__ == "__main__":
         x1=min(a*b,a*c)
         x2=a*min(b,c)
         print(x1==x2)
-
 
         x=x*(1-a)+a
     print(x)

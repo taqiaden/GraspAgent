@@ -17,14 +17,14 @@ from lib.dataset_utils import online_data
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet
-from models.value_net import ValueNet
+from models.policy_net import ValueNet
 from registration import camera
 from training.action_lr import module_key as action_module_key
 from visualiztion import view_score2
 
 instances_per_sample=1
 
-module_key='value_net'
+module_key='policy_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 normal_weight = 10
@@ -43,7 +43,7 @@ class TrainValueNet:
         self.size=None
 
         '''model wrapper'''
-        self.value_net=self.value_model_wrapper()
+        self.policy_net=self.value_model_wrapper()
         self.action_net=self.action_model_wrapper()
         self.data_loader=self.prepare_data_loader()
 
@@ -66,9 +66,9 @@ class TrainValueNet:
 
     def value_model_wrapper(self):
         '''load  models'''
-        value_net = ModelWrapper(model=ValueNet(),module_key=module_key)
-        value_net.ini_model(train=True)
-        return value_net
+        policy_net = ModelWrapper(model=PolicyNet(),module_key=module_key)
+        policy_net.ini_model(train=True)
+        return policy_net
 
     def action_model_wrapper(self):
         '''load  models'''
@@ -90,7 +90,7 @@ class TrainValueNet:
             b = depth.shape[0]
 
             '''zero grad'''
-            self.value_net.model.zero_grad()
+            self.policy_net.model.zero_grad()
 
             '''generated grasps'''
             with torch.no_grad():
@@ -103,7 +103,7 @@ class TrainValueNet:
                     gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
                     suction_direction[j, :, pix_A, pix_B] = normal[j]
 
-                griper_grasp_score,suction_grasp_score=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction)
+                griper_grasp_score,suction_grasp_score=self.policy_net.model(random_rgb,depth_features,gripper_pose,suction_direction)
 
             '''accumulate loss'''
             for j in range(b):
@@ -125,12 +125,4 @@ class TrainValueNet:
         pi.end()
 
 if __name__ == "__main__":
-    train_value_net = TrainValueNet()
-    train_value_net.begin()
-    for i in range(10000):
-        try:
-            cuda_memory_report()
-            train_value_net=TrainValueNet()
-            train_value_net.begin()
-        except Exception as error_message:
-            print(error_message)
+ pass

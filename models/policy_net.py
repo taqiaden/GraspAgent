@@ -10,21 +10,21 @@ from registration import camera
 use_bn=False
 use_in=True
 
-value_module_key='value_net'
+value_module_key='policy_net'
 
 
 class RGBDRepresentation(nn.Module):
-    def __init__(self):
+    def __init__(self,relu_negative_slope=0.):
         super().__init__()
         self.depth_mlp = nn.Sequential(
             nn.Linear(64, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         ).to('cuda')
         self.rgb_mlp = nn.Sequential(
             nn.Linear(64, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         ).to('cuda')
     def forward(self, rgb_features,depth_features ):
         rgb_features=self.rgb_mlp(rgb_features)
@@ -43,12 +43,12 @@ class AbstractQualityRegressor(nn.Module):
         return output_2d
 
 class QValue(nn.Module):
-    def __init__(self):
+    def __init__(self,relu_negative_slope=0.):
         super().__init__()
-        self.res = res_block_mlp_LN(in_c=64, medium_c=32, out_c=16, activation=nn.ReLU()).to('cuda')
+        self.res = res_block_mlp_LN(in_c=64, medium_c=32, out_c=16).to('cuda')
         self.decoder = nn.Sequential(
             nn.LayerNorm(16),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(16, 4),
         ).to('cuda')
     def forward(self, features ):

@@ -6,13 +6,13 @@ from lib.models_utils import number_of_parameters
 
 
 class batch_norm_relu(nn.Module):
-    def __init__(self, in_c,Batch_norm=True,Instance_norm=False):
+    def __init__(self, in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.):
         super().__init__()
         self.batch_norm=Batch_norm
         self.instance_norm=Instance_norm
         self.Bn = nn.BatchNorm2d(in_c)
         self.In = nn.InstanceNorm2d(in_c)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU()
 
     def forward(self, inputs):
         x=inputs
@@ -24,12 +24,12 @@ class batch_norm_relu(nn.Module):
         return x
 
 class residual_block(nn.Module):
-    def __init__(self, in_c, out_c, stride=1,Batch_norm=True,Instance_norm=False):
+    def __init__(self, in_c, out_c, stride=1,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.):
         super().__init__()
         """ Convolutional layer """
-        self.b1 = batch_norm_relu(in_c,Batch_norm,Instance_norm)
+        self.b1 = batch_norm_relu(in_c,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
         self.c1 = nn.Conv2d(in_c, out_c, kernel_size=3, padding=1, stride=stride)
-        self.b2 = batch_norm_relu(out_c,Batch_norm,Instance_norm)
+        self.b2 = batch_norm_relu(out_c,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
         self.c2 = nn.Conv2d(out_c, out_c, kernel_size=3, padding=1, stride=1)
 
         """ Shortcut Connection (Identity Mapping) """
@@ -47,11 +47,11 @@ class residual_block(nn.Module):
 # wget https://repo.continuum.io/archive/Anaconda3-5.3.1-Linux-x86_64.sh
 # bash archive/Anaconda3-5.3.1-Linux-x86_64.sh -b -p ~/anaconda
 class decoder_block(nn.Module):
-    def __init__(self, in_c, out_c,Batch_norm=True,Instance_norm=False):
+    def __init__(self, in_c, out_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.):
         super().__init__()
 
         self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.r = residual_block(in_c+out_c, out_c,Batch_norm=Batch_norm,Instance_norm=Instance_norm)
+        self.r = residual_block(in_c+out_c, out_c,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope)
 
     def forward(self, inputs, skip):
         x = self.upsample(inputs)
@@ -60,26 +60,26 @@ class decoder_block(nn.Module):
         return x
 
 class res_unet(nn.Module):
-    def __init__(self,in_c,Batch_norm=True,Instance_norm=False):
+    def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0):
         super().__init__()
 
         """ Encoder 1 """
         self.c11 = nn.Conv2d(in_c, 64, kernel_size=3, padding=1)
-        self.br1 = batch_norm_relu(64,Batch_norm,Instance_norm)
+        self.br1 = batch_norm_relu(64,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
         self.c12 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
         self.c13 = nn.Conv2d(in_c, 64, kernel_size=1, padding=0)
 
         """ Encoder 2 and 3 """
-        self.r2 = residual_block(64, 128, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm)
-        self.r3 = residual_block(128, 256, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm)
+        self.r2 = residual_block(64, 128, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope)
+        self.r3 = residual_block(128, 256, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope)
 
         """ Bridge """
-        self.r4 = residual_block(256, 512, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm)
+        self.r4 = residual_block(256, 512, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope)
 
         """ Decoder """
-        self.d1 = decoder_block(512, 256,Batch_norm,Instance_norm)
-        self.d2 = decoder_block(256, 128,Batch_norm,Instance_norm)
-        self.d3 = decoder_block(128, 64,Batch_norm,Instance_norm)
+        self.d1 = decoder_block(512, 256,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
+        self.d2 = decoder_block(256, 128,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
+        self.d3 = decoder_block(128, 64,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope)
 
         """ Output """
         # self.output = nn.Conv2d(64, 1, kernel_size=1, padding=0)

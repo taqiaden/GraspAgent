@@ -16,7 +16,7 @@ from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, action_module_key
-from models.value_net import ValueNet, value_module_key
+from models.policy_net import ValueNet, value_module_key
 from records.training_satatistics import TrainingTracker
 
 # from action_lr import module_key as action_module_key
@@ -43,7 +43,7 @@ class TrainValueNet:
         self.learning_rate=learning_rate
 
         '''model wrapper'''
-        self.value_net=self.value_model_wrapper()
+        self.policy_net=self.policy_model_wrapper()
         self.action_net=self.action_model_wrapper()
         self.data_loader=self.prepare_data_loader()
 
@@ -77,12 +77,12 @@ class TrainValueNet:
 
     def value_model_wrapper(self):
         '''load  models'''
-        value_net = ModelWrapper(model=ValueNet(),module_key=value_module_key)
-        value_net.ini_model(train=True)
+        policy_net = ModelWrapper(model=PolicyNet(),module_key=value_module_key)
+        policy_net.ini_model(train=True)
 
         '''optimizers'''
-        value_net.ini_adam_optimizer(learning_rate=self.learning_rate)
-        return value_net
+        policy_net.ini_adam_optimizer(learning_rate=self.learning_rate)
+        return policy_net
 
     def action_model_wrapper(self):
         '''load  models'''
@@ -104,7 +104,7 @@ class TrainValueNet:
             b = depth.shape[0]
 
             '''zero grad'''
-            self.value_net.model.zero_grad()
+            self.policy_net.model.zero_grad()
 
             '''generated grasps'''
             with torch.no_grad():
@@ -118,7 +118,7 @@ class TrainValueNet:
                     gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
                     suction_direction[j, :, pix_A, pix_B] = normal[j]
 
-            griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.value_net.model(random_rgb,depth_features,gripper_pose,suction_direction,target_object_mask)
+            griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.policy_net.model(random_rgb,depth_features,gripper_pose,suction_direction,target_object_mask)
 
             '''learning objectives'''
             gripper_grasp_loss = torch.tensor([0.],device=griper_grasp_score.device)
@@ -182,7 +182,7 @@ class TrainValueNet:
 
             loss=loss+decay_loss+q_value_loss
             loss.backward()
-            self.value_net.optimizer.step()
+            self.policy_net.optimizer.step()
 
             self.swiped_samples += b
             if i%100==0 and i!=0:
@@ -197,12 +197,12 @@ class TrainValueNet:
         self.clear()
 
     def view(self):
-        self.gripper_grasp_statistics.print(self.swiped_samples)
-        self.suction_grasp_statistics.print(self.swiped_samples)
+        self.gripper_grasp_statistics.print()
+        self.suction_grasp_statistics.print()
 
     def export_check_points(self):
-        self.value_net.export_model()
-        self.value_net.export_optimizer()
+        self.policy_net.export_model()
+        self.policy_net.export_optimizer()
 
         self.gripper_grasp_statistics.save()
         self.suction_grasp_statistics.save()
@@ -213,12 +213,12 @@ class TrainValueNet:
 
 if __name__ == "__main__":
     # with torch.no_grad():
-    train_value_net = TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-5)
-    train_value_net.begin()
+    train_policy_net = TrainPolicyNet(batch_size=2, n_samples=None, learning_rate=5e-5)
+    train_policy_net.begin()
     for i in range(10000):
         try:
             cuda_memory_report()
-            train_value_net=TrainValueNet(batch_size=2, n_samples=None, learning_rate=5e-5)
-            train_value_net.begin()
+            train_policy_net=TrainPolicyNet(batch_size=2, n_samples=None, learning_rate=5e-5)
+            train_policy_net.begin()
         except Exception as error_message:
             print(error_message)

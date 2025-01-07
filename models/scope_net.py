@@ -12,16 +12,16 @@ def scope_standardization(data):
     return s_data
 
 class scope_net_vanilla(nn.Module):
-    def __init__(self,in_size):
+    def __init__(self,in_size,relu_negative_slope=0.):
         super().__init__()
 
         self.encoder=nn.Sequential(
             nn.Linear(in_size, 64, bias=False),
             nn.LayerNorm(64),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(64, 128,bias=False),
             nn.LayerNorm(128),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(128, 64,bias=False),
         ).to('cuda')
 
@@ -29,10 +29,10 @@ class scope_net_vanilla(nn.Module):
 
         self.decoder = nn.Sequential(
             nn.LayerNorm(64),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(64, 16, bias=False),
             nn.LayerNorm(16),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             # nn.Dropout(0.5),
             nn.Linear(16, 1),
         ).to('cuda')
