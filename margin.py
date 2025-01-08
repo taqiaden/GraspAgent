@@ -7,15 +7,10 @@ import torch
 import torch.nn.functional as F
 
 if __name__ == "__main__":
-    x=0
-    a=0.001
-    for i in range(1000):
-        a=-np.random.rand()
-        b=np.random.rand()
-        c=np.random.rand()
-        x1=min(a*b,a*c)
-        x2=a*min(b,c)
-        print(x1==x2)
-
-        x=x*(1-a)+a
-    print(x)
+    x=torch.randn(2,2,3)
+    print(F.softmax(x[0].reshape(-1)))
+    y=x.view(2,-1)
+    y=F.softmax(y)
+    # print(F.softmax(x,dim=-1))
+    x=y.reshape(x.shape)
+    print(x[0])

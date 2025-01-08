@@ -27,6 +27,7 @@ from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
+from training.policy_lr import PPOLearning
 from visualiztion import view_npy_open3d, vis_scene, get_arrow
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
@@ -206,7 +207,6 @@ def multi_mask_view(pc, scores_list, pivot=0.5):
 
     view_npy_open3d(cat_pc,color=colors)
 
-
 class GraspAgent():
     def __init__(self):
         '''models'''
@@ -219,6 +219,8 @@ class GraspAgent():
         self.point_clouds = None
         self.depth=None
         self.rgb=None
+
+        self.policy_learning=PPOLearning()
 
         '''dense records'''
         self.gripper_poses_5=None

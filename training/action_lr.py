@@ -145,17 +145,19 @@ class TrainActionNet:
             # else:
             #     x = prediction_ - label_
             # c_loss+=smooth_clamp(x)
+            alpha=collision_threshold
+            beta=0.15-firmness_threshold**2
 
-            collision_loss += (torch.clamp(prediction_ - label_ +collision_threshold**2, 0) * bad_state_grasp)  # *w
+            collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
 
-            firmness_loss += torch.clamp((prediction_ - label_+0.15-firmness_threshold**2), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
-            firmness_loss += torch.clamp((label_ - prediction_+0.15-firmness_threshold**2 ), 0) * (1 - bad_state_grasp) * firmness_state
+            firmness_loss += torch.clamp((prediction_ - label_+beta), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
+            firmness_loss += torch.clamp((label_ - prediction_+beta), 0) * (1 - bad_state_grasp) * firmness_state
 
             # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
             # print(f'p={prediction_}, l={label_}, col={collision_state_}, threshold={collision_threshold}, loss={(collision_loss + firmness_loss )*(collision_threshold**2)}')
 
-        c_loss = (collision_loss + firmness_loss )#*(collision_threshold)#+ curriculum_loss
+        c_loss = (collision_loss + firmness_loss ) * collision_threshold  #+ curriculum_loss
 
         # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
 
@@ -207,6 +209,7 @@ class TrainActionNet:
                 size = depth.shape[0] * depth.shape[1] * depth.shape[2] * depth.shape[3]
                 random_approach = random_approach_tensor(size)
                 gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.0,random_tensor=random_approach,refine_grasp=i%2)
+
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
                 for j in range(b):
@@ -239,7 +242,6 @@ class TrainActionNet:
             '''zero grad'''
             self.gan.critic.zero_grad()
             self.gan.generator.zero_grad()
-
             self.swiped_samples+=b
 
             pcs=[]
@@ -255,7 +257,6 @@ class TrainActionNet:
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
                 depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone,refine_grasp=i%2)
-
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.get_samplers_loss(self.gan, depth, b,pixel_index,
                                               collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
@@ -288,7 +289,6 @@ class TrainActionNet:
                 decay_loss += (decay_(gripper_head_predictions) + decay_(suction_head_predictions) + decay_(
                     shift_head_predictions))/b
 
-
                 '''limits'''
                 with torch.no_grad():
                     normals = suction_direction[j].permute(1, 2, 0)[mask].detach().cpu().numpy()
@@ -300,8 +300,10 @@ class TrainActionNet:
                     shift_head_max_score = torch.max(shift_affordance_classifier).item()
                     shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
 
+
                 '''background detection head'''
                 bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
+
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
                     background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=1.5,negative_weight=1)

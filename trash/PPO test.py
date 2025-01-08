@@ -169,8 +169,10 @@ class Agent():
         state = torch.tensor([state], dtype=torch.float).to(self.actor.device)
 
         dist = self.actor(state)
+
         ## sample the output action from a categorical distribution of predicted actions
         action = dist.sample()
+
         probs = torch.squeeze(dist.log_prob(action)).item()
         action = torch.squeeze(action).item()
 
