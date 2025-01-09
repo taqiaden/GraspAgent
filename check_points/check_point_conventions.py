@@ -48,6 +48,7 @@ class ModelWrapper():
         file_name = self.optimizer_name if file_index is None else str(file_index) + self.optimizer_name
         export_optm(self.optimizer, file_name)
 
+
 class GANWrapper():
     def __init__(self,module_key,generator,critic=None):
         self.module_key=module_key

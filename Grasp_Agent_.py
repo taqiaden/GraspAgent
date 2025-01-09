@@ -5,6 +5,9 @@ import torch
 import trimesh
 from colorama import Fore
 import open3d as o3d
+from torch.distributions import Categorical
+from torchrl.modules import MaskedCategorical
+
 from Configurations.ENV_boundaries import bin_center
 from Configurations.config import distance_scope, gripper_width_during_shift
 from Configurations.run_config import simulation_mode, \
@@ -22,12 +25,12 @@ from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
-from models.policy_net import ValueNet, value_module_key
+from models.policy_net import PolicyNet, policy_module_key
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
-from training.policy_lr import PPOLearning
+from training.policy_lr import PPOLearning, PPOMemory
 from visualiztion import view_npy_open3d, vis_scene, get_arrow
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
@@ -52,6 +55,9 @@ class Action():
             self.is_grasp = action_index <= 1
             self.use_gripper_arm = ((action_index == 0) or (action_index == 2))
             self.use_suction_arm = ((action_index == 1) or (action_index == 3))
+
+        self.value=None
+        self.prob=None
 
         self.target_point=None
         
@@ -220,9 +226,11 @@ class GraspAgent():
         self.depth=None
         self.rgb=None
 
-        self.policy_learning=PPOLearning()
+        self.policy_learning=PPOLearning(model=self.policy_net)
+        self.online_memory=PPOMemory()
 
         '''dense records'''
+        self.quality_masks=None
         self.gripper_poses_5=None
         self.gripper_poses_7=None
         self.gripper_grasp_mask=None
@@ -232,6 +240,7 @@ class GraspAgent():
         self.voxel_pc=None
         self.normals=None
         self.q_value=None
+        self.action_probs=None
         self.biased_q_value=None
         self.shift_end_points=None
         self.valid_actions_mask=None
@@ -240,10 +249,13 @@ class GraspAgent():
         self.first_action_mask=None
         self.target_object_mask=None
 
+
+
         '''track task sequence'''
         self.task_episode=0
 
     def clear(self):
+        self.quality_masks=None
         self.gripper_poses_5=None
         self.gripper_poses_7=None
         self.gripper_grasp_mask=None
@@ -253,6 +265,7 @@ class GraspAgent():
         self.voxel_pc=None
         self.normals=None
         self.q_value=None
+        self.action_probs=None
         self.biased_q_value=None
         self.shift_end_points=None
         self.valid_actions_mask=None
@@ -283,7 +296,7 @@ class GraspAgent():
 
         pi.step(2)
 
-        policy_net = ModelWrapper(model=ValueNet(), module_key=value_module_key)
+        policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
         policy_net.ini_model(train=False)
         self.policy_net = policy_net.model
 
@@ -358,6 +371,51 @@ class GraspAgent():
         self.valid_actions_mask[point_index,action_index]=0
         return point_index,action_index
 
+    def next_action2(self, epsilon=0.0):
+        reshaped_props=self.action_probs.view(1,-1)
+        Categorical(probs=reshaped_props)
+        # MaskedCategorical(probs=reshaped_props,mask=)
+
+        masked_q_value=self.biased_q_value*self.valid_actions_mask
+
+        if np.random.rand()>epsilon:
+            flattened_index=torch.argmax(masked_q_value).item()
+            point_index = math.floor(flattened_index / 4)
+            action_index = flattened_index - int(4 * point_index)
+
+            max_val=masked_q_value[point_index,action_index]
+            if max_val==0: return None,None
+
+        else:
+            available_indexes=torch.nonzero(masked_q_value)
+            if available_indexes.shape[0]==0: return None,None
+            random_pick=np.random.random_integers(0,available_indexes.shape[0]-1)
+            point_index = available_indexes[random_pick][0]
+            action_index = available_indexes[random_pick][1]
+
+        self.valid_actions_mask[point_index,action_index]=0
+        return point_index,action_index
+
+    def prepare_quality_masks(self,mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
+                              background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope):
+        gripper_collision_mask=suction_seal_classifier.detach() > 0.5
+        suction_seal_mask=griper_collision_classifier.detach() > 0.5
+        shift_appeal_mask=shift_appealing.detach() > 0.5
+        self.target_object_mask=background_class.detach() <= 0.5
+        gripper_grasp_mask=torch.zeros_like(shift_appeal_mask)
+        gripper_grasp_mask[:,:,mask]=gripper_grasp_scope.detach() >0.5
+        suction_grasp_mask=torch.zeros_like(shift_appeal_mask)
+        suction_grasp_mask[:,:,mask]=suction_grasp_scope.detach() >0.5
+        gripper_shift_mask=torch.zeros_like(shift_appeal_mask)
+        gripper_shift_mask[:,:,mask]=gripper_shift_scope.detach() >0.5
+        suction_shift_mask=torch.zeros_like(shift_appeal_mask)
+        suction_shift_mask[:,:,mask]=suction_shift_scope.detach() >0.5
+
+        quality_masks=torch.cat([gripper_collision_mask,suction_seal_mask,shift_appeal_mask,gripper_grasp_mask,
+                                 suction_grasp_mask,gripper_shift_mask,suction_shift_mask,self.target_object_mask],dim=1)
+
+        return quality_masks
+
     def model_inference(self,depth,rgb):
         pr.title('model inference')
         self.depth=depth
@@ -369,34 +427,37 @@ class GraspAgent():
         gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
             , background_class, depth_features = self.action_net(depth_torch.clone(),clip=True)
 
-        '''target mask'''
-        self.target_object_mask=background_class.detach() <= 0.5
-
-        '''value net output'''
-        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value = self.policy_net(rgb_torch,
-                                                                                                             depth_features,
-                                                                                                             gripper_pose,
-                                                                                                             suction_direction,self.target_object_mask)
-
         '''depth to point clouds'''
-        self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
-        self.voxel_pc = transform_to_camera_frame(self.voxel_pc, reverse=True)
-
-        '''pixels to points'''
+        voxel_pc_, mask = depth_to_point_clouds(self.depth, camera)
+        self.voxel_pc = transform_to_camera_frame(voxel_pc_, reverse=True)
+        voxel_pc_tensor = torch.from_numpy(self.voxel_pc).to('cuda').float()
         self.normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
         poses = gripper_pose.squeeze().permute(1, 2, 0)[mask]
+
+        '''grasp reachability'''
+        suction_grasp_scope = self.get_suction_grasp_reachability(voxel_pc_tensor,self.normals)
+        gripper_grasp_scope=self.get_gripper_grasp_reachability(voxel_pc_tensor,poses)
+        '''shift reachability'''
+        gripper_shift_scope=self.get_gripper_shift_reachability( voxel_pc_tensor,self.normals)
+        suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
+
+        '''quality masks'''
+        self.quality_masks=self.prepare_quality_masks(mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
+                              background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope)
+
+        '''policy net output'''
+        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value, action_probs = self.policy_net(rgb_torch,
+                                                                                                             gripper_pose,
+                                                                                                             suction_direction,self.quality_masks)
+
+        '''reshape'''
         griper_collision_classifier=griper_collision_classifier.squeeze()[mask]
         griper_grasp_score=griper_grasp_score.squeeze()[mask]
         suction_seal_classifier=suction_seal_classifier.squeeze()[mask]
         suction_grasp_score=suction_grasp_score.squeeze()[mask]
         background_class=background_class.squeeze()[mask]
         shift_appealing=shift_appealing.squeeze()[mask]
-        positions = torch.from_numpy(self.voxel_pc).to('cuda').float()
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
-
-        '''grasp reachability'''
-        suction_grasp_scope = self.get_suction_grasp_reachability(positions,self.normals)
-        gripper_grasp_scope=self.get_gripper_grasp_reachability(positions,poses)
 
         '''grasp actions'''
         self.gripper_grasp_mask=((background_class<0.5)*(gripper_grasp_scope>0.5)
@@ -406,9 +467,6 @@ class GraspAgent():
                                *(suction_seal_classifier>0.5)
                                *(suction_grasp_score*suction_factor>0.5)* int(use_suction)* int(activate_grasp))>0.5
 
-        '''shift reachability'''
-        gripper_shift_scope=self.get_gripper_shift_reachability( positions,self.normals)
-        suction_shift_scope=self.get_suction_shift_reachability(positions,self.normals)
 
         '''shift actions'''
         self.gripper_shift_mask=((shift_appealing>0.5)*(gripper_shift_scope>0.5)* int(use_gripper)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
@@ -421,6 +479,8 @@ class GraspAgent():
         '''initiate random policy'''
         # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
         self.q_value=q_value.squeeze().permute(1,2,0)[mask]
+        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask]
+
         self.biased_q_value=self.q_value.clone()
         min_q_value=torch.min(self.biased_q_value).item()
         self.biased_q_value+=(1-min(min_q_value,0.))
@@ -685,4 +745,5 @@ class GraspAgent():
 # the gripper sampler first three parameters are approach[0] and approach [1] and -1* approach[2]
 # the suction sampler outputs the normal direction
 # T_0 refers to a gripper head transformation matrix with zero penetration while T_d embeds distance term
+# for any sequence we will always give the gripper the first index followed by the suction, e.g. if gripper grasp score locate at the (i) channel then the suction is located at (i+1) channel
 

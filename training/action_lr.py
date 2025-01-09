@@ -109,7 +109,7 @@ class TrainActionNet:
         return gan
 
     def step_critic_training(self,gan, generated_grasps, batch_size, pixel_index, label_generated_grasps, depth,
-                     collision_state_list, out_of_scope_list, firmness_state_list,collision_threshold,firmness_threshold):
+                     collision_state_list, out_of_scope_list, firmness_state_list,alpha,beta):
 
         '''concatenation'''
         with torch.no_grad():
@@ -118,6 +118,8 @@ class TrainActionNet:
 
         '''get predictions'''
         critic_score = gan.critic(depth_cat, generated_grasps_cat)
+
+
 
         '''accumulate loss'''
         collision_loss = 0.
@@ -145,8 +147,7 @@ class TrainActionNet:
             # else:
             #     x = prediction_ - label_
             # c_loss+=smooth_clamp(x)
-            alpha=collision_threshold
-            beta=0.15-firmness_threshold**2
+
 
             collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
 
@@ -157,7 +158,7 @@ class TrainActionNet:
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
             # print(f'p={prediction_}, l={label_}, col={collision_state_}, threshold={collision_threshold}, loss={(collision_loss + firmness_loss )*(collision_threshold**2)}')
 
-        c_loss = (collision_loss + firmness_loss ) * collision_threshold  #+ curriculum_loss
+        c_loss = (collision_loss + firmness_loss ) * alpha  #+ curriculum_loss
 
         # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
 
@@ -234,10 +235,12 @@ class TrainActionNet:
             self.gan.generator.zero_grad()
 
             '''train critic'''
-            t=max(self.moving_collision_rate.val,self.moving_out_of_scope.val)
+            alpha=self.moving_collision_rate.val
+            beta = 0.15 - self.moving_firmness.val +self.moving_out_of_scope.val
+
             l_c ,critic_score_labels= self.step_critic_training(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
-                                           collision_state_list, out_of_scope_list, firmness_state_list,collision_threshold=t,firmness_threshold=self.moving_firmness.val)
+                                           collision_state_list, out_of_scope_list, firmness_state_list,alpha=alpha,beta=beta)
             self.critic_statistics.loss=l_c/b
             '''zero grad'''
             self.gan.critic.zero_grad()
@@ -302,7 +305,11 @@ class TrainActionNet:
 
 
                 '''background detection head'''
-                bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
+                try:
+                    bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[j])
+                except Exception as error_message:
+                    print(file_ids[j])
+                    print(error_message)
 
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()

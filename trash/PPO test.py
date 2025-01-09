@@ -169,7 +169,6 @@ class Agent():
         state = torch.tensor([state], dtype=torch.float).to(self.actor.device)
 
         dist = self.actor(state)
-
         ## sample the output action from a categorical distribution of predicted actions
         action = dist.sample()
 
@@ -286,11 +285,11 @@ score_history = []
 learn_iters = 0
 avg_score = 0
 n_steps = 0
-for i in range(n_games):
+for i in range(n_games): # episodes
     current_state, info = env.reset()
     terminated, truncated = False, False
     done = False
-    score = 0
+    score = 0 # cumulative reward
     while not done:
         action, prob, val = agent.choose_action(current_state)
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -298,12 +297,15 @@ for i in range(n_games):
         n_steps += 1
         score += reward
         agent.store_data(current_state, action, prob, val, reward, done)
-        if n_steps % N == 0:
+        if n_steps % N == 0: ## learn every N action step
             agent.learn()
             learn_iters += 1
         current_state = next_state
     score_history.append(score)
     avg_score = np.mean(score_history[-100:])
+    # k=1/(1+((avg_score**2)/1280))
+    # agent.policy_clip=0.05+0.45*(k)
+    if avg_score>160:exit()
     if avg_score > best_score:
         best_score = avg_score
         agent.save_models()
@@ -322,7 +324,6 @@ env = gym.make("CartPole-v1", render_mode="rgb_array")
 
 state_dim = 4
 action_dim = env.action_space.n
-
 
 class ActorPredNwk(nn.Module):
     def __init__(self, input_dim, out_dim,

@@ -1,10 +1,9 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
 
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import  res_block_mlp_LN, att_res_mlp_LN
+from models.decoders import   att_res_mlp_LN
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera
@@ -12,7 +11,7 @@ from registration import camera
 use_bn=False
 use_in=True
 
-value_module_key='policy_net'
+policy_module_key='policy_net'
 
 
 class QualityRegressor(nn.Module):
@@ -62,9 +61,9 @@ class PolicyNet(nn.Module):
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-    def forward(self, rgb,gripper_pose,suction_direction,masks):
+    def forward(self, rgb,gripper_pose,suction_direction,quality_masks):
         '''backbone'''
-        input_channels=torch.cat([rgb,masks],dim=1)
+        input_channels=torch.cat([rgb,quality_masks],dim=1)
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 
@@ -102,10 +101,9 @@ class PolicyNet(nn.Module):
         action_logits = reshape_for_layer_norm(action_logits, camera=camera, reverse=True)
 
         '''Categorical policy'''
-        policy_view=action_logits.view(action_logits.shape[0],-1)
-        action_probs=F.softmax(policy_view)
+        policy_reshaped=action_logits.reshape(action_logits.shape[0],-1)
+        action_probs=F.softmax(policy_reshaped)
         action_probs=action_probs.reshape(action_logits.shape)
-        policy_dist = Categorical(action_probs)
 
-        return griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_values,policy_dist
+        return griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_values,action_probs
 

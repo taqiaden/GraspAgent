@@ -5,12 +5,45 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
+from torchrl.modules import MaskedCategorical
+
+
+def get_index(flat_index, ori_size):
+    res = torch.zeros(len(ori_size), dtype=torch.int)
+    for i in range(len(ori_size)-1, -1, -1):
+        j = flat_index % ori_size[i]
+        flat_index = flat_index // ori_size[i]
+        res[i] = j
+    return res
+
 
 if __name__ == "__main__":
-    x=torch.randn(2,2,3)
-    print(F.softmax(x[0].reshape(-1)))
-    y=x.view(2,-1)
-    y=F.softmax(y)
-    # print(F.softmax(x,dim=-1))
-    x=y.reshape(x.shape)
-    print(x[0])
+    x=torch.randn(100,4)
+    reshaped_x=x.reshape(-1)
+
+    # x=F.softmax(x,dim=-1)
+
+    dist=MaskedCategorical(probs=reshaped_x, mask=x>0.)
+    while True:
+        index = dist.sample()
+        orig_index=
+
+        print(x[index])
+    # ori_index=get_index(view_index,x.shape)
+
+    # print(x[ori_index[0],ori_index[1],ori_index[2],ori_index[3]])
+    # print(z[0,view_index])
+    #
+    # print(ori_index)
+    # print(view_index)
+    # x_index=
+
+
+
+
+
+
+
+    # probs = torch.squeeze(dist.log_prob(action)).item()
+
