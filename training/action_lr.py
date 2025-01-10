@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 from colorama import Fore
@@ -100,9 +102,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        gan.critic_adam_optimizer(learning_rate=self.learning_rate)
+        # gan.critic_adam_optimizer(learning_rate=self.learning_rate)
 
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
@@ -118,8 +120,6 @@ class TrainActionNet:
 
         '''get predictions'''
         critic_score = gan.critic(depth_cat, generated_grasps_cat)
-
-
 
         '''accumulate loss'''
         collision_loss = 0.
@@ -148,17 +148,18 @@ class TrainActionNet:
             #     x = prediction_ - label_
             # c_loss+=smooth_clamp(x)
 
-
             collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
 
-            firmness_loss += torch.clamp((prediction_ - label_+beta), 0) * (1 - bad_state_grasp) * (1 - firmness_state)
-            firmness_loss += torch.clamp((label_ - prediction_+beta), 0) * (1 - bad_state_grasp) * firmness_state
+            w=1.4+math.log(beta-0.6,10)
+
+            firmness_loss += torch.clamp((prediction_ - label_+beta), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * w
+            firmness_loss += torch.clamp((label_ - prediction_+beta), 0) * (1 - bad_state_grasp) * firmness_state * w
 
             # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
             # print(f'p={prediction_}, l={label_}, col={collision_state_}, threshold={collision_threshold}, loss={(collision_loss + firmness_loss )*(collision_threshold**2)}')
 
-        c_loss = (collision_loss + firmness_loss ) * alpha  #+ curriculum_loss
+        c_loss = ( collision_loss + firmness_loss ) * 100 * (alpha*beta)**2#+ curriculum_loss
 
         # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
 
@@ -235,13 +236,18 @@ class TrainActionNet:
             self.gan.generator.zero_grad()
 
             '''train critic'''
-            alpha=self.moving_collision_rate.val
-            beta = 0.15 - self.moving_firmness.val +self.moving_out_of_scope.val
+            alpha=self.moving_collision_rate.truncated_value+self.moving_out_of_scope.truncated_value
+            beta = 1-self.moving_firmness.truncated_value
+
 
             l_c ,critic_score_labels= self.step_critic_training(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
                                            collision_state_list, out_of_scope_list, firmness_state_list,alpha=alpha,beta=beta)
+
+            if i%5==0:print(f'c_loss={l_c}. alpha = {alpha}, beta = {beta}, firmness weight = {1.4+math.log(beta-0.6,10)}')
+
             self.critic_statistics.loss=l_c/b
+
             '''zero grad'''
             self.gan.critic.zero_grad()
             self.gan.generator.zero_grad()

@@ -241,7 +241,7 @@ class GraspAgent():
         self.normals=None
         self.q_value=None
         self.action_probs=None
-        self.biased_q_value=None
+        # self.biased_q_value=None
         self.shift_end_points=None
         self.valid_actions_mask=None
         self.n_grasps=0
@@ -266,7 +266,7 @@ class GraspAgent():
         self.normals=None
         self.q_value=None
         self.action_probs=None
-        self.biased_q_value=None
+        # self.biased_q_value=None
         self.shift_end_points=None
         self.valid_actions_mask=None
         self.n_grasps=0
@@ -467,7 +467,6 @@ class GraspAgent():
                                *(suction_seal_classifier>0.5)
                                *(suction_grasp_score*suction_factor>0.5)* int(use_suction)* int(activate_grasp))>0.5
 
-
         '''shift actions'''
         self.gripper_shift_mask=((shift_appealing>0.5)*(gripper_shift_scope>0.5)* int(use_gripper)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
         self.suction_shift_mask=((shift_appealing>0.5)*(suction_shift_scope>0.5)* int(use_suction)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
@@ -478,12 +477,12 @@ class GraspAgent():
 
         '''initiate random policy'''
         # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
-        self.q_value=q_value.squeeze().permute(1,2,0)[mask]
-        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask]
+        self.q_value=q_value.squeeze().permute(1,2,0)[mask].reshape(-1)
+        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask].reshape(-1)
 
-        self.biased_q_value=self.q_value.clone()
-        min_q_value=torch.min(self.biased_q_value).item()
-        self.biased_q_value+=(1-min(min_q_value,0.))
+        # self.biased_q_value=self.q_value.clone()
+        # min_q_value=torch.min(self.biased_q_value).item()
+        # self.biased_q_value+=(1-min(min_q_value,0.))
 
         self.valid_actions_mask=torch.zeros_like(self.q_value)
 

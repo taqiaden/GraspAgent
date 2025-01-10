@@ -80,8 +80,6 @@ class MovingRate():
         self.counter+=1
         self.truncated_value=self.f((self.truncated_value + self.moving_rate) / 2)
 
-
-
     def set_decay_rate(self):
         x=0.1*(1-0.0045)**self.counter
         self.decay_rate=max(x,0.001)

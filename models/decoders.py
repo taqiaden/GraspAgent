@@ -116,38 +116,45 @@ class self_att_res_mlp_LN(nn.Module):
     def __init__(self,in_c1,out_c,relu_negative_slope=0.0):
         super().__init__()
         self.key = nn.Sequential(
-            nn.Linear(in_c1, 32)
+            nn.Linear(in_c1, 32),
+            nn.LayerNorm([32]),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
+            nn.Linear(32, 16)
         ).to('cuda')
 
         self.value = nn.Sequential(
-            nn.Linear(in_c1, 32)
+            nn.Linear(in_c1, 32),
+            nn.LayerNorm([32]),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
+            nn.Linear(32, 16)
         ).to('cuda')
 
         self.query =  nn.Sequential(
-            nn.LayerNorm([in_c1]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(in_c1, 32),
+            nn.LayerNorm([32]),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
+            nn.Linear(32, 16)
         ).to('cuda')
 
         self.res=nn.Sequential(
-            nn.Linear(in_c1, 32,bias=False),
+            nn.Linear(in_c1, 32),
             nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
         ).to('cuda')
 
         self.att=nn.Sequential(
-            nn.LayerNorm([32]),
+            nn.LayerNorm([16]),
             nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         ).to('cuda')
 
         self.d = nn.Sequential(
-            nn.Linear(64, 48, bias=False),
-            nn.LayerNorm([48]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(48, 32,bias=False),
+            nn.Linear(48, 32, bias=False),
             nn.LayerNorm([32]),
             nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(32, out_c),
+            nn.Linear(32, 16,bias=False),
+            nn.LayerNorm([16]),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
+            nn.Linear(16, out_c),
         ).to('cuda')
 
     def forward(self, x):
