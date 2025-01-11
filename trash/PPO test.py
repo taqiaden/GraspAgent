@@ -231,12 +231,12 @@ class Agent():
                 prob_ratio = new_probs.exp() / old_probs.exp()
                 # prob_ratio = (new_probs - old_probs).exp()
                 weighted_probs = advantage_arr[batch] * prob_ratio
-                # weighted_clipped_probs = torch.clamp(prob_ratio, 1 - self.policy_clip,
-                #                                      1 + self.policy_clip) * advantage_arr[batch]
-                S_=(soft_square_pulse(prob_ratio,start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio)[0].item()
-                C_=torch.clamp(prob_ratio, 1 - self.policy_clip,1 + self.policy_clip)[0].item()
-                print(f'value= {prob_ratio[0].item()}, soft = {S_}, clipped={C_}')
-                weighted_clipped_probs = soft_square_pulse(prob_ratio.detach(),start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio * advantage_arr[batch]
+                weighted_clipped_probs = torch.clamp(prob_ratio, 1 - self.policy_clip,
+                                                     1 + self.policy_clip) * advantage_arr[batch]
+                # S_=(soft_square_pulse(prob_ratio,start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio)[0].item()
+                # C_=torch.clamp(prob_ratio, 1 - self.policy_clip,1 + self.policy_clip)[0].item()
+                # print(f'value= {prob_ratio[0].item()}, soft = {S_}, clipped={C_}')
+                # weighted_clipped_probs = soft_square_pulse(prob_ratio.detach(),start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio * advantage_arr[batch]
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
 
                 returns = advantage_arr[batch] + values[batch]

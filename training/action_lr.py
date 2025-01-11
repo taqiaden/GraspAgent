@@ -102,7 +102,7 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
         # gan.critic_adam_optimizer(learning_rate=self.learning_rate)
 
@@ -152,14 +152,14 @@ class TrainActionNet:
 
             w=1.4+math.log(beta-0.6,10)
 
-            firmness_loss += torch.clamp((prediction_ - label_+beta), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * w
-            firmness_loss += torch.clamp((label_ - prediction_+beta), 0) * (1 - bad_state_grasp) * firmness_state * w
+            firmness_loss += torch.clamp((prediction_ - label_+alpha), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * w
+            firmness_loss += torch.clamp((label_ - prediction_), 0) * (1 - bad_state_grasp) * firmness_state * w
 
             # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
             # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
-            # print(f'p={prediction_}, l={label_}, col={collision_state_}, threshold={collision_threshold}, loss={(collision_loss + firmness_loss )*(collision_threshold**2)}')
+            # if np.random.rand()>0.8: print(f'p={prediction_}, l={label_}, col={collision_state_} ')
 
-        c_loss = ( collision_loss + firmness_loss ) * 100 * (alpha*beta)**2#+ curriculum_loss
+        c_loss = ( collision_loss + firmness_loss )   * 10*(alpha*beta)**2#+ curriculum_loss
 
         # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
 
@@ -175,7 +175,7 @@ class TrainActionNet:
                         , gripper_pose, suction_direction, pcs, masks,background_class,critic_score_labels,threshold=0.001):
 
         '''Critic score of generated grasps'''
-        generated_critic_score = gan.critic(depth.clone(), gripper_pose)
+        generated_critic_score = gan.critic(depth.clone(), gripper_pose,detach_backbone=True)
 
         '''accumulate loss'''
         gripper_sampling_loss = torch.tensor(0.0, device=gripper_pose.device)
@@ -210,7 +210,7 @@ class TrainActionNet:
             with torch.no_grad():
                 size = depth.shape[0] * depth.shape[1] * depth.shape[2] * depth.shape[3]
                 random_approach = random_approach_tensor(size)
-                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.0,random_tensor=random_approach,refine_grasp=i%2)
+                gripper_pose,suction_direction,_,_,_,_,_ = self.gan.generator(depth.clone(),alpha=0.0,random_tensor=random_approach,refine_grasp=i%3)
 
                 '''process gripper label'''
                 label_generated_grasps = gripper_pose.clone()
@@ -265,7 +265,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
-                depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone,refine_grasp=i%2)
+                depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone,refine_grasp=i%3)
             '''train generator'''
             gripper_sampling_loss,suction_sampling_loss = self.get_samplers_loss(self.gan, depth, b,pixel_index,
                                               collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
@@ -316,6 +316,7 @@ class TrainActionNet:
                 except Exception as error_message:
                     print(file_ids[j])
                     print(error_message)
+                    bin_mask=None
 
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
@@ -439,4 +440,4 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             print(error_message)
 
-        lr=max(lr/1.1,1e-6)
+        # lr=max(lr/1.1,1e-6)

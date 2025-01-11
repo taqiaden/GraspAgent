@@ -112,34 +112,25 @@ class att_res_mlp_LN(nn.Module):
         output=self.d(torch.cat([x,res],dim=-1))
         return output
 
-class self_att_res_mlp_LN(nn.Module):
-    def __init__(self,in_c1,out_c,relu_negative_slope=0.0):
+class att_res_mlp_LN2(nn.Module):
+    def __init__(self,in_c1,in_c2,out_c,relu_negative_slope=0.):
         super().__init__()
         self.key = nn.Sequential(
-            nn.Linear(in_c1, 32),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
-            nn.Linear(32, 16)
+            nn.Linear(in_c1, 16)
         ).to('cuda')
 
         self.value = nn.Sequential(
-            nn.Linear(in_c1, 32),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
-            nn.Linear(32, 16)
+            nn.Linear(in_c1, 16)
         ).to('cuda')
 
         self.query =  nn.Sequential(
-            nn.Linear(in_c1, 32),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
-            nn.Linear(32, 16)
+            nn.Linear(in_c2, 16),
         ).to('cuda')
 
         self.res=nn.Sequential(
-            nn.Linear(in_c1, 32),
+            nn.Linear(in_c1 + in_c2, 32,bias=False),
             nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU(),
+            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
         ).to('cuda')
 
         self.att=nn.Sequential(
@@ -148,24 +139,22 @@ class self_att_res_mlp_LN(nn.Module):
         ).to('cuda')
 
         self.d = nn.Sequential(
-            nn.Linear(48, 32, bias=False),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(32, 16,bias=False),
+            nn.Linear(48, 16,bias=False),
             nn.LayerNorm([16]),
             nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
             nn.Linear(16, out_c),
         ).to('cuda')
 
-    def forward(self, x):
+    def forward(self, key_value_input,query_input):
         '''residual'''
-        res = self.res(x)
+        inputs=torch.cat([key_value_input,query_input],dim=1)
+        res = self.res(inputs)
 
         '''key value from input1'''
-        key=self.key(x)
-        value=self.value(x)
+        key=self.key(key_value_input)
+        value=self.value(key_value_input)
         '''Query from input2'''
-        query=self.query(x)
+        query=self.query(query_input)
         '''attention score'''
         att_map=key*query
         att_map=F.softmax(att_map,dim=-1)
@@ -250,113 +239,6 @@ class att_res_mlp_LN3(nn.Module):
 
         return output
 
-class att_res_mlp_LN2(nn.Module):
-    def __init__(self,in_c1,in_c2,out_c,relu_negative_slope=0.):
-        super().__init__()
-        assert in_c1 >32 and out_c<32 and in_c2<16
-
-        self.key = nn.Sequential(
-            nn.Linear(in_c1, 32)
-        ).to('cuda')
-
-        self.value = nn.Sequential(
-            nn.Linear(in_c1, 32)
-        ).to('cuda')
-
-        self.query =  nn.Sequential(
-            nn.Linear(in_c2, 16, bias=False),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 32),
-        ).to('cuda')
-
-        self.res1=nn.Sequential(
-            nn.Linear(in_c1 + in_c2, 32),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(32, 16),
-        ).to('cuda')
-
-        self.res2=nn.Sequential(
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(32, 16),
-        ).to('cuda')
-
-        self.block1 = nn.Sequential(
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16, bias=False),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16,bias=False),
-            nn.LayerNorm([16])
-        ).to('cuda')
-
-        self.block2 = nn.Sequential(
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16, bias=False),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16,bias=False),
-            nn.LayerNorm([16])
-        ).to('cuda')
-
-        self.block3 = nn.Sequential(
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16, bias=False),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16,bias=False),
-            nn.LayerNorm([16])
-        ).to('cuda')
-
-        self.block4 = nn.Sequential(
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16, bias=False),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(16, 16),
-        ).to('cuda')
-
-        self.final = nn.Sequential(
-            nn.LayerNorm([48]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(48, 24,bias=False),
-            nn.LayerNorm([24]),
-            nn.LeakyReLU(negative_slope=relu_negative_slope) if relu_negative_slope>0. else nn.ReLU(),
-            nn.Linear(24, out_c),
-        ).to('cuda')
-
-
-
-    def forward(self, key_value_input,query_input):
-        '''residual'''
-        inputs=torch.cat([key_value_input,query_input],dim=1)
-        res1 = self.res1(inputs)
-
-
-        '''key value from input1'''
-        key=self.key(key_value_input)
-        value=self.value(key_value_input)
-
-        '''Query from input2'''
-        query=self.query(query_input)
-
-        '''attention score'''
-        att_map=key*query
-        att_map=F.softmax(att_map,dim=-1)
-        x=att_map*value
-
-        res2 = self.res2(x)
-
-        x=self.block1(res2)
-        x=self.block2(x+res1)
-        x=self.block3(x+res1)
-        x=self.block4(x+res1)
-        output=self.final(torch.cat([x,res1,res2],dim=-1))
-
-        return output
 
 
 class att_res_decoder_A(nn.Module):
