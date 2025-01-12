@@ -55,19 +55,20 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
         return 0.
 
 if __name__ == "__main__":
-    x=[]
-    y=[]
-    t=torch.tensor([-1.0])
-    while True:
-        x.append(t.clone())
-        y.append(soft_square_pulse(t,start=0.8,end=1.2))
-        t+=0.1
-        if t>2:break
-
-
-
-    plt.plot(x,y)
-    plt.show()
+    # x=1-0.25
+    # x=np.tanh(7*x-5)*0.5+0.5
+    # print(x)
+    # t=torch.tensor([-1.0])
+    # while True:
+    #     x.append(t.clone())
+    #     y.append(soft_square_pulse(t,start=0.8,end=1.2))
+    #     t+=0.1
+    #     if t>2:break
+    #
+    #
+    #
+    # plt.plot(x,y)
+    # plt.show()
 
     # print(soft_square_pulse(1.1))
     # print(soft_clipping(1.0,0.8,1.2))
@@ -77,10 +78,10 @@ if __name__ == "__main__":
     # # x=F.softmax(x,dim=-1)
     #
     # # dist=MaskedCategorical(probs=reshaped_x, mask=x>0.)
-    # m=MovingRate('test')
-    # while True:
-    #     m.update(0.5)
-    #     m.view()
+    m=MovingRate('test')
+    while True:
+        m.update(0.5)
+        m.view()
 
         # index = dist.sample()
         # orig_index=

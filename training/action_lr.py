@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 import torch
 from colorama import Fore
@@ -7,6 +5,7 @@ from filelock import FileLock
 from torch import nn
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
+from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
 from lib.IO_utils import custom_print
@@ -17,12 +16,10 @@ from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, Critic, action_module_key, random_approach_tensor
-from records.training_satatistics import TrainingTracker, MovingRate
+from records.training_satatistics import TrainingTracker, MovingRate, truncate
 from registration import camera
-from training.learning_objectives.grasp_sampling_evalutor import gripper_sampler_loss
 from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
-from training.learning_objectives.suction_sampling_evaluator import suction_sampler_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
 detach_backbone=False
@@ -37,6 +34,25 @@ bce_loss=nn.BCELoss()
 
 balanced_bce_loss=BalancedBCELoss()
 print=custom_print
+
+cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
+
+def suction_sampler_loss(pc,target_normal):
+
+    labels = estimate_suction_direction(pc, view=False)  # inference time on local computer = 1.3 s
+    labels = torch.from_numpy(labels).to('cuda')
+
+    return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
+
+def gripper_sampler_loss(pixel_index,j,generated_critic_score,critic_score_label):
+
+
+    pix_A = pixel_index[j, 0]
+    pix_B = pixel_index[j, 1]
+
+    prediction_score = generated_critic_score[j, 0, pix_A, pix_B]
+    loss = torch.clamp(critic_score_label - prediction_score,0)
+    return loss
 
 def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,objects_mask=None,maximum_iterations=10000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
@@ -55,6 +71,54 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
     else:
         return np.random.randint(0, pc.shape[0])
     return target_index
+
+
+def step_critic_training(gan, generated_grasps, batch_size, pixel_index, label_generated_grasps, depth,
+                         collision_state_list, out_of_scope_list, firmness_state_list, alpha, beta, firmness_weight):
+
+    '''concatenation'''
+    with torch.no_grad():
+        generated_grasps_cat = torch.cat([generated_grasps, label_generated_grasps], dim=0)
+        depth_cat = depth.repeat(2, 1, 1, 1)
+
+    '''get predictions'''
+    critic_score = gan.critic(depth_cat, generated_grasps_cat)
+
+    '''accumulate loss'''
+    collision_loss = 0.
+    firmness_loss = 0.
+    curriculum_loss=0.
+    # c_loss=0.0
+    critic_score_labels=[]
+    for j in range(batch_size):
+        pix_A = pixel_index[j, 0]
+        pix_B = pixel_index[j, 1]
+        prediction_ = critic_score[j, 0, pix_A, pix_B]
+        label_ = critic_score[j + batch_size, 0, pix_A, pix_B]
+        critic_score_labels.append(label_.detach().clone())
+
+        collision_state_ = collision_state_list[j]
+        out_of_scope = out_of_scope_list[j]
+
+        bad_state_grasp = collision_state_ or out_of_scope
+        firmness_state = firmness_state_list[j]
+
+
+        collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
+
+
+        firmness_loss += torch.clamp((prediction_ - label_+alpha), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * firmness_weight
+        firmness_loss += torch.clamp((label_ - prediction_+alpha), 0) * (1 - bad_state_grasp) * firmness_state * firmness_weight
+
+    c_loss = ( collision_loss + firmness_loss )   * 100*(alpha*beta)**2#+ curriculum_loss
+
+    '''optimizer step'''
+    c_loss.backward()
+    gan.critic_optimizer.step()
+    gan.critic_optimizer.zero_grad()
+
+    return c_loss.item(), critic_score_labels
+
 
 class TrainActionNet:
     def __init__(self,batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
@@ -84,7 +148,6 @@ class TrainActionNet:
         self.background_detector_statistics = TrainingTracker(name=action_module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
 
         self.swiped_samples=0
-        self.truncated_threshold=self.moving_collision_rate.truncated_value
 
     def prepare_data_loader(self):
         file_ids = sample_positive_buffer(size=self.n_samples, dict_name=gripper_grasp_tracker,
@@ -109,89 +172,6 @@ class TrainActionNet:
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
         return gan
-
-    def step_critic_training(self,gan, generated_grasps, batch_size, pixel_index, label_generated_grasps, depth,
-                     collision_state_list, out_of_scope_list, firmness_state_list,alpha,beta):
-
-        '''concatenation'''
-        with torch.no_grad():
-            generated_grasps_cat = torch.cat([generated_grasps, label_generated_grasps], dim=0)
-            depth_cat = depth.repeat(2, 1, 1, 1)
-
-        '''get predictions'''
-        critic_score = gan.critic(depth_cat, generated_grasps_cat)
-
-        '''accumulate loss'''
-        collision_loss = 0.
-        firmness_loss = 0.
-        curriculum_loss=0.
-        # c_loss=0.0
-        critic_score_labels=[]
-        for j in range(batch_size):
-            pix_A = pixel_index[j, 0]
-            pix_B = pixel_index[j, 1]
-            prediction_ = critic_score[j, 0, pix_A, pix_B]
-            label_ = critic_score[j + batch_size, 0, pix_A, pix_B]
-            critic_score_labels.append(label_.detach().clone())
-
-            collision_state_ = collision_state_list[j]
-            out_of_scope = out_of_scope_list[j]
-
-            bad_state_grasp = collision_state_ or out_of_scope
-            firmness_state = firmness_state_list[j]
-            # smooth_clamp =lambda x: x  if x > 0 else -x / 10
-            # if bad_state_grasp:
-            #     x=prediction_ - label_ + threshold
-            # elif firmness_state and firmness_truncated_value<0.3:
-            #     x=label_ - prediction_
-            # else:
-            #     x = prediction_ - label_
-            # c_loss+=smooth_clamp(x)
-
-            collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
-
-            w=1.4+math.log(beta-0.6,10)
-
-            firmness_loss += torch.clamp((prediction_ - label_+alpha), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * w
-            firmness_loss += torch.clamp((label_ - prediction_), 0) * (1 - bad_state_grasp) * firmness_state * w
-
-            # curriculum_loss+=torch.clamp(label_-prediction_  - threshold, 0)
-            # if torch.clamp(label_-prediction_  - threshold, 0)>0.:print(f'p={prediction_}, l={label_}, col={collision_state_}')
-            # if np.random.rand()>0.8: print(f'p={prediction_}, l={label_}, col={collision_state_} ')
-
-        c_loss = ( collision_loss + firmness_loss )   * 10*(alpha*beta)**2#+ curriculum_loss
-
-        # print(f'critic loss={c_loss.item()}, threshold={collision_threshold}')
-
-        '''optimizer step'''
-        c_loss.backward()
-        gan.critic_optimizer.step()
-        gan.critic_optimizer.zero_grad()
-
-        return c_loss.item(), critic_score_labels
-
-    def get_samplers_loss(self,gan, depth, batch_size, pixel_index, collision_state_list,
-                        out_of_scope_list,firmness_state_list
-                        , gripper_pose, suction_direction, pcs, masks,background_class,critic_score_labels,threshold=0.001):
-
-        '''Critic score of generated grasps'''
-        generated_critic_score = gan.critic(depth.clone(), gripper_pose,detach_backbone=True)
-
-        '''accumulate loss'''
-        gripper_sampling_loss = torch.tensor(0.0, device=gripper_pose.device)
-        suction_sampling_loss = torch.tensor(0.0, device=gripper_pose.device)
-
-        for j in range(batch_size):
-            pc = pcs[j]
-            mask = masks[j]
-            gripper_sampling_loss +=  gripper_sampler_loss(pixel_index, j, collision_state_list[j], out_of_scope_list[j],firmness_state_list[j],  generated_critic_score,background_class,critic_score_labels[j],threshold=threshold)
-            suction_sampling_loss +=suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
-
-        gripper_sampling_loss=gripper_sampling_loss/batch_size
-        suction_sampling_loss=suction_sampling_loss/batch_size
-
-        return gripper_sampling_loss, suction_sampling_loss
-
 
     def begin(self):
         collision_times = 0.
@@ -236,15 +216,14 @@ class TrainActionNet:
             self.gan.generator.zero_grad()
 
             '''train critic'''
-            alpha=self.moving_collision_rate.truncated_value+self.moving_out_of_scope.truncated_value
-            beta = 1-self.moving_firmness.truncated_value
+            alpha=self.moving_collision_rate.val+self.moving_out_of_scope.val
+            beta = 1-self.moving_firmness.val
+            firmness_weight =np.tanh(7*beta-5)*0.5+0.5
 
-
-            l_c ,critic_score_labels= self.step_critic_training(self.gan, gripper_pose, b, pixel_index,
+            l_c ,critic_score_labels= step_critic_training(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
-                                           collision_state_list, out_of_scope_list, firmness_state_list,alpha=alpha,beta=beta)
+                                           collision_state_list, out_of_scope_list, firmness_state_list,alpha=alpha,beta=beta,firmness_weight=firmness_weight)
 
-            if i%5==0:print(f'c_loss={l_c}. alpha = {alpha}, beta = {beta}, firmness weight = {1.4+math.log(beta-0.6,10)}')
 
             self.critic_statistics.loss=l_c/b
 
@@ -266,28 +245,36 @@ class TrainActionNet:
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
                 depth.clone(),alpha=0.0,random_tensor=random_approach,detach_backbone=detach_backbone,refine_grasp=i%3)
-            '''train generator'''
-            gripper_sampling_loss,suction_sampling_loss = self.get_samplers_loss(self.gan, depth, b,pixel_index,
-                                              collision_state_list, out_of_scope_list,firmness_state_list,gripper_pose,
-                                                                          suction_direction,pcs,masks,background_class,critic_score_labels,threshold=self.moving_collision_rate.val)
-
-            self.gripper_sampler_statistics.loss=gripper_sampling_loss.item()
-            self.suction_sampler_statistics.loss=suction_sampling_loss.item()
 
             '''loss computation'''
-            suction_loss=torch.tensor(0.0,device=gripper_pose.device)
-            gripper_loss=torch.tensor(0.0,device=gripper_pose.device)
-            shift_loss=torch.tensor(0.0,device=gripper_pose.device)
-            background_loss=torch.tensor(0.0,device=gripper_pose.device)
+            suction_loss=suction_quality_classifier.mean()*0.0
+            gripper_loss=griper_collision_classifier.mean()*0.0
+            shift_loss=shift_affordance_classifier.mean()*0.0
+            background_loss=background_class.mean()*0.0
             decay_loss=torch.tensor(0.0,device=gripper_pose.device)
+            suction_sampling_loss = suction_direction.mean()*0.0
+            gripper_sampling_loss = gripper_pose.mean()*0.0
+
             non_zero_background_loss_counter=0
 
-            n=instances_per_sample*b
+            counted_samples=[c or o for c,o in zip(collision_state_list,out_of_scope_list)]
+            effective_batch_size=b if detach_backbone else sum(counted_samples)
+            n=instances_per_sample*effective_batch_size
             decay_= lambda scores:torch.clamp(scores,0).mean()*0.1
 
             for j in range(b):
+                if counted_samples[j]==0 and not detach_backbone:continue
                 pc=pcs[j]
                 mask=masks[j]
+
+                generated_critic_score = self.gan.critic(depth.clone(), gripper_pose, detach_backbone=True)
+
+                gripper_sampling_loss += gripper_sampler_loss(pixel_index, j,
+                                                              generated_critic_score, critic_score_labels[j])
+                gripper_sampling_loss=gripper_sampling_loss/effective_batch_size
+
+                suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
+                suction_sampling_loss=suction_sampling_loss/effective_batch_size
 
                 gripper_poses=gripper_pose[j].permute(1,2,0)[mask].detach()#.cpu().numpy()
                 suction_head_predictions=suction_quality_classifier[j, 0][mask]
@@ -296,7 +283,7 @@ class TrainActionNet:
                 background_class_predictions = background_class.permute(0,2, 3, 1)[j, :, :, 0][mask]
 
                 decay_loss += (decay_(gripper_head_predictions) + decay_(suction_head_predictions) + decay_(
-                    shift_head_predictions))/b
+                    shift_head_predictions))/effective_batch_size
 
                 '''limits'''
                 with torch.no_grad():
@@ -345,6 +332,8 @@ class TrainActionNet:
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 
+            if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())} alpha = {truncate(alpha)}, beta = {truncate(beta)}, firmness weight = {truncate(firmness_weight)}')
+
             # regularization = (depth_features.transpose(0,1).reshape(64,-1).mean(dim=0) ** 2).mean()
 
             loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss#+regularization
@@ -353,6 +342,8 @@ class TrainActionNet:
             self.gan.generator_optimizer.zero_grad()
 
             with torch.no_grad():
+                self.gripper_sampler_statistics.loss = gripper_sampling_loss.item()
+                self.suction_sampler_statistics.loss = suction_sampling_loss.item()
                 self.suction_head_statistics.loss = suction_loss.item()
                 self.gripper_head_statistics.loss = gripper_loss.item()
                 self.shift_head_statistics.loss = shift_loss.item()
@@ -361,8 +352,7 @@ class TrainActionNet:
             if i%100==0 and i!=0:
                 self.view_result(gripper_pose,collision_times,good_firmness_times,out_of_scope_times)
                 self.export_check_points()
-                self.truncated_threshold = self.moving_collision_rate.truncated_value
-                print(f'truncated_threshold = {self.truncated_threshold}')
+                self.save_statistics()
 
             pi.step(i)
         pi.end()
@@ -394,14 +384,10 @@ class TrainActionNet:
             self.moving_firmness.view()
             self.moving_out_of_scope.view()
 
-    def export_check_points(self):
-        self.gan.export_models()
-        self.gan.export_optimizers()
-
+    def save_statistics(self):
         self.moving_collision_rate.save()
         self.moving_firmness.save()
         self.moving_out_of_scope.save()
-
         self.suction_head_statistics.save()
         self.gripper_head_statistics.save()
         self.shift_head_statistics.save()
@@ -410,6 +396,9 @@ class TrainActionNet:
         self.gripper_sampler_statistics.save()
         self.suction_sampler_statistics.save()
 
+    def export_check_points(self):
+        self.gan.export_models()
+        self.gan.export_optimizers()
 
     def clear(self):
         self.suction_head_statistics.clear()
@@ -425,19 +414,16 @@ if __name__ == "__main__":
     for i in range(1000):
         #cuda_memory_report()
 
-
-        # with torch.no_grad():
+        # cuda_memory_report()
         # train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
         # train_action_net.begin()
-        # cuda_memory_report()
-        # train_action_net = TrainActionNet(batch_size=1, n_samples=None, learning_rate=lr)
-        # train_action_net.begin()
+        # continue
         try:
             cuda_memory_report()
             train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
             train_action_net.begin()
         except Exception as error_message:
             torch.cuda.empty_cache()
-            print(error_message)
+            print(Exception,error_message)
 
         # lr=max(lr/1.1,1e-6)
