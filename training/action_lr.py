@@ -218,7 +218,7 @@ class TrainActionNet:
             '''train critic'''
             alpha=self.moving_collision_rate.val+self.moving_out_of_scope.val
             beta = 1-self.moving_firmness.val
-            firmness_weight =np.tanh(7*beta-5)*0.5+0.5
+            firmness_weight =np.tanh(11*beta-9)*0.5+0.5
 
             l_c ,critic_score_labels= step_critic_training(self.gan, gripper_pose, b, pixel_index,
                                            label_generated_grasps, depth,
@@ -334,9 +334,8 @@ class TrainActionNet:
 
             if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())} alpha = {truncate(alpha)}, beta = {truncate(beta)}, firmness weight = {truncate(firmness_weight)}')
 
-            # regularization = (depth_features.transpose(0,1).reshape(64,-1).mean(dim=0) ** 2).mean()
 
-            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss#+regularization
+            loss=(suction_loss+gripper_loss+shift_loss+decay_loss)*0.1+gripper_sampling_loss+suction_sampling_loss+background_loss
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
