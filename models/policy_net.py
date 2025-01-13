@@ -102,7 +102,7 @@ class PolicyNet(nn.Module):
 
         '''Categorical policy'''
         policy_reshaped=action_logits.reshape(action_logits.shape[0],-1)
-        action_probs=F.softmax(policy_reshaped)
+        action_probs=F.softmax(policy_reshaped,dim=-1)
         action_probs=action_probs.reshape(action_logits.shape)
 
         return griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_values,action_probs

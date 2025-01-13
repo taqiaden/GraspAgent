@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from collections import deque
 
 
 def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
@@ -9,53 +10,36 @@ def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
     return objective
 
 class PPOMemory():
-    """
-    Memory for PPO
-    """
-
     def __init__(self):
-        self.states = []
-        self.actions = []
-        self.action_probs = []
-        self.rewards = []
-        self.vals = []
-        self.dones = []
+        self.actions_obj_list = deque([])
 
-        # self.batch_size = batch_size
+    def push(self, action_obj):
+        self.actions_obj_list.append(action_obj)
 
-    def generate_batches(self,batch_size):
-        ## suppose n_states=20 and batch_size = 4
-        n_states = len(self.states)
-        ##n_states should be always greater than batch_size
-        ## batch_start is the starting index of every batch
-        ## eg:   array([ 0,  4,  8, 12, 16]))
-        batch_start = np.arange(0, n_states, batch_size)
-        ## random shuffling if indexes
-        # eg: [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19]
-        indices = np.arange(n_states, dtype=np.int64)
-        ## eg: array([12, 17,  6,  7, 10, 11, 15, 13, 18,  9,  8,  4,  3,  0,  2,  5, 14,19,  1, 16])
-        np.random.shuffle(indices)
-        batches = [indices[i:i + batch_size] for i in batch_start]
-        ## eg: [array([12, 17,  6,  7]),array([10, 11, 15, 13]),array([18,  9,  8,  4]),array([3, 0, 2, 5]),array([14, 19,  1, 16])]
-        return np.array(self.states), np.array(self.actions), \
-            np.array(self.action_probs), np.array(self.vals), np.array(self.rewards), \
-            np.array(self.dones), batches
+    def generate_batches(self):
+        return
+        # ## suppose n_states=20 and batch_size = 4
+        # n_states = len(self.states)
+        # ##n_states should be always greater than batch_size
+        # ## batch_start is the starting index of every batch
+        # ## eg:   array([ 0,  4,  8, 12, 16]))
+        # batch_start = np.arange(0, n_states, self.batch_size)
+        # ## random shuffling if indexes
+        # # eg: [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19]
+        # indices = np.arange(n_states, dtype=np.int64)
+        # ## eg: array([12, 17,  6,  7, 10, 11, 15, 13, 18,  9,  8,  4,  3,  0,  2,  5, 14,19,  1, 16])
+        # np.random.shuffle(indices)
+        # batches = [indices[i:i + self.batch_size] for i in batch_start]
+        # ## eg: [array([12, 17,  6,  7]),array([10, 11, 15, 13]),array([18,  9,  8,  4]),array([3, 0, 2, 5]),array([14, 19,  1, 16])]
+        # return np.array(self.states), np.array(self.actions), \
+        #     np.array(self.action_probs), np.array(self.vals), np.array(self.rewards), \
+        #     np.array(self.dones), batches
 
-    def store_memory(self, state, action, action_prob, val, reward, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.action_probs.append(action_prob)
-        self.rewards.append(reward)
-        self.vals.append(val)
-        self.dones.append(done)
+    def pop(self):
+        self.actions_obj_list.popleft()
 
-    def clear_memory(self):
-        self.states = []
-        self.actions = []
-        self.action_probs = []
-        self.rewards = []
-        self.vals = []
-        self.dones = []
+    def __len__(self):
+        return len(self.actions_obj_list)
 
 class PPOLearning():
     def __init__(self, model,n_epochs=4,policy_clip=0.2, gamma=0.99, lamda=0.95,batch_size=5):

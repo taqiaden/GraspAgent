@@ -57,12 +57,13 @@ def trigger_new_perception():
 def crop_side_tray_image(img):
     img_suction = img[200:540, 0:160, 0]
     img_grasp = img[180:570, 780:1032, 0]
-    return img_suction, img_grasp
+    img_main=img[190:560, 170:770, 0]
+    return img_suction, img_grasp,img_main
 
 def get_side_bins_images():
     im = cv.imread(texture_image_path)
-    img_suction, img_grasp = crop_side_tray_image(im)
-    return img_suction, img_grasp
+    img_suction, img_grasp ,img_main= crop_side_tray_image(im)
+    return img_suction, img_grasp,img_main
 
 def get_scene_point_clouds():
     point_data = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant

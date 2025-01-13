@@ -13,11 +13,11 @@ from records.training_satatistics import MovingRate
 
 
 def get_index(flat_index, ori_size):
-    res = torch.zeros(len(ori_size), dtype=torch.int)
+    res = len(ori_size)*[0]
     for i in range(len(ori_size)-1, -1, -1):
         j = flat_index % ori_size[i]
         flat_index = flat_index // ori_size[i]
-        res[i] = j
+        res[i] = j.item()
     return res
 
 def soft_square_pulse(x,start=-1.,end=1.,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.0,no_grad=True):
@@ -55,9 +55,24 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
         return 0.
 
 if __name__ == "__main__":
-    x=1-0.25
-    x=np.tanh(11*x-9)*0.5+0.5
+    from collections import deque
+    x=deque([1,2,3])
+    x.append(6)
     print(x)
+    x.appendleft(8)
+    print(x)
+    x.pop()
+    print(x)
+    x.popleft()
+    print(x)
+    # x=torch.rand((4,7))
+    # t1=x.clone()
+    # print(x)
+    # x=x.reshape(-1)
+    # x=x.reshape(4,7)
+    # print(x==t1)
+    # print(x[3,:])
+    # print(z[4*3:])
     # t=torch.tensor([-1.0])
     # while True:
     #     x.append(t.clone())
@@ -72,12 +87,19 @@ if __name__ == "__main__":
 
     # print(soft_square_pulse(1.1))
     # print(soft_clipping(1.0,0.8,1.2))
-    # x=torch.randn(100,4)
-    # reshaped_x=x.reshape(-1)
-    #
+    # x=torch.randn(17056,4)
+    # y=x.reshape(-1)
+    # # reshaped_x=x.reshape(-1)
+    # #
     # # x=F.softmax(x,dim=-1)
-    #
-    # # dist=MaskedCategorical(probs=reshaped_x, mask=x>0.)
+    # #
+    # dist=MaskedCategorical(probs=y, mask=y>0.)
+    # action=dist.sample()
+    # index=get_index(action, (17056,4))
+    # print(index)
+    # print(action)
+    # print(x[index[0],[index[1]]])
+    # print(y[action])
     # m=MovingRate('test')
     # while True:
     #     m.update(0.5)

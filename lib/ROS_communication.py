@@ -4,7 +4,6 @@ import trimesh
 from Configurations import config
 from Configurations.config import home_dir
 from lib.grasp_utils import get_pose_matrixes, adjust_final_matrix
-from lib.report_utils import wait_indicator as wi
 
 ROS_communication_file="ros_execute.txt"
 
@@ -88,17 +87,19 @@ def save_gripper_data(end_effecter_mat, grasp_width, file_path):
     grasp_data = np.array([xyz[0], xyz[1], xyz[2], wxyz[1], wxyz[2], wxyz[3], wxyz[0], grasp_width])
     np.save(file_path, grasp_data)
 
-
-
-def wait_for_feedback():
-    # wait until grasp or suction finished
-    txt = 'Wait'
-    wait = wi('Waiting for robot feedback')
-    while txt == 'Wait':
-        wait.step(0.5)
-        with open(home_dir + ROS_communication_file, 'r') as f:
-            txt = f.read()
-    else:
-        wait.end()
-        print('Robot state: ' + txt)
+def read_robot_feedback():
+    with open(home_dir + ROS_communication_file, 'r') as f:
+        txt = f.read()
     return txt
+
+# def wait_for_feedback():
+#     # wait until grasp or suction finished
+#     txt = 'Wait'
+#     wait = wi('Waiting for robot feedback')
+#     while txt == 'Wait':
+#         wait.step(0.5)
+#         txt = read_robot_feedback()
+#     else:
+#         wait.end()
+#         print('Robot state: ' + txt)
+#     return txt

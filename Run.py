@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import sys
+
 import numpy
 import numpy as np
 import torch
@@ -15,7 +17,7 @@ grasp_agent.initialize_check_points()
 
 while True:
     trigger_new_perception()
-    # img_suction_pre, img_grasp_pre = get_side_bins_images()
+    # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
     with torch.no_grad():
         '''get modalities'''
         depth=get_scene_depth()
@@ -34,7 +36,9 @@ while True:
         if first_action_obj is not None and not simulation_mode:
             '''execute action/s'''
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
+            '''wait'''
+            first_action_obj,second_action_obj =grasp_agent.wait_robot_feedback(first_action_obj,second_action_obj)
             '''report result'''
-            grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre)
+            grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
         '''clear dense data'''
         grasp_agent.clear()

@@ -1,15 +1,18 @@
-import os
+## Import required libraries
+
+import os 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F 
 import numpy as np
 import gym
 import warnings
 from torch.distributions.categorical import Categorical
-
-from margin import soft_square_pulse
-
 warnings.simplefilter("ignore")
+
+
+## Initilaize Data store, Actor Network and Critic network
+
 
 ############################# Data Store ####################################################
 class PPOMemory():
@@ -65,6 +68,8 @@ class PPOMemory():
 ############################ Actor Network ######################################
 
 ## initialize actor network and critic network
+
+
 class ActorNwk(nn.Module):
     def __init__(self, input_dim, out_dim,
                  adam_lr,
@@ -137,6 +142,8 @@ class CriticNwk(nn.Module):
     def load_checkpoint(self):
         self.load_state_dict(torch.load(self.checkpoint_file))
 
+
+## Initilaize an Agent will will be able to train the model
 
 ############################# Agent ########################################3
 
@@ -233,10 +240,6 @@ class Agent():
                 weighted_probs = advantage_arr[batch] * prob_ratio
                 weighted_clipped_probs = torch.clamp(prob_ratio, 1 - self.policy_clip,
                                                      1 + self.policy_clip) * advantage_arr[batch]
-                # S_=(soft_square_pulse(prob_ratio,start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio)[0].item()
-                # C_=torch.clamp(prob_ratio, 1 - self.policy_clip,1 + self.policy_clip)[0].item()
-                # print(f'value= {prob_ratio[0].item()}, soft = {S_}, clipped={C_}')
-                # weighted_clipped_probs = soft_square_pulse(prob_ratio.detach(),start=1 - self.policy_clip,end=1 + self.policy_clip)*prob_ratio * advantage_arr[batch]
                 actor_loss = -torch.min(weighted_probs, weighted_clipped_probs).mean()
 
                 returns = advantage_arr[batch] + values[batch]
@@ -252,7 +255,8 @@ class Agent():
 
         self.memory.clear_memory()
 
-    ### Train the model
+
+### Train the model
 
 
 import gym
@@ -292,11 +296,11 @@ score_history = []
 learn_iters = 0
 avg_score = 0
 n_steps = 0
-for i in range(n_games): # episodes
+for i in range(n_games):
     current_state, info = env.reset()
     terminated, truncated = False, False
     done = False
-    score = 0 # cumulative reward
+    score = 0
     while not done:
         action, prob, val = agent.choose_action(current_state)
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -304,15 +308,12 @@ for i in range(n_games): # episodes
         n_steps += 1
         score += reward
         agent.store_data(current_state, action, prob, val, reward, done)
-        if n_steps % N == 0: ## learn every N action step
+        if n_steps % N == 0:
             agent.learn()
             learn_iters += 1
         current_state = next_state
     score_history.append(score)
     avg_score = np.mean(score_history[-100:])
-    # k=1/(1+((avg_score**2)/1280))
-    # agent.policy_clip=0.05+0.45*(k)
-    if avg_score>160:exit()
     if avg_score > best_score:
         best_score = avg_score
         agent.save_models()
@@ -331,6 +332,7 @@ env = gym.make("CartPole-v1", render_mode="rgb_array")
 
 state_dim = 4
 action_dim = env.action_space.n
+
 
 class ActorPredNwk(nn.Module):
     def __init__(self, input_dim, out_dim,
@@ -357,7 +359,6 @@ class ActorPredNwk(nn.Module):
 
     def load_checkpoint(self):
         self.load_state_dict(torch.load(self.checkpoint_file))
-
 
 policy_nwk = ActorPredNwk(input_dim=state_dim, out_dim=action_dim)
 policy_nwk.load_checkpoint()

@@ -7,6 +7,7 @@ from colorama import Fore
 import open3d as o3d
 from torch.distributions import Categorical
 from torchrl.modules import MaskedCategorical
+from lib.report_utils import wait_indicator as wi
 
 from Configurations.ENV_boundaries import bin_center
 from Configurations.config import distance_scope, gripper_width_during_shift
@@ -14,7 +15,7 @@ from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from lib.ROS_communication import wait_for_feedback, deploy_action
+from lib.ROS_communication import  deploy_action, read_robot_feedback
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
@@ -41,8 +42,16 @@ execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
 
 pr=my_print()
 
+def get_unflatten_index(flat_index, ori_size):
+    res = len(ori_size)*[0]
+    for i in range(len(ori_size)-1, -1, -1):
+        j = flat_index % ori_size[i]
+        flat_index = flat_index // ori_size[i]
+        res[i] = j
+    return res
+
 class Action():
-    def __init__(self,point_index=None,action_index=None):
+    def __init__(self,point_index=None,action_index=None, probs=None, value=None):
         self.point_index=point_index
         self.action_index=action_index
         if action_index is None:
@@ -56,8 +65,10 @@ class Action():
             self.use_gripper_arm = ((action_index == 0) or (action_index == 2))
             self.use_suction_arm = ((action_index == 1) or (action_index == 3))
 
-        self.value=None
-        self.prob=None
+        self.value=probs
+        self.prob=value
+
+        self.file_id=None
 
         self.target_point=None
         
@@ -221,13 +232,14 @@ class GraspAgent():
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
 
+        self.buffer=PPOMemory()
+
         '''modalities'''
         self.point_clouds = None
         self.depth=None
         self.rgb=None
 
         self.policy_learning=PPOLearning(model=self.policy_net)
-        self.online_memory=PPOMemory()
 
         '''dense records'''
         self.quality_masks=None
@@ -252,7 +264,7 @@ class GraspAgent():
 
 
         '''track task sequence'''
-        self.task_episode=0
+        self.run_sequence=0
 
     def clear(self):
         self.quality_masks=None
@@ -350,7 +362,7 @@ class GraspAgent():
         result, _ = torch.min(result, dim=-1)
         return result
 
-    def next_action(self, epsilon=0.0):
+    def next_action_old(self, epsilon=0.0):
         masked_q_value=self.biased_q_value*self.valid_actions_mask
 
         if np.random.rand()>epsilon:
@@ -371,30 +383,17 @@ class GraspAgent():
         self.valid_actions_mask[point_index,action_index]=0
         return point_index,action_index
 
-    def next_action2(self, epsilon=0.0):
-        reshaped_props=self.action_probs.view(1,-1)
-        Categorical(probs=reshaped_props)
-        # MaskedCategorical(probs=reshaped_props,mask=)
+    def next_action(self):
 
-        masked_q_value=self.biased_q_value*self.valid_actions_mask
+        dist=MaskedCategorical(probs=self.action_probs,mask=self.valid_actions_mask)
+        flattened_action_index= dist.sample()
+        probs = torch.squeeze(dist.log_prob(flattened_action_index)).item()
+        flattened_action_index = torch.squeeze(flattened_action_index).item()
+        value = self.q_value[flattened_action_index]
+        value = torch.squeeze(value).item()
 
-        if np.random.rand()>epsilon:
-            flattened_index=torch.argmax(masked_q_value).item()
-            point_index = math.floor(flattened_index / 4)
-            action_index = flattened_index - int(4 * point_index)
-
-            max_val=masked_q_value[point_index,action_index]
-            if max_val==0: return None,None
-
-        else:
-            available_indexes=torch.nonzero(masked_q_value)
-            if available_indexes.shape[0]==0: return None,None
-            random_pick=np.random.random_integers(0,available_indexes.shape[0]-1)
-            point_index = available_indexes[random_pick][0]
-            action_index = available_indexes[random_pick][1]
-
-        self.valid_actions_mask[point_index,action_index]=0
-        return point_index,action_index
+        self.valid_actions_mask[flattened_action_index] = 0
+        return flattened_action_index, probs, value
 
     def prepare_quality_masks(self,mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
                               background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope):
@@ -477,20 +476,20 @@ class GraspAgent():
 
         '''initiate random policy'''
         # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
-        self.q_value=q_value.squeeze().permute(1,2,0)[mask].reshape(-1)
-        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask].reshape(-1)
+        self.q_value=q_value.squeeze().permute(1,2,0)[mask]
+        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask]
 
         # self.biased_q_value=self.q_value.clone()
         # min_q_value=torch.min(self.biased_q_value).item()
         # self.biased_q_value+=(1-min(min_q_value,0.))
 
-        self.valid_actions_mask=torch.zeros_like(self.q_value)
+        self.valid_actions_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
 
         '''initialize valid actions mask'''
-        self.valid_actions_mask[:,0][self.gripper_grasp_mask]+=1
-        self.valid_actions_mask[:,1][self.suction_grasp_mask]+=1
-        self.valid_actions_mask[:,2][self.gripper_shift_mask]+=1
-        self.valid_actions_mask[:,3][self.suction_shift_mask]+=1
+        self.valid_actions_mask[:,0][self.gripper_grasp_mask].fill_(True)
+        self.valid_actions_mask[:,1][self.suction_grasp_mask].fill_(True)
+        self.valid_actions_mask[:,2][self.gripper_shift_mask].fill_(True)
+        self.valid_actions_mask[:,3][self.suction_shift_mask].fill_(True)
 
         '''count available actions'''
         self.n_grasps=torch.count_nonzero(self.valid_actions_mask[:,0:2])
@@ -498,6 +497,11 @@ class GraspAgent():
 
         '''to numpy'''
         self.normals=self.normals.cpu().numpy()
+
+        '''flatten'''
+        self.q_value = self.q_value.reshape(-1)
+        self.action_probs = self.action_probs.reshape(-1)
+        self.valid_actions_mask = self.valid_actions_mask.reshape(-1)
 
     def dense_view(self):
         print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
@@ -640,12 +644,12 @@ class GraspAgent():
         second_action_obj=Action()
         self.first_action_mask=None
 
-
         '''first action'''
-        available_actions_size=int((self.valid_actions_mask>0.0).sum())
+        available_actions_size=torch.count_nonzero(self.valid_actions_mask).item()
         for i in range(available_actions_size):
-            point_index, action_index=self.next_action(epsilon=0.0)
-            action_obj=Action(point_index, action_index)
+            flattened_action_index, probs, value=self.next_action()
+            unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0],4))
+            action_obj=Action(point_index=unflatten_index[0],action_index=unflatten_index[1], probs=probs, value=value)
             self.process_action(action_obj)
             if action_obj.is_executable:
                 first_action_obj=action_obj
@@ -653,8 +657,10 @@ class GraspAgent():
                     self.mask_arm_occupancy(action_obj)
                 break
 
-        self.valid_actions_mask[:,2:]*=0 # simultaneous operation of both arms are for grasp actions only
-        if first_action_obj.is_shift:self.valid_actions_mask*=0
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1,4)
+        self.valid_actions_mask[:,2:].fill_(False) # simultaneous operation of both arms are for grasp actions only
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
+        if first_action_obj.is_shift:self.valid_actions_mask.fill_(False)
 
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
@@ -662,10 +668,11 @@ class GraspAgent():
         # self.view_valid_actions_mask()
 
         '''second action'''
-        available_actions_size=int((self.valid_actions_mask>0.0).sum())
+        available_actions_size=torch.count_nonzero(self.valid_actions_mask).item()
         for i in range(available_actions_size):
-            point_index, action_index=self.next_action(epsilon=0.0)
-            action_obj = Action(point_index, action_index)
+            flattened_action_index, probs, value = self.next_action()
+            unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0], 4))
+            action_obj = Action(point_index=unflatten_index[0],action_index=unflatten_index[1], probs=probs, value=value)
             self.process_action(action_obj)
             if action_obj.is_executable:
                 second_action_obj=action_obj
@@ -676,6 +683,28 @@ class GraspAgent():
         second_action_obj.print()
 
         return first_action_obj,second_action_obj
+
+    def wait_robot_feedback(self,first_action_obj,second_action_obj):
+        # wait until grasp or suction finished
+        robot_feedback_ = 'Wait'
+        wait = wi('Waiting for robot feedback')
+        counter=0
+        while robot_feedback_ == 'Wait':
+            wait.step(0.5)
+            if counter==0:
+                '''save buffer as pickl'''
+            elif counter==1:
+                '''step policy training'''
+            robot_feedback_ = read_robot_feedback()
+            counter+=1
+        else:
+            wait.end()
+            print('Robot msg: ' + robot_feedback_)
+        first_action_obj.robot_feedback = robot_feedback_
+        second_action_obj.robot_feedback = robot_feedback_
+
+        return first_action_obj,second_action_obj
+
 
     def execute(self,first_action_obj,second_action_obj):
         pr.title('execute action')
@@ -704,23 +733,20 @@ class GraspAgent():
                     '''suction'''
                     subprocess.run(execute_suction_shift_bash)
 
-        '''get robot feedback'''
-        robot_feedback_ = wait_for_feedback()
-
-        first_action_obj.robot_feedback=robot_feedback_
-        second_action_obj.robot_feedback=robot_feedback_
-
         return first_action_obj,second_action_obj
 
-    def process_feedback(self,first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre):
+    def process_feedback(self,first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre):
         pr.title('process feedback')
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset': trigger_new_perception()
         if not report_result: return
 
-        img_suction_after, img_grasp_after = get_side_bins_images()
+        img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
 
         '''report change if robot moves'''
         if first_action_obj.robot_feedback == 'Succeed':
+            if first_action_obj.is_shift:
+                first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
+
             if first_action_obj.use_gripper_arm:
                 gripper_action=first_action_obj
                 suction_action=second_action_obj
@@ -729,12 +755,19 @@ class GraspAgent():
                 suction_action = first_action_obj
 
             '''check changes in side bins'''
-            gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
-            suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
+            if gripper_action.is_grasp:
+                gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
+
+            if suction_action.is_grasp:
+                suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
 
             '''save action instance'''
-            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action,self.task_episode)
-            self.task_episode+=1
+            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action,self.run_sequence)
+            self.run_sequence+=1
+
+            '''send to buffer'''
+            if gripper_action.action_index: self.buffer.push(gripper_action)
+            if suction_action.action_index: self.buffer.push(suction_action)
 
 
 '''conventions'''
@@ -745,4 +778,5 @@ class GraspAgent():
 # the suction sampler outputs the normal direction
 # T_0 refers to a gripper head transformation matrix with zero penetration while T_d embeds distance term
 # for any sequence we will always give the gripper the first index followed by the suction, e.g. if gripper grasp score locate at the (i) channel then the suction is located at (i+1) channel
-
+# if the action is shift, it is always saved in the first action object
+# executing both arms at the same time will be only when both actions are grasp actions

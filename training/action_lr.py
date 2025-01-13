@@ -22,7 +22,7 @@ from training.learning_objectives.gripper_collision import gripper_collision_los
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
-detach_backbone=False
+detach_backbone=True
 
 lock = FileLock("file.lock")
 instances_per_sample=1
