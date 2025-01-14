@@ -208,6 +208,7 @@ class Agent():
                 running_advantage = discount * running_advantage
                 # running_advantage += discount*(reward_arr[k] + self.gamma*value_arr[k+1]*(1-int(dones_arr[k])) - value_arr[k])
                 discount *= self.gamma * self.lamda
+                if int(dones_arr[k]) == 1:break
 
             advantage[t] = running_advantage
         advantage = torch.tensor(advantage).to(self.actor.device)
@@ -317,6 +318,7 @@ for i in range(n_games):
     if avg_score > best_score:
         best_score = avg_score
         agent.save_models()
+    if avg_score>160:exit()
     print('episode', i, 'score %.1f' % score, 'avg score %.1f' % avg_score,
           'time_steps', n_steps, 'learning_steps', learn_iters)
 

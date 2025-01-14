@@ -643,9 +643,7 @@ class GraspAgent():
                     self.mask_arm_occupancy(action_obj)
                 break
 
-        if first_action_obj.is_executable:
-            input('No executable action is found ...')
-            exit()
+        if first_action_obj.is_executable: exit('No executable action found ...')
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
 
@@ -683,6 +681,8 @@ class GraspAgent():
         while robot_feedback_ == 'Wait':
             wait.step(0.5)
             if counter==0:
+                '''reduce buffer size'''
+                self.buffer.pop()
                 '''dump the buffer as pickl'''
                 save_pickle(buffer_file,self.buffer)
             elif counter==1:
@@ -771,3 +771,4 @@ class GraspAgent():
 # for any sequence we will always give the gripper the first index followed by the suction, e.g. if gripper grasp score locate at the (i) channel then the suction is located at (i+1) channel
 # if the action is shift, it is always saved in the first action object
 # executing both arms at the same time will be only when both actions are grasp actions
+# a single run may include one action or two actions (moving both arms)

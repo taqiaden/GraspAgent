@@ -1,7 +1,12 @@
 import numpy as np
 import torch
 from collections import deque
+from Grasp_Agent_ import Action
 
+minimum_buffer_size=20
+max_buffer_size=50
+gamma=0.99
+lamda=0.95
 
 def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
     ratio = new_policy_probs / old_policy_probs
@@ -12,31 +17,97 @@ def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
 class PPOMemory():
     def __init__(self):
         self.actions_obj_list = deque([])
+        self.rewards=deque([])
+        self.values=deque([])
+        self.advantages=deque([])
 
-    def push(self, action_obj):
+        self.probs=deque([])
+        self.last_ending_index=None # the end index of the last completed episode
+
+        '''track episode data'''
+        self.is_end_of_episode=deque([])
+        # list elements takes the values [0,1,None]
+            # 0 : the instance belong to the episode but is not the end of it
+            # 1 : the instance is the end of the episode
+            # None : the instance is not part of the episode, also means the instance is sampled following either a deterministic policy or a random policy
+
+    def push(self, action_obj:Action):
         self.actions_obj_list.append(action_obj)
+        self.values.append(action_obj.value)
+        self.probs.append(action_obj.prob)
+        self.update_rewards(action_obj)
+        if action_obj.on_target:
+            if len(self)>0 and self.is_end_of_episode[-1]==0:
+                self.is_end_of_episode[-1]=1
+            self.is_end_of_episode.append(None)
+            self.last_ending_index=len(self)-1
+            self.update_advantages()
+        else:
+            self.is_end_of_episode.append(0)
 
-    def generate_batches(self):
-        return
-        # ## suppose n_states=20 and batch_size = 4
-        # n_states = len(self.states)
-        # ##n_states should be always greater than batch_size
-        # ## batch_start is the starting index of every batch
-        # ## eg:   array([ 0,  4,  8, 12, 16]))
-        # batch_start = np.arange(0, n_states, self.batch_size)
-        # ## random shuffling if indexes
-        # # eg: [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19]
-        # indices = np.arange(n_states, dtype=np.int64)
-        # ## eg: array([12, 17,  6,  7, 10, 11, 15, 13, 18,  9,  8,  4,  3,  0,  2,  5, 14,19,  1, 16])
-        # np.random.shuffle(indices)
-        # batches = [indices[i:i + self.batch_size] for i in batch_start]
-        # ## eg: [array([12, 17,  6,  7]),array([10, 11, 15, 13]),array([18,  9,  8,  4]),array([3, 0, 2, 5]),array([14, 19,  1, 16])]
-        # return np.array(self.states), np.array(self.actions), \
-        #     np.array(self.action_probs), np.array(self.vals), np.array(self.rewards), \
-        #     np.array(self.dones), batches
+
+    def update_rewards(self,action_obj:Action):
+        assert len(self.rewards)==len(self.actions_obj_list)-1
+        '''Reward is computed in two steps'''
+        if action_obj.on_target:
+            # if the action grasp the target then it is not part of the episode as it follows a deterministic policy
+            # the episode ends before this action step and more reward will be added to the former actions because it facilitates the current action to grasp the target
+            self.rewards.append(None)
+        else:
+            '''1) penalize current action to reduce the effort needed to reach the target'''
+            k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
+            self.rewards.append(-0.2/k)
+
+        '''2) reward previous action/s if it cause to grasp the target in the current action'''
+        if action_obj.on_target and len(self.actions_obj_list)>1:
+            if self.actions_obj_list[-1].is_synchronous:
+                # add rewards to the last two actions if both arms are used in the last run
+                self.rewards[-2:]+=1
+            else:
+                self.rewards[-1:]+=1
+
+    def generate_batches(self,batch_size):
+        '''arrange batches to the end of the last completed episode'''
+        n_states = self.last_ending_index+1
+        batch_start = np.arange(0, n_states, batch_size)
+        indices = np.arange(n_states, dtype=np.int64)
+        np.random.shuffle(indices)
+        batches = [indices[i:i + batch_size] for i in batch_start]
+        return  batches
+
+    def update_advantages(self):
+        n_states = self.last_ending_index + 1
+        advantage = np.zeros(n_states, dtype=np.float32)
+        start_=len(self.advantages)
+
+        for t in range(start_, n_states - 1):
+            discount = 1
+            running_advantage = 0
+            for k in range(t, n_states - 1):
+                if self.is_end_of_episode[k] == 1:
+                    running_advantage += self.rewards[k] - self.values[k]
+                else:
+                    running_advantage += self.rewards[k] + (gamma * self.values[k + 1]) - self.values[k]
+
+                running_advantage = discount * running_advantage
+                discount *= gamma * lamda
+
+                if self.is_end_of_episode[k] == 1: break
+
+            self.advantages.append(running_advantage)
+            # advantage[t] = running_advantage
+        return advantage
 
     def pop(self):
-        self.actions_obj_list.popleft()
+        if len(self)>max_buffer_size:
+            for i in range(3):
+                self.actions_obj_list.popleft()
+                self.rewards.popleft()
+                self.values.popleft()
+                self.probs.popleft()
+                self.advantages.popleft()
+                self.is_end_of_episode.popleft()
+                self.last_ending_index-=1
 
     def get_all_buffer_files_ids(self):
         file_ids=[]
@@ -58,58 +129,6 @@ class PPOLearning():
         self.model=model
 
         self.memory = PPOMemory()
-
-    def store_data(self, state, action, action_prob, val, reward, done):
-        self.memory.store_memory(state, action, action_prob, val, reward, done)
-
-    # def save_models(self):
-    #     print('... Saving Models ......')
-    #     self.actor.save_checkpoint()
-    #     self.critic.save_checkpoint()
-    #
-    # def load_models(self):
-    #     print('... Loading models ...')
-    #     self.actor.load_checkpoint()
-    #     self.critic.load_checkpoint()
-
-    def choose_action(self, state):
-        state = torch.tensor([state], dtype=torch.float).to(self.actor.device)
-
-        dist = self.actor(state)
-
-        ## sample the output action from a categorical distribution of predicted actions
-        action = dist.sample()
-
-        probs = torch.squeeze(dist.log_prob(action)).item()
-        action = torch.squeeze(action).item()
-
-        ## value from critic model
-        value = self.critic(state)
-        value = torch.squeeze(value).item()
-
-        return action, probs, value
-
-    def calculate_advanatage(self, reward_arr, value_arr, dones_arr):
-        time_steps = len(reward_arr)
-        advantage = np.zeros(len(reward_arr), dtype=np.float32)
-
-        for t in range(0, time_steps - 1):
-            discount = 1
-            running_advantage = 0
-            for k in range(t, time_steps - 1):
-                if int(dones_arr[k]) == 1:
-                    running_advantage += reward_arr[k] - value_arr[k]
-                else:
-
-                    running_advantage += reward_arr[k] + (self.gamma * value_arr[k + 1]) - value_arr[k]
-
-                running_advantage = discount * running_advantage
-                # running_advantage += discount*(reward_arr[k] + self.gamma*value_arr[k+1]*(1-int(dones_arr[k])) - value_arr[k])
-                discount *= self.gamma * self.lamda
-
-            advantage[t] = running_advantage
-        advantage = torch.tensor(advantage).to(self.actor.device)
-        return advantage
 
     def learn(self):
         for _ in range(self.n_epochs):

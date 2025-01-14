@@ -56,15 +56,9 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
 
 if __name__ == "__main__":
     from collections import deque
-    x=deque([1,2,3])
-    x.append(6)
-    print(x)
-    x.appendleft(8)
-    print(x)
-    x.pop()
-    print(x)
-    x.popleft()
-    print(x)
+    x=deque([None,None,None])
+    print(x[-1] is None)
+
     # x=torch.rand((4,7))
     # t1=x.clone()
     # print(x)
