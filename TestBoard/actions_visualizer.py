@@ -90,7 +90,6 @@ def loop():
             print(critic_score.max())
             print(critic_score.min())
 
-
         # view_features(depth_features,reshape=False)
         '''Evaluate generated grasps'''
         # collision_state_list, firmness_state_list, out_of_scope_list = evaluate_grasps(b, pixel_index, depth,

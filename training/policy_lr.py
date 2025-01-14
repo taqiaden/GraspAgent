@@ -38,6 +38,12 @@ class PPOMemory():
     def pop(self):
         self.actions_obj_list.popleft()
 
+    def get_all_buffer_files_ids(self):
+        file_ids=[]
+        for i in range(self.__len__()):
+            file_ids.append(self.actions_obj_list[i].file_id)
+        return file_ids
+
     def __len__(self):
         return len(self.actions_obj_list)
 

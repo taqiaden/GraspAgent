@@ -22,7 +22,7 @@ from training.learning_objectives.gripper_collision import gripper_collision_los
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
-detach_backbone=True
+detach_backbone=False
 
 lock = FileLock("file.lock")
 instances_per_sample=1
@@ -105,7 +105,6 @@ def step_critic_training(gan, generated_grasps, batch_size, pixel_index, label_g
 
 
         collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
-
 
         firmness_loss += torch.clamp((prediction_ - label_+alpha), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * firmness_weight
         firmness_loss += torch.clamp((label_ - prediction_+alpha), 0) * (1 - bad_state_grasp) * firmness_state * firmness_weight

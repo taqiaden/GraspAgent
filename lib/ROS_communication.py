@@ -91,15 +91,3 @@ def read_robot_feedback():
     with open(home_dir + ROS_communication_file, 'r') as f:
         txt = f.read()
     return txt
-
-# def wait_for_feedback():
-#     # wait until grasp or suction finished
-#     txt = 'Wait'
-#     wait = wi('Waiting for robot feedback')
-#     while txt == 'Wait':
-#         wait.step(0.5)
-#         txt = read_robot_feedback()
-#     else:
-#         wait.end()
-#         print('Robot state: ' + txt)
-#     return txt
