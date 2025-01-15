@@ -1,4 +1,3 @@
-import math
 import os.path
 import subprocess
 import numpy as np
@@ -7,10 +6,9 @@ import trimesh
 from colorama import Fore
 import open3d as o3d
 from torchrl.modules import MaskedCategorical
-
+from Online_data_audit.data_tracker2 import DataTracker2
 from lib.IO_utils import save_pickle, load_pickle
 from lib.report_utils import wait_indicator as wi
-
 from Configurations.ENV_boundaries import bin_center
 from Configurations.config import distance_scope, gripper_width_during_shift
 from Configurations.run_config import simulation_mode, \
@@ -41,7 +39,10 @@ execute_gripper_grasp_bash = './bash/run_robot_grasp.sh'
 execute_suction_shift_bash = './bash/run_robot_suction_shift.sh'
 execute_gripper_shift_bash = './bash/run_robot_gripper_shift.sh'
 execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
+
 buffer_file='buffer.pkl'
+action_data_tracker_path=r'online_data_dict'
+
 pr=my_print()
 
 def get_unflatten_index(flat_index, ori_size):
@@ -73,7 +74,7 @@ class Action():
         self.reward=None
 
         self.is_synchronous=None
-        self.on_target=None
+        self.policy_index=None # 0 for stochastic policy, 1 for deterministic policy, 2 for random policy
         self.file_id=None
 
         '''pose'''
@@ -84,6 +85,7 @@ class Action():
 
         '''quality'''
         self.is_executable=None
+        self.executed=None
         self.robot_feedback=None
         self.grasp_result=None
         self.shift_result=None
@@ -236,6 +238,8 @@ class GraspAgent():
         self.gripper_arm_reachability_net = None
 
         self.buffer=load_pickle(buffer_file) if os.path.exists(buffer_file) else PPOMemory()
+        self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
+        self.online_learning=PPOLearning()
 
         '''modalities'''
         self.point_clouds = None
@@ -605,7 +609,6 @@ class GraspAgent():
         self.valid_actions_mask[occupancy_mask].fill_(False)
         self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
 
-
     def view_valid_actions_mask(self):
         four_pc_stack = np.stack([self.voxel_pc, self.voxel_pc, self.voxel_pc, self.voxel_pc])
         four_pc_stack[1, :, 0] += 0.5
@@ -638,7 +641,7 @@ class GraspAgent():
             self.process_action(action_obj)
             if action_obj.is_executable:
                 first_action_obj=action_obj
-                if i<available_actions_on_target:first_action_obj.on_target=True
+                if i<available_actions_on_target:first_action_obj.policy_index=1
                 if action_obj.is_grasp:
                     self.mask_arm_occupancy(action_obj)
                 break
@@ -647,7 +650,7 @@ class GraspAgent():
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
 
-        if first_action_obj.on_target: self.valid_actions_mask=self.valid_actions_on_target_mask
+        if first_action_obj.policy_index==1: self.valid_actions_mask=self.valid_actions_on_target_mask
         else:
             self.valid_actions_mask = self.valid_actions_mask.reshape(-1, 4)
             self.valid_actions_mask[:, 2:].fill_(False)  # simultaneous operation of both arms are for grasp actions only
@@ -685,9 +688,12 @@ class GraspAgent():
                 self.buffer.pop()
                 '''dump the buffer as pickl'''
                 save_pickle(buffer_file,self.buffer)
+                '''save data tracker'''
+                self.data_tracker.save()
             elif counter==1:
-                if len(self.buffer)>20:
+                if self.buffer.episodes_counter>0:
                     '''step policy training'''
+                    self.online_learning.step(self.policy_net,self.buffer)
             robot_feedback_ = read_robot_feedback()
             counter+=1
         else:
@@ -695,7 +701,6 @@ class GraspAgent():
             print('Robot msg: ' + robot_feedback_)
         first_action_obj.robot_feedback = robot_feedback_
         second_action_obj.robot_feedback = robot_feedback_
-
         return first_action_obj,second_action_obj
 
     def execute(self,first_action_obj,second_action_obj):
@@ -727,7 +732,7 @@ class GraspAgent():
 
         return first_action_obj,second_action_obj
 
-    def process_feedback(self,first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre):
+    def process_feedback(self,first_action_obj:Action,second_action_obj:Action, img_grasp_pre, img_suction_pre,img_main_pre):
         pr.title('process feedback')
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset': trigger_new_perception()
         if not report_result: return
@@ -736,6 +741,8 @@ class GraspAgent():
 
         '''save feedback to data pool'''
         if first_action_obj.robot_feedback == 'Succeed':
+            first_action_obj.executed=True
+            second_action_obj.executed=True
             if first_action_obj.is_shift:
                 first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
 
@@ -757,9 +764,17 @@ class GraspAgent():
             save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action,self.run_sequence)
             self.run_sequence+=1
 
-            '''send to buffer'''
-            if gripper_action.is_executable: self.buffer.push(gripper_action)
-            if suction_action.is_executable: self.buffer.push(suction_action)
+            '''update buffer and tracker'''
+            if gripper_action.is_executable:
+                self.buffer.push(gripper_action)
+                self.data_tracker.push(gripper_action)
+            if suction_action.is_executable:
+                self.buffer.push(suction_action)
+                self.data_tracker.push(suction_action)
+
+        else:
+            first_action_obj.executed=False
+            second_action_obj.executed=False
 
 '''conventions'''
 # normal is a vector emerge out of the surface

@@ -2,8 +2,8 @@ import numpy as np
 import torch
 from collections import deque
 from Grasp_Agent_ import Action
+from models.policy_net import PolicyNet
 
-minimum_buffer_size=20
 max_buffer_size=50
 gamma=0.99
 lamda=0.95
@@ -20,51 +20,67 @@ class PPOMemory():
         self.rewards=deque([])
         self.values=deque([])
         self.advantages=deque([])
+        self.is_synchronous=deque([])
+        self.action_indexes=deque([])
+        self.point_indexes=deque([])
 
         self.probs=deque([])
         self.last_ending_index=None # the end index of the last completed episode
 
-        '''track episode data'''
         self.is_end_of_episode=deque([])
-        # list elements takes the values [0,1,None]
-            # 0 : the instance belong to the episode but is not the end of it
-            # 1 : the instance is the end of the episode
-            # None : the instance is not part of the episode, also means the instance is sampled following either a deterministic policy or a random policy
+        self.episodes_counter=0 # track the number of completed episodes in the buffer
 
     def push(self, action_obj:Action):
-        self.actions_obj_list.append(action_obj)
-        self.values.append(action_obj.value)
-        self.probs.append(action_obj.prob)
-        self.update_rewards(action_obj)
-        if action_obj.on_target:
-            if len(self)>0 and self.is_end_of_episode[-1]==0:
-                self.is_end_of_episode[-1]=1
-            self.is_end_of_episode.append(None)
-            self.last_ending_index=len(self)-1
-            self.update_advantages()
-        else:
+        if action_obj.policy_index==0:
+            self.actions_obj_list.append(action_obj)
+            self.values.append(action_obj.value)
+            self.probs.append(action_obj.prob)
+            self.is_synchronous.append(action_obj.is_synchronous)
+            self.action_indexes.append(action_obj.action_index)
+            self.point_indexes.append(action_obj.point_index)
+            '''task in process'''
+            self.effort_penalty(action_obj)
             self.is_end_of_episode.append(0)
+        elif action_obj.policy_index==1:
+            '''task end successfully'''
+            if len(self)>0 and self.is_end_of_episode[-1]==0:
+                self.episodes_counter+=1
+                self.last_ending_index = len(self) - 1
+                self.positive_reward()
+                self.is_end_of_episode[-1]=1
+                self.update_advantages()
+        elif action_obj.policy_index==2:
+            '''task end with failure'''
+            if len(self)>0 and self.is_end_of_episode[-1]==0:
+                self.episodes_counter+=1
+                self.last_ending_index = len(self) - 1
+                self.negative_reward()
+                self.is_end_of_episode[-1]=1
+                self.update_advantages()
 
-
-    def update_rewards(self,action_obj:Action):
+    def effort_penalty(self,action_obj:Action):
         assert len(self.rewards)==len(self.actions_obj_list)-1
-        '''Reward is computed in two steps'''
-        if action_obj.on_target:
-            # if the action grasp the target then it is not part of the episode as it follows a deterministic policy
-            # the episode ends before this action step and more reward will be added to the former actions because it facilitates the current action to grasp the target
-            self.rewards.append(None)
-        else:
-            '''1) penalize current action to reduce the effort needed to reach the target'''
-            k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
-            self.rewards.append(-0.2/k)
+        '''penalize each action to reduce the effort needed to reach the target'''
+        k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
+        self.rewards.append(-0.4/k)
 
-        '''2) reward previous action/s if it cause to grasp the target in the current action'''
-        if action_obj.on_target and len(self.actions_obj_list)>1:
-            if self.actions_obj_list[-1].is_synchronous:
+    def positive_reward(self):
+        '''add reward to the last action/s that leads to grasp the target in the current action'''
+        if len(self.probs)>1:
+            if self.is_synchronous[-1]:
                 # add rewards to the last two actions if both arms are used in the last run
                 self.rewards[-2:]+=1
             else:
                 self.rewards[-1:]+=1
+
+    def negative_reward(self):
+        '''dedict reward to the last action/s that leads to the disappearance of the target in the new state'''
+        if len(self.probs)>1:
+            if self.is_synchronous[-1]:
+                # add rewards to the last two actions if both arms are used in the last run
+                self.rewards[-2:]-=1
+            else:
+                self.rewards[-1:]-=1
 
     def generate_batches(self,batch_size):
         '''arrange batches to the end of the last completed episode'''
@@ -101,13 +117,19 @@ class PPOMemory():
     def pop(self):
         if len(self)>max_buffer_size:
             for i in range(3):
+                if self.is_end_of_episode[0]==1:
+                    self.episodes_counter -= 1
                 self.actions_obj_list.popleft()
                 self.rewards.popleft()
                 self.values.popleft()
                 self.probs.popleft()
+                self.action_indexes.popleft()
+                self.point_indexes.popleft()
                 self.advantages.popleft()
                 self.is_end_of_episode.popleft()
+                self.is_synchronous.popleft()
                 self.last_ending_index-=1
+
 
     def get_all_buffer_files_ids(self):
         file_ids=[]
@@ -119,7 +141,7 @@ class PPOMemory():
         return len(self.actions_obj_list)
 
 class PPOLearning():
-    def __init__(self, model,n_epochs=4,policy_clip=0.2, gamma=0.99, lamda=0.95,batch_size=5):
+    def __init__(self, model=None,buffer:PPOMemory=None,n_epochs=4,policy_clip=0.2, gamma=0.99, lamda=0.95,batch_size=5):
 
         self.gamma = gamma
         self.policy_clip = policy_clip
@@ -128,25 +150,34 @@ class PPOLearning():
         self.batch_size=batch_size
         self.model=model
 
-        self.memory = PPOMemory()
+        self.memory = buffer
+
+    def step(self,model:PolicyNet(),buffer:PPOMemory):
+        self.model=model
+        self.memory=buffer
+        self.model.train(True)
+        self.learn()
+        self.model.eval()
+        return self.model
 
     def learn(self):
         for _ in range(self.n_epochs):
 
-            ## initially all will be empty arrays
-            state_arr, action_arr, old_prob_arr, value_arr, \
-                reward_arr, dones_arr, batches = self.memory.generate_batches(batch_size=self.batch_size)
+            batches = self.memory.generate_batches(batch_size=self.batch_size)
 
-            advantage_arr = self.calculate_advanatage(reward_arr, value_arr, dones_arr)
-            values = torch.tensor(value_arr).to(self.model.device)
+            # advantage_arr = self.calculate_advanatage(reward_arr, value_arr, dones_arr)
+            # values = torch.tensor(value_arr).to(self.model.device)
+
+            '''load files'''
 
             for batch in batches:
-                states = torch.tensor(state_arr[batch], dtype=torch.float).to(self.model.device)
-                old_probs = torch.tensor(old_prob_arr[batch]).to(self.model.device)
-                actions = torch.tensor(action_arr[batch]).to(self.model.device)
-
-                dist = self.actor(states)
-                critic_value = self.critic(states)
+                b=len(batch)
+                '''load states'''
+                states=None
+                # states = torch.tensor(state_arr[batch], dtype=torch.float).to(self.model.device)
+                old_probs = torch.tensor(self.memory.probs[batch]).to(self.model.device)
+                # actions = torch.tensor(action_arr[batch]).to(self.model.device)
+                griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_values,action_probs=self.model(rgb,gripper_pose,suction_direction,quality_masks)
 
                 critic_value = torch.squeeze(critic_value)
 
