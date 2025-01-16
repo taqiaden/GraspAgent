@@ -1,11 +1,10 @@
 import numpy as np
 from torch.utils import data
-
 from label_unpack import LabelObj
 from lib.image_utils import depth_to_gray_scale
 
 
-class ValueDataset(data.Dataset):
+class PolicyDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):
         super().__init__()
         self.data_pool = data_pool

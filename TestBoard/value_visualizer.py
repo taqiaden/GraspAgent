@@ -9,7 +9,7 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker import gripper_grasp_tracker, sample_all_positive_and_negatives, \
     suction_grasp_tracker
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from dataloaders.value_dl import ValueDataset
+from dataloaders.policy_dl import ValueDataset
 from interpolate_bin import estimate_object_mask
 from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report

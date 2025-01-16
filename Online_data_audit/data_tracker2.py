@@ -1,5 +1,7 @@
 import random
 
+import numpy as np
+
 from Grasp_Agent_ import Action
 from Online_data_audit.dictionary_utils import load_dict, save_dict
 from label_unpack import LabelObj
@@ -29,8 +31,6 @@ class DataTracker2():
         self.list_size=list_size
         self.empty_list=[0]*list_size
 
-        self.truncate_factor=1000
-
     def get_value(self,key):
         if key in self.dict:
             return self.dict[key]
@@ -46,43 +46,34 @@ class DataTracker2():
         new_record[4]=0 if action_obj.shift_result==0 else 1
         self.dict[action_obj.file_id]=new_record
 
-    def update_ground_truth_(self,file_id,ground_truth,list_index=0):
-        old_record = self.get_value(file_id)
-        new_record = old_record
-        new_record[list_index]=ground_truth
-        self.dict[file_id] = new_record
+    def selective_sampling(self, size,sampling_probabilities=None):
+        shuffled_keys=list(self.dict.keys())
+        random.shuffle(shuffled_keys)
 
-    def set_test_sample(self,file_id,list_index,data=1):
-        old_record = self.get_value(file_id)
-        new_record = old_record
-        new_record[list_index] = data
-        self.dict[file_id] = new_record
+        ids=[]
+        for key in shuffled_keys:
+            record=self.dict[key]
+            if len(ids)==size: break
 
-    def set_collision_state(self,file_id,list_index,data=2):
-        old_record = self.get_value(file_id)
-        new_record = old_record
-        new_record[list_index] = data
-        self.dict[file_id] = new_record
+            if record[0]==0:
+                '''gripper'''
+                if record[3]==1 and np.random.random<=sampling_probabilities[0]:
+                    '''positive'''
+                    ids.append(key)
+                elif np.random.random<=sampling_probabilities[1]:
+                    '''negative'''
+                    ids.append(key)
+            else:
+                '''suction'''
+                if record[3] == 1 and np.random.random<=sampling_probabilities[2]:
+                    '''positive'''
+                    ids.append(key)
+                elif np.random.random<=sampling_probabilities[3]:
+                    '''negative'''
+                    ids.append(key)
 
-    def update_loss_record(self,file_ids,losses,start_index=0):
-        for j in range(len(file_ids)):
-            '''old record'''
-            old_record=self.get_value(file_ids[j])
+        return ids
 
-            '''compute'''
-            first_moment = moving_momentum(old_record[1+start_index], losses[j].item(), decay_rate=0.99, exponent=1)
-            second_moment = moving_momentum(old_record[2+start_index], losses[j].item(), decay_rate=0.99, exponent=2)
-
-            '''truncated update'''
-            new_record = old_record
-            new_record[0+start_index]=float(int(losses[j] * self.truncate_factor))/self.truncate_factor
-            new_record[1+start_index] = float(int(first_moment * self.truncate_factor))/self.truncate_factor
-            new_record[2+start_index] = float(int(second_moment * self.truncate_factor))/self.truncate_factor
-
-            # print(new_record)
-
-            '''update'''
-            self.dict[file_ids[j]] = new_record
 
     def save(self):
         save_dict(self.dict, self.path)

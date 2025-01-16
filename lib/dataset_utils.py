@@ -147,6 +147,7 @@ class data_pool():
         self.label=modality_pool('label',self.dir,'npy',self.is_local)
         self.rgb=modality_pool('rgb',self.dir,'jpg',self.is_local)
         self.depth=modality_pool('depth',self.dir,'npy',self.is_local)
+        self.mask=modality_pool('mask',self.dir,'npy',self.is_local)
 
         '''set main modality'''
         self.main_modality=self.label
