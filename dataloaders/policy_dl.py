@@ -1,10 +1,8 @@
-import numpy as np
 from torch.utils import data
-from label_unpack import LabelObj
-from lib.image_utils import depth_to_gray_scale
+from label_unpack import  LabelObj2
 
 
-class PolicyDataset(data.Dataset):
+class GraspQualityDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):
         super().__init__()
         self.data_pool = data_pool
@@ -12,19 +10,21 @@ class PolicyDataset(data.Dataset):
 
     def __getitem__(self, idx):
         target_index = self.files_indexes[idx]
-        depth = self.data_pool.depth.load_as_numpy(target_index)
+        rgb = self.data_pool.rgb.load_as_numpy(target_index)
         label = self.data_pool.label.load_as_numpy(target_index)
-        label_obj = LabelObj(label=label, depth=depth)
+        label_obj = LabelObj2(label=label)
 
-        pixel_index = label_obj.get_pixel_index()
-        pose_7=label_obj.get_gripper_pose_7()
+        gripper_pixel_index = label_obj.gripper.pixel_index()
+        suction_pixel_index = label_obj.suction.pixel_index()
 
-        score = label_obj.success
-        normal= label_obj.normal
+        pose_7=label_obj.gripper.pose_7()
 
-        random_rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
+        gripper_score=label_obj.gripper.result
+        suction_score=label_obj.suction.result
 
-        return depth[np.newaxis,:,:],pose_7,pixel_index,score,normal,label_obj.is_gripper,random_rgb
+        normal= label_obj.suction.normal
+
+        return rgb,pose_7,gripper_pixel_index,suction_pixel_index,gripper_score,suction_score,normal
 
     def __len__(self):
         return len(self.files_indexes)

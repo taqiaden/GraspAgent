@@ -84,3 +84,134 @@ class LabelObj():
         collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
 
         return collision_intensity>0
+
+    # tabulated data:
+    # [0:3]: gripper_target_point
+    # [3:6]: suction_target_point
+    # [6:22]: gripper_transformation
+    # [22:38]: suction_transformation
+    # [38]: gripper_width
+    # [39:42] gripper shift end position
+    # [42:45] suction shift end position
+    # [45]: gripper_action_index
+    # [46]: suction_action_index
+    # [47]: gripper_result
+    # [48]: suction_result
+    # [49]: run_sequence
+
+class GripperParameters:
+    def __init__(self,label):
+        self.target_point = label[0:3]
+        self.transformation = label[6:22].copy().reshape(-1, 4)
+        self.width = label[38] / config.width_scale
+        self.is_grasp=1 if label[45]==1 else 0
+        self.is_shift=1 if label[45]==2 else 0
+        if self.is_shift:
+            self.shift_end_location=label[39:42]
+        self.result=label[47]
+
+    @property
+    def approach(self):
+        return self.transformation[0:3, 0]
+
+    @property
+    def transition(self):
+        return self.transformation[0:3, 3]
+
+    @property
+    def distance(self):
+        return (self.transition-self.target_point)/self.approach
+
+    @property
+    def pose_7(self):
+        R = self.transformation[0:3, 0:3]
+        pose_7 = encode_gripper_pose_npy(self.distance, self.width, R)
+        return pose_7
+
+    def pixel_index(self,depth):
+        pixel_index=get_pixel_index(depth, camera, self.target_point)
+        return pixel_index
+
+    def check_collision(self,depth,pc,visualize=False):
+        pixel_index = self.pixel_index(depth)
+
+        depth_value = depth[pixel_index[0], pixel_index[1]]
+
+        '''get pose parameters'''
+        target_point = pixel_to_point(pixel_index, depth_value, camera)
+        target_point = transform_to_camera_frame(target_point[None, :], reverse=True)[0]
+
+        target_pose = self.pose_7()
+        T_d, width, distance = pose_7_to_transformation(torch.from_numpy(target_pose), target_point)
+
+        collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
+
+        return collision_intensity>0
+
+class SuctionParameters:
+    def __init__(self,label):
+        self.target_point = label[3:6]
+        self.transformation = label[22:38].copy().reshape(-1, 4)
+        self.is_grasp=1 if label[46]==1 else 0
+        self.is_shift=1 if label[46]==2 else 0
+        if self.is_shift:
+            self.shift_end_location=label[42:45]
+        self.result=label[48]
+
+    @property
+    def approach(self):
+        return self.transformation[0:3, 0]
+
+    @property
+    def normal(self):
+        return -self.approach
+
+    def pixel_index(self,depth):
+        pixel_index=get_pixel_index(depth, camera, self.target_point)
+        return pixel_index
+
+
+class LabelObj2:
+    def __init__(self,label=None,point_clouds=None,depth=None,RGB=None):
+        '''modalities'''
+        self.point_clouds=point_clouds
+        self.depth=depth
+        self.RGB=RGB
+
+        '''label data'''
+        if label is not None:
+            self.use_gripper = label[45]!=0
+            self.use_suction = label[46]!=0
+
+            '''gripper parameters'''
+            if self.use_gripper :
+                self.gripper=GripperParameters(label)
+
+            '''suction parameters'''
+            if self.use_suction:
+                self.suction=SuctionParameters(label)
+
+            self.step_number=label[49]
+            self.is_end_of_task=label[50]
+
+
+    def get_depth(self,point_clouds=None):
+        if self.depth is not None and point_clouds is None:
+            return self.depth
+        else:
+            if point_clouds is not None: self.point_clouds=point_clouds
+            transformed_pc = transform_to_camera_frame(self.point_clouds)
+            self.depth = point_clouds_to_depth(transformed_pc, camera)
+            return self.depth
+
+    def get_point_clouds_from_depth(self,depth=None):
+        if depth is not None:
+            self.depth=depth
+        point_clouds, mask = depth_to_point_clouds(self.depth, camera)
+        point_clouds = transform_to_camera_frame(point_clouds, reverse=True)
+        return point_clouds
+
+
+
+
+

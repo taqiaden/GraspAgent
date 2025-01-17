@@ -1,9 +1,7 @@
 import random
-
 import numpy as np
-
-from Grasp_Agent_ import Action
 from Online_data_audit.dictionary_utils import load_dict, save_dict
+from action import Action
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
 from lib.report_utils import progress_indicator as pi
@@ -12,22 +10,33 @@ from lib.statistics import moving_momentum
 dictionary_directory=r'Online_data_audit/'
 
 #[key] file id
-# [0] 0 for gripper, 1 for suction
+'''gripper records'''
+# [0] 1 if gripper is used else 1
 # [1] 0 for grasp 1 for shift
-# [2] 0 for solo arm, 1 for both arms utilization
-# [3] 0 for failed to grasp, 1 for successful grasp
-# [4] 0 for failed shift, 1 for successful shift
+# [2] grasp result
+# [3] shift result
+'''suction records'''
+# [4] if suction is used else 1
+# [5] 0 for grasp 1 for shift
+# [6] grasp result
+# [7] shift result
+
 gripper_container_size=10
 suction_container_size=10
 
 online_data = online_data()
+
+def sampling_p(sampling_rate,target_rate=0.25,exponent=10,k=0.75):
+    if sampling_rate>target_rate:
+        return ((target_rate - sampling_rate - 1)**exponent) *k
+    else:
+        return 1. - (sampling_rate/target_rate)*(1-k)
 
 class DataTracker2():
     def __init__(self,name='',list_size=3):
         self.name=name
         self.path=dictionary_directory+name+',pkl'
         self.dict=load_dict(self.path)
-
         self.list_size=list_size
         self.empty_list=[0]*list_size
 
@@ -38,37 +47,50 @@ class DataTracker2():
             return self.empty_list.copy()
 
     def push(self, action_obj:Action):
-        new_record=self.empty_list.copy()
-        new_record[0]=0 if action_obj.use_gripper_arm else 1
-        new_record[1]=0 if action_obj.is_grasp else 1
-        new_record[2]=0 if not action_obj.is_synchronous else 1
-        new_record[3]=0 if action_obj.grasp_result==0 else 1
-        new_record[4]=0 if action_obj.shift_result==0 else 1
+        new_record=self.get_value(action_obj.file_id)
+
+        if action_obj.use_gripper_arm:
+            '''gripper'''
+            new_record[0] = 1 if action_obj.use_gripper_arm else 0
+            new_record[1] = 0 if action_obj.is_grasp else 1
+            new_record[2] = action_obj.grasp_result
+            new_record[3] = action_obj.shift_result
+
+        else:
+            '''suction'''
+            new_record[4] = 1 if action_obj.use_suction_arm else 0
+            new_record[5] = 0 if action_obj.is_grasp else 1
+            new_record[6] = action_obj.grasp_result
+            new_record[7] = action_obj.shift_result
+
         self.dict[action_obj.file_id]=new_record
 
-    def selective_sampling(self, size,sampling_probabilities=None):
+    def selective_grasp_sampling(self, size,sampling_rates=None):
         shuffled_keys=list(self.dict.keys())
         random.shuffle(shuffled_keys)
+
+        sampling_probabilities=[sampling_p(sampling_rates(i)) for i in range(4)]
 
         ids=[]
         for key in shuffled_keys:
             record=self.dict[key]
             if len(ids)==size: break
 
-            if record[0]==0:
-                '''gripper'''
-                if record[3]==1 and np.random.random<=sampling_probabilities[0]:
+            if record[0]==1 and record[1]==0:
+                '''gripper grasp'''
+                if record[3]==1 and np.random.random()<=sampling_probabilities[0]:
                     '''positive'''
                     ids.append(key)
-                elif np.random.random<=sampling_probabilities[1]:
+                elif np.random.random()<=sampling_probabilities[1]:
                     '''negative'''
                     ids.append(key)
-            else:
-                '''suction'''
-                if record[3] == 1 and np.random.random<=sampling_probabilities[2]:
+
+            if record[4]==1 and record[5]==0:
+                '''suction grasp'''
+                if record[3] == 1 and np.random.random()<=sampling_probabilities[2]:
                     '''positive'''
                     ids.append(key)
-                elif np.random.random<=sampling_probabilities[3]:
+                elif np.random.random()<=sampling_probabilities[3]:
                     '''negative'''
                     ids.append(key)
 

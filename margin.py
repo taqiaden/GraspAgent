@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from torch.distributions.categorical import Categorical
-from torchrl.modules import MaskedCategorical
 
 from records.training_satatistics import MovingRate
 

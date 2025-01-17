@@ -45,19 +45,12 @@ def suction_sampler_loss(pc,target_normal):
     return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
 
 def gripper_sampler_loss(pixel_index,j,generated_critic_score,critic_score_label):
-
-
     pix_A = pixel_index[j, 0]
     pix_B = pixel_index[j, 1]
 
     prediction_score = generated_critic_score[j, 0, pix_A, pix_B]
     loss = torch.clamp(critic_score_label - prediction_score,0)
     return loss
-def selection_p(sampling_rate,probability_exponent=10):
-    pivot_point = np.sqrt(np.abs(sampling_rate)) * np.sign(sampling_rate)
-    xa = ((model_max_score - prediction_).item() / model_score_range) * pivot_point
-    selection_probability = ((1 - pivot_point) / 2 + xa + 0.5 * (1 - abs(pivot_point)))
-    selection_probability = selection_probability ** probability_exponent
 
 def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,objects_mask=None,maximum_iterations=10000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
@@ -77,10 +70,8 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
         return np.random.randint(0, pc.shape[0])
     return target_index
 
-
 def step_critic_training(gan, generated_grasps, batch_size, pixel_index, label_generated_grasps, depth,
                          collision_state_list, out_of_scope_list, firmness_state_list, alpha, beta, firmness_weight):
-
     '''concatenation'''
     with torch.no_grad():
         generated_grasps_cat = torch.cat([generated_grasps, label_generated_grasps], dim=0)
@@ -108,20 +99,18 @@ def step_critic_training(gan, generated_grasps, batch_size, pixel_index, label_g
         bad_state_grasp = collision_state_ or out_of_scope
         firmness_state = firmness_state_list[j]
 
-        collision_loss += (torch.clamp(prediction_ - label_ +alpha, 0) * bad_state_grasp)  # *w
+        collision_loss += (torch.clamp(prediction_ - label_ +1, 0) * bad_state_grasp)  # *w
 
-        firmness_loss += torch.clamp((prediction_ - label_+alpha), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * firmness_weight
-        firmness_loss += torch.clamp((label_ - prediction_+alpha), 0) * (1 - bad_state_grasp) * firmness_state * firmness_weight
+        firmness_loss += torch.clamp((prediction_ - label_+1), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * firmness_weight
+        firmness_loss += torch.clamp((label_ - prediction_+1), 0) * (1 - bad_state_grasp) * firmness_state * firmness_weight
 
-    c_loss = ( collision_loss + firmness_loss )   * 100*(alpha*beta)#+ curriculum_loss
+    c_loss = ( collision_loss + firmness_loss )   #* 10*(alpha*beta) # + curriculum_loss
 
     '''optimizer step'''
     c_loss.backward()
     gan.critic_optimizer.step()
     gan.critic_optimizer.zero_grad()
-
     return c_loss.item(), critic_score_labels
-
 
 class TrainActionNet:
     def __init__(self,batch_size=1,n_samples=None,epochs=1,learning_rate=5e-5):
@@ -166,9 +155,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10)
 
         gan.generator_adam_optimizer(learning_rate=self.learning_rate)
 
@@ -410,7 +399,7 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-5
+    lr = 1e-6
     for i in range(1000):
         #cuda_memory_report()
 

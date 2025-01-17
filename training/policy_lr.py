@@ -3,17 +3,25 @@ import random
 import numpy as np
 import torch
 from collections import deque
+
+from Configurations.config import workers
 from Grasp_Agent_ import Action
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper
+from dataloaders.policy_dl import GraspQualityDataset
 from models.policy_net import PolicyNet, policy_module_key
 from records.training_satatistics import MovingRate
+from lib.report_utils import progress_indicator
+from lib.dataset_utils import online_data2
+
 
 max_policy_buffer_size=50
 max_quality_buffer_size=50
 gamma=0.99
 lamda=0.95
 learning_rate=1e-4
+
+online_data2=online_data2()
 
 def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
     ratio = new_policy_probs / old_policy_probs
@@ -239,44 +247,45 @@ class PPOLearning():
         online_ids=buffer.non_episodic_buffer_file_ids[indexes]
 
         '''sample from old experience'''
-        g_p_pr=sampling_p(buffer.g_p_sampling_rate.moving_rate)
-        g_n_pr=sampling_p(buffer.g_n_sampling_rate.moving_rate)
-        s_p_pr=sampling_p(buffer.s_p_sampling_rate.moving_rate)
-        s_n_pr=sampling_p(buffer.s_n_sampling_rate.moving_rate)
-        replay_ids=data_tracker.selective_sampling(size=replay_size,sampling_probabilities=(g_p_pr,g_n_pr,s_p_pr,s_n_pr))
+        replay_ids=data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(buffer.g_p_sampling_rate.val,buffer.g_n_sampling_rate.val,
+                                                                                    buffer.s_p_sampling_rate.val,buffer.s_n_sampling_rate.val))
 
         return online_ids+replay_ids
 
     def grasp_quality_learning(self,model_wrapper:ModelWrapper(),buffer:PPOMemory,data_tracker:DataTracker2,batch_size=2,n_batches=4,online_ratio=0.3):
 
         file_ids=self.sample_files_( buffer, data_tracker, batch_size, n_batches, online_ratio)
-        return
-        pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
-        for i, batch in enumerate(self.data_loader, 0):
-            depth,pose_7,pixel_index,score,normal,is_gripper,random_rgb= batch
-            depth = depth.cuda().float()  # [b,1,480.712]
-            pose_7 = pose_7.cuda().float()
-            score = score.cuda().float()
-            normal = normal.cuda().float()
-            is_gripper = is_gripper.cuda().float()
-            random_rgb = random_rgb.cuda().float().permute(0,3,1,2)
 
-            b = depth.shape[0]
+        '''dataloader'''
+        dataset = GraspQualityDataset(data_pool=online_data2, file_ids=file_ids)
+        data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=workers,
+                                                       shuffle=True)
+
+        pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
+        for i, batch in enumerate(data_loader, 0):
+
+            rgb,pose_7,gripper_pixel_index,suction_pixel_index,gripper_score,suction_score,normal= batch
+
+            rgb = rgb.cuda().float()
+            pose_7 = pose_7.cuda().float()
+            gripper_score = gripper_score.cuda().float()
+            suction_score = suction_score.cuda().float()
+            normal = normal.cuda().float()
+
+
+            b = rgb.shape[0]
 
             '''zero grad'''
-            self.policy_net.model.zero_grad()
+            self.model_wrapper.model.zero_grad()
 
-            '''generated grasps'''
-            with torch.no_grad():
-                gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier \
-                    ,background_class,depth_features= self.action_net.generator(depth.clone())
-                target_object_mask = background_class.detach() <= 0.5
-                '''process label'''
-                for j in range(b):
-                    pix_A = pixel_index[j, 0]
-                    pix_B = pixel_index[j, 1]
-                    gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
-                    suction_direction[j, :, pix_A, pix_B] = normal[j]
+
+
+            '''process label'''
+            for j in range(b):
+                pix_A = pixel_index[j, 0]
+                pix_B = pixel_index[j, 1]
+                gripper_pose[j, :, pix_A, pix_B] = pose_7[j]
+                suction_direction[j, :, pix_A, pix_B] = normal[j]
 
             griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_value=self.policy_net.model(random_rgb,depth_features,gripper_pose,suction_direction,target_object_mask)
 
@@ -311,50 +320,15 @@ class PPOLearning():
             decay_loss=reversed_decay_(griper_grasp_score)+reversed_decay_(suction_grasp_score)+reversed_decay_(shift_affordance_classifier)
             decay_loss*=0.3
 
-            '''q value initialization'''
-            q_value_loss=torch.tensor([0.],device=q_value.device)
 
-            for j in range(b):
-                target_object_mask_j=target_object_mask[j,0]
-                permuted_q_value=q_value[j,0:2].permute(1,2,0)
-                q_value_loss += (torch.clamp(
-                    permuted_q_value[~target_object_mask_j] - permuted_q_value[target_object_mask_j].mean(), 0.) ** 2).mean()
-
-                grasp_q_values=q_value[j,0:2]
-                shift_q_values=q_value[j,2:]
-
-                '''initialize lower q-value for shift compared to grasp'''
-                q_value_loss+=(torch.clamp(shift_q_values-grasp_q_values.mean(),0.)**2).mean()
-
-                x1=np.random.randint(0,711)
-                x2=np.random.randint(0,711)
-
-                max_index=max(x1,x2)
-                min_index=min(x1,x2)
-
-                '''grasp q-value initialization'''
-                q_value_loss+=(torch.clamp(grasp_q_values[0,:,max_index].mean()-grasp_q_values[0,:,min_index].mean(),0.)**2).mean()
-                q_value_loss+=(torch.clamp(grasp_q_values[1,:,min_index].mean()-grasp_q_values[1,:,max_index].mean(),0.)**2).mean()
-
-                '''shift q-value initialization'''
-                q_value_loss+=(torch.clamp(shift_q_values[0,:,max_index].mean()-shift_q_values[0,:,min_index].mean(),0.)**2).mean()
-                q_value_loss+=(torch.clamp(shift_q_values[1,:,min_index].mean()-shift_q_values[1,:,max_index].mean(),0.)**2).mean()
 
             loss=loss+decay_loss+q_value_loss
             loss.backward()
             self.policy_net.optimizer.step()
 
-            self.swiped_samples += b
-            if i%100==0 and i!=0:
-                self.export_check_points()
-                self.view()
-
             pi.step(i)
         pi.end()
 
-        self.export_check_points()
-        self.view()
-        self.clear( )
 
     def policy_learning(self):
         for _ in range(self.n_epochs):

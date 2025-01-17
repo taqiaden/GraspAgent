@@ -1,12 +1,13 @@
 import datetime
 import math
 import time
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from lib.IO_utils import custom_print
+
+
+base_directory=r'records/'
 
 print=custom_print
 
@@ -79,12 +80,11 @@ def distribution_summary(npy,data_name=None):
     print(f'     Ave = {average} , Std = {std}')
     return max_score,min_score,average,std
 
-
 def save_new_data_point(data,file_name):
     # if not os.path.exists(file_name):
     #     with open(file_name, 'w') as file:
     #         file.write()
-    with open(file_name,"a") as f:
+    with open(base_directory+file_name,"a") as f:
         f.write(f'{data}\n')
 
 class counter_progress():

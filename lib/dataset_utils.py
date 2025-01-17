@@ -38,7 +38,6 @@ else:
 
 online_data_local_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
 
-
 def configure_smbclient():
     # initialize smbclient
     smbclient.ClientConfig(username='taqiaden', password='774631499')

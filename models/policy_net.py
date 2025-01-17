@@ -44,12 +44,8 @@ class PolicyNet(nn.Module):
         super().__init__()
         '''Total of 11 input channels'''
         # 3 RGB
-        # 2 grasp region mask
-        # 1 shift region mask
-        # 2 grasp reachability mask
-        # 2 shift reachability mask
         # 1 target object/s mask
-        self.rgb_back_bone = res_unet(in_c=11, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.rgb_back_bone = res_unet(in_c=4, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
 
         self.critic=VanillaDecoder().to('cuda')
         self.actor=VanillaDecoder().to('cuda')
@@ -61,9 +57,9 @@ class PolicyNet(nn.Module):
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-    def forward(self, rgb,gripper_pose,suction_direction,quality_masks):
+    def forward(self, rgb,gripper_pose,suction_direction,target_mask):
         '''backbone'''
-        input_channels=torch.cat([rgb,quality_masks],dim=1)
+        input_channels=torch.cat([rgb,target_mask],dim=1)
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 

@@ -16,8 +16,8 @@ def shift_a_distance(T, step_distance):
 def get_target_point_2(T,distance):
     approach=T[0:3, 0]
     transition=T[0:3, 3]
-    center_point= transition - approach * distance
-    return center_point
+    target_point= transition - approach * distance
+    return target_point
 
 def adjust_final_matrix(base_transformation,x_correction):
     rot1 = [[0, 0, 1, -x_correction],

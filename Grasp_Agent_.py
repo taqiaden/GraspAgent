@@ -5,8 +5,8 @@ import torch
 import trimesh
 from colorama import Fore
 import open3d as o3d
-from torchrl.modules import MaskedCategorical
 from Online_data_audit.data_tracker2 import DataTracker2
+from action import Action
 from lib.IO_utils import save_pickle, load_pickle
 from lib.report_utils import wait_indicator as wi
 from Configurations.ENV_boundaries import bin_center
@@ -21,9 +21,9 @@ from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import check_image_similarity
-from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
+from lib.rl.masked_categorical import MaskedCategorical
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.policy_net import PolicyNet, policy_module_key
@@ -32,7 +32,7 @@ from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
 from training.policy_lr import PPOLearning, PPOMemory
-from visualiztion import view_npy_open3d, vis_scene, get_arrow
+from visualiztion import view_npy_open3d, vis_scene
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
 execute_gripper_grasp_bash = './bash/run_robot_grasp.sh'
@@ -52,146 +52,6 @@ def get_unflatten_index(flat_index, ori_size):
         flat_index = flat_index // ori_size[i]
         res[i] = j
     return res
-
-class Action():
-    def __init__(self,point_index=None,action_index=None, probs=None, value=None):
-        self.point_index=point_index
-        self.action_index=action_index
-        if action_index is None:
-            self.is_shift=None
-            self.is_grasp=None
-            self.use_gripper_arm=None
-            self.use_suction_arm=None
-        else:
-            self.is_shift = action_index > 1
-            self.is_grasp = action_index <= 1
-            self.use_gripper_arm = ((action_index == 0) or (action_index == 2))
-            self.use_suction_arm = ((action_index == 1) or (action_index == 3))
-
-        '''rl data'''
-        self.value=probs
-        self.prob=value
-        self.reward=None
-
-        self.is_synchronous=None
-        self.policy_index=None # 0 for stochastic policy, 1 for deterministic policy, 2 for random policy
-        self.file_id=None
-
-        '''pose'''
-        self.target_point=None
-        self.transformation=None
-        self.width=None
-        self.shift_end_point=None
-
-        '''quality'''
-        self.is_executable=None
-        self.executed=None
-        self.robot_feedback=None
-        self.grasp_result=None
-        self.shift_result=None
-
-    @property
-    def is_valid(self):
-        return self.use_gripper_arm is not None or self.use_suction_arm is not None
-    @property
-    def arm_name(self):
-        if self.use_gripper_arm:
-            return 'gripper'
-        elif self.use_suction_arm:
-            return 'suction'
-
-    @property
-    def action_name(self):
-        if self.is_grasp:
-            return 'grasp'
-        elif self.is_shift:
-            return 'shift'
-
-    def check_collision(self,point_cloud):
-        if self.is_valid and self.is_grasp and self.use_gripper_arm:
-            return grasp_collision_detection(self.transformation, self.width, point_cloud, visualize=False) > 0
-        else:
-            return None
-
-    def get_gripper_mesh(self,color=None):
-        if self.is_valid and self.use_gripper_arm:
-            mesh = construct_gripper_mesh_2(self.width, self.transformation)
-            mesh.paint_uniform_color([0.5, 0.9, 0.5]) if color is None else mesh.paint_uniform_color(color)
-            return mesh
-        else:
-            return None
-
-    @property
-    def approach(self):
-        if self.transformation is not None:
-            return self.transformation[0:3, 0]
-        else:
-            return None
-
-    @property
-    def normal(self):
-        if self.transformation is not None:
-            normal = self.approach*-1
-            return normal
-        else:
-            return None
-
-    def get_approach_mesh(self):
-        if self.is_valid and self.transformation is not None:
-            arrow_emerge_point=self.target_point-self.approach*0.05
-            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.3)
-            return arrow_mesh
-        else:
-            return None
-
-    def pose_mesh(self):
-        if self.is_valid:
-            if self.use_gripper_arm:
-                if self.is_grasp:
-                    return self.get_gripper_mesh()
-                else:
-                    return self.get_gripper_mesh(color=[0.5, 0.5, 0.5])
-            else:
-                arrow_mesh=self.get_approach_mesh()
-                if self.is_grasp:
-                    arrow_mesh.paint_uniform_color([0.5, 0.9, 0.5])
-                else:
-                    arrow_mesh.paint_uniform_color([0.5, 0.5, 0.5])
-                return arrow_mesh
-        else:
-            return None
-
-    def view(self,point_clouds,mask=None):
-        scene_list = []
-        pose_mesh=self.pose_mesh()
-        # o3d_line(start, end2, colors_=[0, 0.5, 0])
-        if pose_mesh is not None:
-            scene_list.append(pose_mesh)
-            masked_colors = np.ones_like(point_clouds) * [0.5, 0.9, 0.5]
-            if mask is not None:
-                masked_colors[mask]=(masked_colors[mask]*0)+[0.9, 0.5, 0.5]
-            pcd = numpy_to_o3d(pc=point_clouds, color=masked_colors)
-            scene_list.append(pcd)
-            o3d.visualization.draw_geometries(scene_list)
-
-    def print(self):
-        if  self.is_valid:
-            pr.print('Action details:')
-            pr.step_f()
-            pr.print(f'{self.action_name} using {self.arm_name} arm')
-            if self.target_point is not None:
-                pr.print(f'target point {self.target_point}')
-
-            if self.robot_feedback is not None:
-                pr.print(f'Robot feedback message : {self.robot_feedback}')
-
-            if self.grasp_result is not None:
-                pr.print(f'Grasp result : {self.grasp_result}')
-
-            if self.shift_result is not None:
-                pr.print(f'Shift result : {self.shift_result}')
-
-            pr.step_b()
 
 def get_shift_end_points(start_points):
     targets=torch.zeros_like(start_points)
@@ -249,7 +109,7 @@ class GraspAgent():
         self.policy_learning=PPOLearning(model=self.policy_net)
 
         '''dense records'''
-        self.quality_masks=None
+        # self.quality_masks=None
         self.gripper_poses_5=None
         self.gripper_poses_7=None
         self.gripper_grasp_mask=None
@@ -266,13 +126,14 @@ class GraspAgent():
         self.n_shifts=0
         self.first_action_mask=None
         self.target_object_mask=None
+        self.mask_numpy=None
         self.valid_actions_on_target_mask=None
 
         '''track task sequence'''
         self.run_sequence=0
 
     def clear(self):
-        self.quality_masks = None
+        # self.quality_masks = None
         self.gripper_poses_5 = None
         self.gripper_poses_7 = None
         self.gripper_grasp_mask = None
@@ -290,6 +151,7 @@ class GraspAgent():
         self.first_action_mask = None
         self.target_object_mask = None
         self.valid_actions_on_target_mask = None
+        self.mask_numpy=None
 
 
     @property
@@ -426,13 +288,15 @@ class GraspAgent():
         suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
 
         '''quality masks'''
-        self.quality_masks=self.prepare_quality_masks(mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
-                              background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope)
+        # self.quality_masks=self.prepare_quality_masks(mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
+        #                       background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope)
 
+        self.target_object_mask = background_class.detach() <= 0.5
+        self.mask_numpy=self.target_object_mask.cpu().numpy()
         '''policy net output'''
         griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value, action_probs = self.policy_net(rgb_torch,
                                                                                                              gripper_pose,
-                                                                                                             suction_direction,self.quality_masks)
+                                                                                                             suction_direction,self.target_object_mask)
 
         '''reshape'''
         griper_collision_classifier=griper_collision_classifier.squeeze()[mask]
@@ -616,11 +480,14 @@ class GraspAgent():
         four_pc_stack[3, :, 0] += 1.5
 
         colors = np.ones_like(four_pc_stack) * [0.5, 0.9, 0.5]
-
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1,4)
         for i in range(4):
             mask_i = (self.valid_actions_mask[:, i] > 0.5).cpu().numpy()
             (colors[i])[~mask_i] *= 0.
             (colors[i])[~mask_i] += [0.9, 0.9, 0.9]
+
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
+
         four_pc_stack = np.concatenate([four_pc_stack[0], four_pc_stack[1], four_pc_stack[2], four_pc_stack[3]], axis=0)
         colors = np.concatenate([colors[0], colors[1], colors[2], colors[3]], axis=0)
         view_npy_open3d(four_pc_stack, color=colors)
@@ -761,7 +628,7 @@ class GraspAgent():
                 suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
 
             '''save action instance'''
-            save_grasp_sample(self.rgb, self.depth, gripper_action, suction_action,self.run_sequence)
+            save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
             self.run_sequence+=1
 
             '''update buffer and tracker'''
@@ -771,7 +638,6 @@ class GraspAgent():
             if suction_action.is_executable:
                 self.buffer.push(suction_action)
                 self.data_tracker.push(suction_action)
-
         else:
             first_action_obj.executed=False
             second_action_obj.executed=False
