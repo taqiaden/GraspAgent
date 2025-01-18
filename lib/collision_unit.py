@@ -10,12 +10,13 @@ from lib.grasp_utils import shift_a_distance
 from lib.mesh_utils import construct_gripper_mesh
 
 
-def grasp_collision_detection(T_d_,width,point_data, visualize=False):
+def grasp_collision_detection(T_d_,width,point_data, visualize=False,with_allowance=True):
     T_d=np.copy(T_d_)
     assert np.any(np.isnan(T_d))==False,f'{T_d}'
     #########################################################
     '''Push the gripper to the maximum inference allowance'''
-    T_d=shift_a_distance(T_d, -dist_allowance)
+    if with_allowance:
+        T_d=shift_a_distance(T_d, -dist_allowance)
 
     point_data =copy.deepcopy(point_data)
 

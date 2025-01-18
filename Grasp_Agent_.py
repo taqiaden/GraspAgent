@@ -8,11 +8,13 @@ import open3d as o3d
 from Online_data_audit.data_tracker2 import DataTracker2
 from action import Action
 from lib.IO_utils import save_pickle, load_pickle
+from lib.grasp_utils import shift_a_distance
 from lib.report_utils import wait_indicator as wi
-from Configurations.ENV_boundaries import bin_center
+from Configurations.ENV_boundaries import bin_center, dist_allowance
 from Configurations.config import distance_scope, gripper_width_during_shift
 from Configurations.run_config import simulation_mode, \
-    suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift
+    suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift, \
+    enhance_gripper_firmness, single_arm_operation_mode
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from lib.ROS_communication import  deploy_action, read_robot_feedback
@@ -383,6 +385,16 @@ class GraspAgent():
         # activate_exploration = True if np.random.rand() < exploration_probabilty else False
 
         collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
+        if collision_intensity==0 and enhance_gripper_firmness:
+            print('Enhance gripper pose')
+            step=dist_allowance/2
+            n=max(int((distance_scope-distance)/step),10)
+            for i in range(n):
+                T_d_new = shift_a_distance(T_d, step).copy()
+                collision_intensity = grasp_collision_detection(T_d_new, width, self.voxel_pc, visualize=False,with_allowance=False)
+                if collision_intensity==0:T_d=T_d_new
+                else:break
+
 
         # T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
         #                                                               exploration_attempts=5,
@@ -522,7 +534,8 @@ class GraspAgent():
             self.valid_actions_mask = self.valid_actions_mask.reshape(-1, 4)
             self.valid_actions_mask[:, 2:].fill_(False)  # simultaneous operation of both arms are for grasp actions only
             self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
-            if first_action_obj.is_shift:self.valid_actions_mask.fill_(False)
+            if first_action_obj.is_shift or single_arm_operation_mode:
+                return first_action_obj, second_action_obj
 
         '''second action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()

@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
-import sys
-
-import numpy
 import numpy as np
 import torch
-from Configurations.run_config import simulation_mode, use_real_rgb
+from Configurations.run_config import simulation_mode
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale, view_image
@@ -17,19 +14,16 @@ grasp_agent.initialize_check_points()
 
 while True:
     trigger_new_perception()
-    # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
+    img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
     with torch.no_grad():
         '''get modalities'''
         depth=get_scene_depth()
-        if use_real_rgb:
-            rgb=get_scene_RGB()
-        else:
-            rgb=depth_to_gray_scale(depth[:,:,np.newaxis], view=False, convert_to_three_channels=True, colorize=True)
-        # view_image(rgb)
-        # view_colored_point_cloud(rgb,depth)
+        rgb=get_scene_RGB()
+        view_image(rgb)
+        view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
         grasp_agent.model_inference(depth,rgb)
-        # grasp_agent.dense_view()
+        grasp_agent.dense_view()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
         grasp_agent.actions_view(first_action_obj,second_action_obj)

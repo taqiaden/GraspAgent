@@ -128,9 +128,10 @@ class ActionNet(nn.Module):
 
         self.sigmoid=nn.Sigmoid()
 
-    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,refine_grasp=True):
+    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,refine_grasp=True,selective_detachment=None):
         '''input standardization'''
         depth = standardize_depth(depth)
+
 
         '''backbone'''
         if detach_backbone:
@@ -138,6 +139,12 @@ class ActionNet(nn.Module):
                 features = self.back_bone(depth)
         else:
             features = self.back_bone(depth)
+            if selective_detachment is not None:
+                f_list=[]
+                for i in range(depth.shape[0]):
+                    if selective_detachment[i]:f_list.append(features[i])
+                    else: f_list.append(features[i].detach())
+                features=torch.stack(f_list)
 
         # depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
