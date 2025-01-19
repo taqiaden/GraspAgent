@@ -1,5 +1,7 @@
 import random
 
+import numpy as np
+
 from Online_data_audit.dictionary_utils import load_dict, save_dict
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
@@ -25,6 +27,7 @@ class DataTracker():
         self.path=dictionary_directory+name+',pkl'
         self.dict=load_dict(self.path)
 
+
         self.list_size=list_size
         self.empty_list=[0]*list_size
 
@@ -36,22 +39,30 @@ class DataTracker():
         else:
             return self.empty_list.copy()
 
-    def update_ground_truth_(self,file_id,ground_truth,list_index=0):
-        old_record = self.get_value(file_id)
-        new_record = old_record
-        new_record[list_index]=ground_truth
-        self.dict[file_id] = new_record
+    # def update_ground_truth_(self,file_id,ground_truth,list_index=0):
+    #     old_record = self.get_value(file_id)
+    #     new_record = old_record
+    #     new_record[list_index]=ground_truth
+    #     self.dict[file_id] = new_record
+    #
+    # def set_test_sample(self,file_id,list_index,data=1):
+    #     old_record = self.get_value(file_id)
+    #     new_record = old_record
+    #     new_record[list_index] = data
+    #     self.dict[file_id] = new_record
+    #
+    # def set_collision_state(self,file_id,list_index,data):
+    #     old_record = self.get_value(file_id)
+    #     new_record = old_record
+    #     new_record[list_index] = data
+    #     self.dict[file_id] = new_record
 
-    def set_test_sample(self,file_id,list_index,data=1):
+    def update_value(self, file_id, list_index, data,decay_rate=1.0):
         old_record = self.get_value(file_id)
         new_record = old_record
-        new_record[list_index] = data
-        self.dict[file_id] = new_record
+        new_val=(1.-decay_rate)*new_record[list_index]+data*decay_rate
+        new_record[list_index] = new_val
 
-    def set_collision_state(self,file_id,list_index,data=2):
-        old_record = self.get_value(file_id)
-        new_record = old_record
-        new_record[list_index] = data
         self.dict[file_id] = new_record
 
     def update_loss_record(self,file_ids,losses,start_index=0):
@@ -102,21 +113,31 @@ def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True,l
 
     data_tracker.save()
 
-def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False):
+def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False,sample_with_probability=False,k=2):
     positive_labels=[]
     data_tracker = DataTracker(name=dict_name, list_size=10)
 
+    p_cumulative=0
     for key in data_tracker.dict:
-        record=data_tracker.dict[key]
-        ground_truth=record[0]
-        collision_state=record[2]
-        if disregard_collision_samples and collision_state==1:continue
+        record_=data_tracker.dict[key]
+        ground_truth_=record_[0]
+        collision_state_=record_[2]
+        probability_=record_[3]
+        p_cumulative+=probability_
+        if disregard_collision_samples and collision_state_==1:continue
 
-        if int(ground_truth)==1:
-            positive_labels.append(key)
-        else:
+        if not int(ground_truth_)==1:
             continue
 
+        if sample_with_probability and np.random.rand()>=probability_**k:
+            data_tracker.update_value(file_id=key,list_index=3,data=1, decay_rate=0.01)
+            continue
+
+        data_tracker.update_value(file_id=key, list_index=3, data=0, decay_rate=0.01)
+        positive_labels.append(key)
+
+    data_tracker.save()
+    print(f'Mean sampling probability = {p_cumulative/len(data_tracker.dict)}')
     random.shuffle(positive_labels)
     if size is not None and len(positive_labels) >= size: positive_labels=positive_labels[0:size]
 
@@ -224,8 +245,46 @@ def track_collision_state(list_size=10,index=2):
     print(f'Found {counter} samples in collision state out of {len(ids)}')
     data_tracker.save()
 
+def set_sampling_probability(list_size=10, index=3):
+    '''get number of test samples'''
+    ids=sample_positive_buffer(gripper_grasp_tracker,size=None)
+
+
+    pi = progress_indicator('progress ', max_limit=len(ids))
+
+    '''set collision state'''
+    data_tracker = DataTracker(name=gripper_grasp_tracker, list_size=list_size)
+
+
+    counter=0
+
+    for i in range(len(ids)):
+        data_tracker.update_value( ids[i], index, data=0.3)
+        print(ids[i])
+        print(data_tracker.dict[ids[i]])
+        pi.step(i)
+
+    pi.end()
+    print(f'Found {counter} samples in collision state out of {len(ids)}')
+    data_tracker.save()
+
 if __name__ == '__main__':
-    track_collision_state()
+    # set_sampling_probability()
+    # track_collision_state()
+    data_tracker = DataTracker(name=gripper_grasp_tracker, list_size=10)
+
+    for key in data_tracker.dict:
+        record = data_tracker.dict[key]
+        ground_truth = record[0]
+        collision_state = record[2]
+        probability = record[3]
+        if int(ground_truth)==1:
+            pass
+        else:
+            continue
+        if  collision_state == 1: continue
+        # new_val = probability * (1 - 0.001) + 1 * 0.001
+        print(probability)
     # set_suction_dictionary()
     # set_gripper_dictionary()
     # split_gripper_data()

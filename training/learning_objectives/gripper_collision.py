@@ -44,6 +44,7 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7,visuali
         approach_cos = F.cosine_similarity(target_pose[0:3], ref_approach, dim=0)
         in_scope = 1.0 > generated_grasps[j, -2, pix_A, pix_B] > 0.0 and 1.0 > generated_grasps[
             j, -1, pix_A, pix_B] > 0.0 and approach_cos > theta_cos_scope
+
         out_of_scope_list.append(not in_scope)
 
         '''check firmness'''

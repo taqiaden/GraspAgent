@@ -54,9 +54,9 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
         return 0.
 
 if __name__ == "__main__":
-    from collections import deque
-    x=deque([None,None,None])
-    print(x[-1] is None)
+    adaptive_sample_size = lambda x: max(1, min(100, int(500 * (1 - x) ** 2)))
+    n_g = adaptive_sample_size(0.7)
+    print(n_g)
 
     # x=torch.rand((4,7))
     # t1=x.clone()

@@ -23,6 +23,8 @@ class ConfessionMatrix():
         self.FN = FN
         self.TN = TN
 
+        self.epsilon = 0.00001
+
     def update_confession_matrix(self,label,prediction_,pivot_value=0.5):
         '''masks'''
         TP_mask,FP_mask,FN_mask,TN_mask=confession_mask(label,prediction_,pivot_value=pivot_value)
@@ -31,25 +33,38 @@ class ConfessionMatrix():
         self.FN += (FN_mask).sum()
         self.TN += (TN_mask).sum()
 
-        return TP_mask,FP_mask,FN_mask,TN_mask
 
+        return TP_mask,FP_mask,FN_mask,TN_mask
+    @property
     def correct_classification(self):
         return self.TP+self.TN
+
+    @property
     def total_classification(self):
         return self.TP+self.TN+self.FP+self.FN
+
+    @property
     def accuracy(self):
-        return self.correct_classification()/self.total_classification()
+        return self.correct_classification/(self.total_classification+self.epsilon)
+
+    @property
     def recall(self):
         return self.TP/(self.TP+self.FN)
+
+    @property
     def tpr(self):
-        return self.recall()
+        return self.recall
+
+    @property
     def fpr(self):
         return self.FP/(self.FP+self.TN)
+
+    @property
     def precision(self):
         return self.TP/(self.TP+self.FP)
 
     def view(self):
-        total=self.total_classification()
+        total=self.total_classification
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
@@ -214,7 +229,7 @@ class TrainingTracker:
         self.momentum = truncate(self.momentum,k=100000)
         print(f'Moving average loss= {self.loss_moving_average_}, Convergence = {self.convergence}, momentum = {self.momentum}')
 
-        if self.confession_matrix.total_classification()>0:
+        if self.confession_matrix.total_classification>0:
             self.confession_matrix.view()
 
         if self.label_balance_indicator is not None:

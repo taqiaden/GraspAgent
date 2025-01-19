@@ -17,7 +17,7 @@ use_bn=False
 use_in=True
 action_module_key='action_net'
 critic_relu_slope=0.2
-classification_relu_slope=0.0
+classification_relu_slope=0.2
 generator_backbone_relu_slope=0.2
 gripper_sampler_relu_slope=0.2
 suction_sampler_relu_slope=0.2
@@ -128,7 +128,7 @@ class ActionNet(nn.Module):
 
         self.sigmoid=nn.Sigmoid()
 
-    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,refine_grasp=True,selective_detachment=None):
+    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,refine_grasp=True):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -139,12 +139,6 @@ class ActionNet(nn.Module):
                 features = self.back_bone(depth)
         else:
             features = self.back_bone(depth)
-            if selective_detachment is not None:
-                f_list=[]
-                for i in range(depth.shape[0]):
-                    if selective_detachment[i]:f_list.append(features[i])
-                    else: f_list.append(features[i].detach())
-                features=torch.stack(f_list)
 
         # depth_features=features.detach().clone()
         features=reshape_for_layer_norm(features, camera=camera, reverse=False)
