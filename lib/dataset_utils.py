@@ -87,9 +87,9 @@ class modality_pool():
         else:
             return self.load_as_numpy(idx)
     def save_as_numpy(self, data, idx):
-        self.save_numpy_( self.dir + idx + self.sufix, data)
+        self.save_numpy_( self.dir + str(idx) + self.sufix, data)
     def save_as_image(self, data, idx):
-        cv2.imwrite(self.dir + idx + self.sufix,data)
+        cv2.imwrite(self.dir + str(idx) + self.sufix,data)
     def save(self, data,idx):
         if self.extension=='jpg':
             return self.save_as_image(data,idx)
@@ -150,6 +150,10 @@ class data_pool():
 
         '''set main modality'''
         self.main_modality=self.label
+
+    @property
+    def address(self):
+        return self.dir
 
     def load_numpy(self,file_full_path):
         # check if data and label exist

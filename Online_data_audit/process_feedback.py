@@ -6,7 +6,7 @@ from action import Action
 from lib.dataset_utils import online_data2
 
 online_data2=online_data2()
-grasp_data_counter_key='grasp_data'
+grasp_data_counter_key='episodic_data_counter2'
 
 def articulate_action_index(action):
     # 0 for idle, 1 for grasp, 2 for shift
@@ -34,7 +34,7 @@ def standard_label_structure(gripper_action:Action ,suction_action:Action,step_n
 
     label = (gripper_action.target_point.tolist() + suction_action.target_point.tolist()
         +gripper_action.transformation.reshape(-1).tolist() + suction_action.transformation.reshape(-1).tolist()
-             + [gripper_action.width] + gripper_action.shift_end_point.tolist()+suction_action.shift_end_point.tolist()+
+             + [gripper_action.real_width] + gripper_action.shift_end_point.tolist()+suction_action.shift_end_point.tolist()+
              [articulate_action_index(gripper_action)] + [articulate_action_index(suction_action)]
                 + [articulate_action_result(gripper_action)] + [articulate_action_result(suction_action)]
              + [step_number]+[is_end_of_task])
@@ -43,27 +43,6 @@ def standard_label_structure(gripper_action:Action ,suction_action:Action,step_n
 
     return np.array(label)
 
-def print_(action_name,result,arm_name):
-    if result is not None:
-        print(Fore.LIGHTBLACK_EX, f'Report {action_name} action on {arm_name} arm', Fore.RESET)
-    elif result==1:
-        print(Fore.GREEN, f'Report successful {action_name} action on {arm_name} arm', Fore.RESET)
-    elif result == 1:
-        print(Fore.YELLOW, f'Report failed {action_name} action on {arm_name} arm', Fore.RESET)
-    else:
-        assert 1==2, 'Error while reporting an action'
-
-def print_result(action):
-    if action is not None:
-        if action.is_grasp:
-            action_name='grasp'
-            result=action.grasp_result
-        else:
-            action_name='shift'
-            result=action.shift_result
-
-        arm_name='gripper' if action.use_gripper_arm else 'suction'
-        print_(action_name, result, arm_name)
 
 def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequence):
     '''set unique identifier'''
@@ -81,13 +60,10 @@ def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequen
     gripper_action.file_id=index
     suction_action.file_id=index
 
-
     '''update index'''
     save_key(grasp_data_counter_key, index)
 
-    '''print brief report'''
-    print_result(gripper_action)
-    print_result(suction_action)
+    print(Fore.LIGHTBLACK_EX,f'Save labeled data to : {online_data2.address}',Fore.RESET)
 
     # tabulated data:
     # [0:3]: gripper_target_point
@@ -102,4 +78,4 @@ def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequen
     # [47]: gripper_result
     # [48]: suction_result
     # [49]: step_number
-    # [50]: step number
+    # [50]: is end of an episode

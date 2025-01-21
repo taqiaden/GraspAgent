@@ -28,14 +28,14 @@ def check_image_similarity(old_image, new_image):
     res = np.sum((old_image.astype("float") - new_image.astype("float")) ** 2)
     res /= (old_image.shape[0] * old_image.shape[1])
     limit=30
-    safety_threshold=50
+    safety_threshold=20
     print(f'Image res = {res}')
     if res > limit+safety_threshold:
         return 1
     elif res<limit:
         return 0
     else:
-        print(Fore.RED,'Warning: Can not confirm the grasp success',Fore.RESET)
+        print(Fore.RED,'Warning: Can not confirm the action success',Fore.RESET)
         return None
 
 def resize_image(im,size):

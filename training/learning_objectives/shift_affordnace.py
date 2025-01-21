@@ -7,7 +7,7 @@ from training.learning_objectives.suction_seal import transform_point_to_normal_
 from visualiztion import view_shift_pose
 
 shift_effective_length=0.035
-shift_execution_length=0.1
+shift_execution_length=0.15
 
 
 shift_elevation_threshold = 0.001

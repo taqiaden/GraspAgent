@@ -79,6 +79,7 @@ def get_scene_point_clouds():
 def get_scene_RGB():
     '''load and crop'''
     full_RGB=cv2.imread(rgb_path)
+    full_RGB=cv2.cvtColor(np.float32(full_RGB), cv2.COLOR_BGR2RGB) / 255
     assert full_RGB.shape == (1200, 1920, 3), f'{full_RGB.shape}'
     scene_RGB = crop_scene_image(full_RGB)
 

@@ -29,8 +29,8 @@ def standardize_depth(depth):
     depth=(depth-depth_mean)/depth_std
     return depth
 
-def view_colored_point_cloud(RGB,Depth):
-    heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255
+def view_colored_point_cloud(heap_rgb,Depth):
+    # heap_rgb = cv2.cvtColor(np.float32(RGB), cv2.COLOR_BGR2RGB) / 255
     colored_pc,mask = depth_to_point_clouds(Depth.squeeze(), camera,rgb=heap_rgb)
     colored_pc[:,0:3] = transform_to_camera_frame(colored_pc[:,0:3], reverse=True)
 

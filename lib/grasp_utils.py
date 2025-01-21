@@ -19,10 +19,10 @@ def get_target_point_2(T,distance):
     target_point= transition - approach * distance
     return target_point
 
-def adjust_final_matrix(base_transformation,x_correction):
-    rot1 = [[0, 0, 1, -x_correction],
-            [-1, 0, 0, 0],
-            [0, -1, 0, 0],
+def adjust_final_matrix(base_transformation,x_correction=0.,y_correction=0.,z_correction=0.):
+    rot1 = [[0, 0, 1, x_correction],
+            [-1, 0, 0, y_correction],
+            [0, -1, 0, z_correction],
             [0, 0, 0, 1]]
     final_matrix = np.dot(base_transformation, rot1)
     return final_matrix

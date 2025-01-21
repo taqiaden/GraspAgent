@@ -1,5 +1,6 @@
 import os.path
 import subprocess
+
 import numpy as np
 import torch
 import trimesh
@@ -9,20 +10,22 @@ from Online_data_audit.data_tracker2 import DataTracker2
 from action import Action
 from lib.IO_utils import save_pickle, load_pickle
 from lib.grasp_utils import shift_a_distance
+from lib.models_utils import number_of_parameters
 from lib.report_utils import wait_indicator as wi
 from Configurations.ENV_boundaries import bin_center, dist_allowance
 from Configurations.config import distance_scope, gripper_width_during_shift
 from Configurations.run_config import simulation_mode, \
-    suction_factor, gripper_factor, report_result, use_gripper, use_suction, activate_grasp, activate_shift, \
-    enhance_gripper_firmness, single_arm_operation_mode
+    suction_factor, gripper_factor, report_result, \
+    enhance_gripper_firmness, single_arm_operation_mode, \
+    gripper_grasp,gripper_shift,suction_grasp,suction_shift
 from Online_data_audit.process_feedback import save_grasp_sample
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
-from lib.ROS_communication import  deploy_action, read_robot_feedback
+from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
-from lib.image_utils import check_image_similarity
+from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
@@ -197,6 +200,21 @@ class GraspAgent():
 
         pi.end()
 
+        self.models_report()
+
+    def models_report(self):
+        action_model_size=number_of_parameters(self.action_net)
+        policy_model_size=number_of_parameters(self.policy_net)
+        gripper_arm_reachability_model_size=number_of_parameters(self.policy_net)
+        # suction_arm_reachability_model_size=number_of_parameters(self.suction_arm_reachability_net)
+        print(f'Models initiated:')
+        print(f'Number of parameters:')
+        pr.step_f(f'action net : {action_model_size}')
+        pr.print(f'policy net : {policy_model_size}')
+        pr.print(f'reachability nets : {gripper_arm_reachability_model_size} * 2')
+        pr.step_b()
+
+
     def get_suction_grasp_reachability(self,positions,normals):
         approach=-normals.clone()
         suction_scope = self.suction_arm_reachability_net(torch.cat([positions, approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
@@ -224,8 +242,7 @@ class GraspAgent():
         gripper_approach=normals.clone()
         gripper_approach[:,2]*=-1
         gripper_scope_a=self.gripper_arm_reachability_net(torch.cat([positions, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
-        if self.shift_end_points is None:
-            self.shift_end_points = get_shift_end_points(positions)
+        self.shift_end_points = get_shift_end_points(positions)
         gripper_scope_b=self.gripper_arm_reachability_net(torch.cat([self.shift_end_points, gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         result = torch.stack([gripper_scope_a, gripper_scope_b], dim=-1)
         result, _ = torch.min(result, dim=-1)
@@ -240,8 +257,8 @@ class GraspAgent():
         value = self.q_value[flattened_action_index]
         value = torch.squeeze(value).item()
         if sample_from_target_actions:
-            self.valid_actions_on_target_mask[flattened_action_index].fill_(False)
-        self.valid_actions_mask[flattened_action_index].fill_(False)
+            self.valid_actions_on_target_mask[flattened_action_index]=False
+        self.valid_actions_mask[flattened_action_index]=False
         return flattened_action_index, probs, value
 
     def prepare_quality_masks(self,mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
@@ -288,17 +305,18 @@ class GraspAgent():
         '''shift reachability'''
         gripper_shift_scope=self.get_gripper_shift_reachability( voxel_pc_tensor,self.normals)
         suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
+        '''shift with the arm of best reachablity'''
+        gripper_shift_scope[suction_shift_scope>gripper_shift_scope]*=0.
+        suction_shift_scope[gripper_shift_scope>suction_shift_scope]*=0.
 
-        '''quality masks'''
-        # self.quality_masks=self.prepare_quality_masks(mask,suction_seal_classifier,griper_collision_classifier,shift_appealing,
-        #                       background_class,gripper_grasp_scope,suction_grasp_scope,gripper_shift_scope,suction_shift_scope)
-
+        '''target mask'''
         self.target_object_mask = background_class.detach() <= 0.5
         self.mask_numpy=self.target_object_mask.cpu().numpy()
+
         '''policy net output'''
-        griper_grasp_score, suction_grasp_score, shift_affordance_classifier, q_value, action_probs = self.policy_net(rgb_torch,
-                                                                                                             gripper_pose,
-                                                                                                             suction_direction,self.target_object_mask)
+        griper_grasp_score, suction_grasp_score,\
+        shift_affordance_classifier, q_value, action_probs = \
+            self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask)
 
         '''reshape'''
         griper_collision_classifier=griper_collision_classifier.squeeze()[mask]
@@ -309,17 +327,30 @@ class GraspAgent():
         shift_appealing=shift_appealing.squeeze()[mask]
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
 
+        # view_mask(voxel_pc_,background_class<0.5)
+        # view_mask(voxel_pc_,shift_appealing>0.5)
+        # view_mask(voxel_pc_,griper_collision_classifier>0.5)
+        griper_grasp_score.fill_(1.)
+        suction_grasp_score.fill_(1.)
+
         '''grasp actions'''
         self.gripper_grasp_mask=((background_class<0.5)*(gripper_grasp_scope>0.5)
                                *(griper_collision_classifier>0.5)
-                               *(griper_grasp_score*gripper_factor>0.5)* int(use_gripper)* int(activate_grasp))>0.5
+                               *(griper_grasp_score*gripper_factor>0.5)* gripper_grasp)
         self.suction_grasp_mask=((background_class<0.5)*(suction_grasp_scope>0.5)
                                *(suction_seal_classifier>0.5)
-                               *(suction_grasp_score*suction_factor>0.5)* int(use_suction)* int(activate_grasp))>0.5
+                               *(suction_grasp_score*suction_factor>0.5)* (suction_grasp))
+        # view_mask(voxel_pc_,self.gripper_grasp_mask)
+        # view_mask(voxel_pc_,self.suction_grasp_mask)
 
         '''shift actions'''
-        self.gripper_shift_mask=((shift_appealing>0.5)*(gripper_shift_scope>0.5)* int(use_gripper)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
-        self.suction_shift_mask=((shift_appealing>0.5)*(suction_shift_scope>0.5)* int(use_suction)* int(activate_shift))>0.5#*(shift_affordance_classifier>0.5)
+        self.gripper_shift_mask=((shift_appealing>0.5)*(gripper_shift_scope>0.5)* (gripper_shift))#*(shift_affordance_classifier>0.5)
+        self.suction_shift_mask=((shift_appealing>0.5)*(suction_shift_scope>0.5)* (suction_shift)) #*(shift_affordance_classifier>0.5)
+
+        view_mask(voxel_pc_,(shift_appealing>0.5))
+        view_mask(voxel_pc_,(suction_shift_scope>0.5))
+
+        view_mask(voxel_pc_,self.suction_shift_mask)
 
         '''gripper pose convention'''
         self.gripper_poses_7=poses
@@ -332,14 +363,14 @@ class GraspAgent():
 
         self.valid_actions_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
         self.valid_actions_on_target_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
-        self.valid_actions_on_target_mask[:,0][self.target_object_mask].fill_(True)
-        self.valid_actions_on_target_mask[:,1][self.target_object_mask].fill_(True)
+        self.valid_actions_on_target_mask[:,0].masked_fill_(self.gripper_grasp_mask,True)
+        self.valid_actions_on_target_mask[:,1].masked_fill_(self.suction_grasp_mask,True)
 
         '''initialize valid actions mask'''
-        self.valid_actions_mask[:,0][self.gripper_grasp_mask].fill_(True)
-        self.valid_actions_mask[:,1][self.suction_grasp_mask].fill_(True)
-        self.valid_actions_mask[:,2][self.gripper_shift_mask].fill_(True)
-        self.valid_actions_mask[:,3][self.suction_shift_mask].fill_(True)
+        self.valid_actions_mask[:,0].masked_fill_(self.gripper_grasp_mask,True)
+        self.valid_actions_mask[:,1].masked_fill_(self.suction_grasp_mask,True)
+        self.valid_actions_mask[:,2].masked_fill_(self.gripper_shift_mask,True)
+        self.valid_actions_mask[:,3].masked_fill_(self.suction_shift_mask,True)
 
         '''count available actions'''
         self.n_grasps=torch.count_nonzero(self.valid_actions_mask[:,0:2])
@@ -386,13 +417,12 @@ class GraspAgent():
 
         collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
         if collision_intensity==0 and enhance_gripper_firmness:
-            print('Enhance gripper pose')
             step=dist_allowance/2
             n=max(int((distance_scope-distance)/step),10)
             for i in range(n):
                 T_d_new = shift_a_distance(T_d, step).copy()
-                collision_intensity = grasp_collision_detection(T_d_new, width, self.voxel_pc, visualize=False,with_allowance=False)
-                if collision_intensity==0:T_d=T_d_new
+                collision_intensity2 = grasp_collision_detection(T_d_new, width, self.voxel_pc, visualize=False,with_allowance=False)
+                if collision_intensity2==0:T_d=T_d_new
                 else:break
 
 
@@ -453,9 +483,10 @@ class GraspAgent():
 
         '''mask occupied arm'''
         if action_obj.use_gripper_arm:
-            self.valid_actions_mask[:, [0, 2]].fill_(False)
+            self.valid_actions_mask[:, [0, 2]]=False
         else:
-            self.valid_actions_mask[:, [1, 3]].fill_(False)
+            self.valid_actions_mask[:, [1, 3]]=False
+
 
         '''mask occupied space'''
         arm_knee_margin = 0.2
@@ -482,8 +513,11 @@ class GraspAgent():
             occupancy_mask = (self.voxel_pc[:,1] > minimum_margin) | (second_arm_extreme>arm_knee_extreme) |  dist_mask
 
         self.first_action_mask=occupancy_mask
-        self.valid_actions_mask[occupancy_mask].fill_(False)
+        # print(occupancy_mask.shape)
+        # print(self.valid_actions_mask.shape)
+        self.valid_actions_mask[occupancy_mask]=False
         self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
+        self.valid_actions_on_target_mask=self.valid_actions_on_target_mask & self.valid_actions_mask
 
     def view_valid_actions_mask(self):
         four_pc_stack = np.stack([self.voxel_pc, self.voxel_pc, self.voxel_pc, self.voxel_pc])
@@ -512,7 +546,7 @@ class GraspAgent():
 
         '''first action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
-        available_actions_on_target=torch.count_nonzero(self.target_object_mask).item()
+        available_actions_on_target=torch.count_nonzero(self.valid_actions_on_target_mask).item()
         for i in range(total_available_actions):
             flattened_action_index, probs, value=self.next_action(sample_from_target_actions=i<available_actions_on_target)
             unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0],4))
@@ -525,17 +559,19 @@ class GraspAgent():
                     self.mask_arm_occupancy(action_obj)
                 break
 
-        if first_action_obj.is_executable: exit('No executable action found ...')
+        if not first_action_obj.is_executable: exit('No executable action found ...')
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
 
-        if first_action_obj.policy_index==1: self.valid_actions_mask=self.valid_actions_on_target_mask
+        if first_action_obj.policy_index==1:
+            self.valid_actions_mask=self.valid_actions_on_target_mask
         else:
             self.valid_actions_mask = self.valid_actions_mask.reshape(-1, 4)
-            self.valid_actions_mask[:, 2:].fill_(False)  # simultaneous operation of both arms are for grasp actions only
+            self.valid_actions_mask[:, 2:]=False  # simultaneous operation of both arms are for grasp actions only
             self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
-            if first_action_obj.is_shift or single_arm_operation_mode:
-                return first_action_obj, second_action_obj
+
+        if first_action_obj.is_shift or single_arm_operation_mode:
+            return first_action_obj, second_action_obj
 
         '''second action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
@@ -592,6 +628,7 @@ class GraspAgent():
 
         if not simulation_mode:
             pr.print('Run robot')
+            set_wait_flag()
             if second_action_obj.is_valid and (first_action_obj.is_grasp and second_action_obj.is_grasp):
                 '''grasp with the two arms'''
                 subprocess.run(execute_both_grasp_bash)
@@ -614,46 +651,49 @@ class GraspAgent():
 
     def process_feedback(self,first_action_obj:Action,second_action_obj:Action, img_grasp_pre, img_suction_pre,img_main_pre):
         pr.title('process feedback')
-        if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset': trigger_new_perception()
-        if not report_result: return
+        if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset':
+            trigger_new_perception()
+        if  report_result:
+            if first_action_obj.policy_index==1:self.run_sequence=0
 
-        img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
+            img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
 
-        '''save feedback to data pool'''
-        if first_action_obj.robot_feedback == 'Succeed':
-            first_action_obj.executed=True
-            second_action_obj.executed=True
-            if first_action_obj.is_shift:
-                first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
+            '''save feedback to data pool'''
+            if first_action_obj.robot_feedback == 'Succeed':
+                first_action_obj.executed=True
+                second_action_obj.executed=True
+                if first_action_obj.is_shift:
+                    first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
 
-            if first_action_obj.use_gripper_arm:
-                gripper_action=first_action_obj
-                suction_action=second_action_obj
+                if first_action_obj.use_gripper_arm:
+                    gripper_action=first_action_obj
+                    suction_action=second_action_obj
+                else:
+                    gripper_action = second_action_obj
+                    suction_action = first_action_obj
+
+                '''check changes in side bins'''
+                if gripper_action.is_grasp:
+                    gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
+
+                if suction_action.is_grasp:
+                    suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
+
+                '''save action instance'''
+                if gripper_action.result is not None or suction_action.result is not None:
+                    save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
+                self.run_sequence+=1
+
+                '''update buffer and tracker'''
+                if gripper_action.is_executable:
+                    self.buffer.push(gripper_action)
+                    self.data_tracker.push(gripper_action)
+                if suction_action.is_executable:
+                    self.buffer.push(suction_action)
+                    self.data_tracker.push(suction_action)
             else:
-                gripper_action = second_action_obj
-                suction_action = first_action_obj
-
-            '''check changes in side bins'''
-            if gripper_action.is_grasp:
-                gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
-
-            if suction_action.is_grasp:
-                suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
-
-            '''save action instance'''
-            save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
-            self.run_sequence+=1
-
-            '''update buffer and tracker'''
-            if gripper_action.is_executable:
-                self.buffer.push(gripper_action)
-                self.data_tracker.push(gripper_action)
-            if suction_action.is_executable:
-                self.buffer.push(suction_action)
-                self.data_tracker.push(suction_action)
-        else:
-            first_action_obj.executed=False
-            second_action_obj.executed=False
+                first_action_obj.executed=False
+                second_action_obj.executed=False
 
 '''conventions'''
 # normal is a vector emerge out of the surface
@@ -666,3 +706,7 @@ class GraspAgent():
 # if the action is shift, it is always saved in the first action object
 # executing both arms at the same time will be only when both actions are grasp actions
 # a single run may include one action or two actions (moving both arms)
+# after execution the robot rises three flage:
+    # succeed: the plan has been executed completly
+    # failed: Unable to execute part or full of the path
+    # reset: path plan is found but execution termimnated due to an error

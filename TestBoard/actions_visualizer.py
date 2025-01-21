@@ -77,7 +77,6 @@ def loop():
         # print('----')
         # view_parameters_value(gan.critic.back_bone,iterations=5)
         # gan.export_models()
-        #
         # exit()
 
         with torch.no_grad():

@@ -98,13 +98,13 @@ def step_critic_training(gan, generated_grasps, batch_size, pixel_index, label_g
         bad_state_grasp = collision_state_ or out_of_scope
         firmness_state = firmness_state_list[j]
 
-        collision_loss += (torch.clamp(prediction_ - label_ +1, 0) * bad_state_grasp)
+        collision_loss += (torch.clamp(prediction_ - label_ +1., 0.) * bad_state_grasp)**2
         p_=int(np.random.rand()<(beta**2))
 
-        firmness_loss += torch.clamp((prediction_ - label_), 0) * (1 - bad_state_grasp) * (1 - firmness_state) * p_
-        firmness_loss += torch.clamp((label_ - prediction_), 0) * (1 - bad_state_grasp) * firmness_state * p_
+        firmness_loss += (torch.clamp((prediction_ - label_), 0.) * (1 - bad_state_grasp) * (1 - firmness_state) * p_)**2
+        firmness_loss += (torch.clamp((label_ - prediction_), 0.) * (1 - bad_state_grasp) * firmness_state * p_)**2
 
-    c_loss = ( collision_loss + firmness_loss )**2   #* 10*(alpha*beta) # + curriculum_loss
+    c_loss = ( collision_loss + firmness_loss )  #* 10*(alpha*beta) # + curriculum_loss
 
     '''optimizer step'''
     c_loss.backward()
@@ -123,11 +123,33 @@ class TrainActionNet:
 
         '''model wrapper'''
         self.gan=self.prepare_model_wrapper()
+        self.data_loader=None
+
+        '''Moving rates'''
+        self.moving_collision_rate=None
+        self.moving_firmness=None
+        self.moving_out_of_scope=None
+
+        '''initialize statistics records'''
+        self.suction_head_statistics = None
+        self.gripper_head_statistics = None
+        self.shift_head_statistics = None
+        self.gripper_sampler_statistics = None
+        self.suction_sampler_statistics = None
+        self.critic_statistics = None
+        self.background_detector_statistics = None
+
+        self.data_tracker = None
+        self.swiped_samples=None
+
+    def initialize(self):
+
+        self.prepare_data_loader()
+
+        '''Moving rates'''
         self.moving_collision_rate=MovingRate('collision')
         self.moving_firmness=MovingRate('firmness')
         self.moving_out_of_scope=MovingRate('out_of_scope')
-        self.data_loader=self.prepare_data_loader()
-
         '''initialize statistics records'''
         self.suction_head_statistics = TrainingTracker(name=action_module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
         self.gripper_head_statistics = TrainingTracker(name=action_module_key+'_gripper_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
@@ -148,7 +170,7 @@ class TrainActionNet:
         data_loader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, num_workers=workers,
                                                        shuffle=True)
         self.size=len(dataset)
-        return data_loader
+        self.data_loader= data_loader
 
     def prepare_model_wrapper(self):
         '''load  models'''
@@ -156,11 +178,11 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        #gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.5)
 
-        gan.generator_adam_optimizer(learning_rate=self.learning_rate)
+        gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
 
         return gan
 
@@ -203,7 +225,7 @@ class TrainActionNet:
                     d_=int(collision_state_list[k] or out_of_scope_list[k])
                     self.data_tracker.update_value(file_id=file_ids[k],list_index=3,data=d_,decay_rate=0.1)
                     self.moving_collision_rate.update(collision_state_list[k])
-                    self.moving_firmness.update(collision_state_list[k])
+                    self.moving_firmness.update(firmness_state_list[k])
                     self.moving_out_of_scope.update(out_of_scope_list[k])
 
             '''zero grad'''
@@ -264,8 +286,9 @@ class TrainActionNet:
 
                 generated_critic_score = self.gan.critic(depth.clone(), gripper_pose, detach_backbone=True)
 
+
                 gripper_sampling_loss += gripper_sampler_loss(pixel_index, j,
-                                                              generated_critic_score, critic_score_labels[j])
+                                                              generated_critic_score, critic_score_labels[j]) * int(counted_samples[j]==1)
                 gripper_sampling_loss=gripper_sampling_loss/effective_batch_size
 
                 suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
@@ -306,8 +329,9 @@ class TrainActionNet:
                     self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                     non_zero_background_loss_counter+=1
 
-                # adaptive_sample_size=lambda x: max(1,min(100,int(500*(1-x)**2)))
-                n_g=10
+                adaptive_sample_size=lambda x: max(1,min(100,int(500*(1-x)**2)))
+                # n_g=adaptive_sample_size(self.gripper_head_statistics.accuracy)
+                n_g=20
                 for k in range(n_g):
                     '''gripper collision head'''
                     gripper_target_index=model_dependent_sampling(pc, gripper_head_predictions, gripper_head_max_score, gripper_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.gripper_head_statistics.label_balance_indicator)
@@ -316,13 +340,15 @@ class TrainActionNet:
                     gripper_target_pose = gripper_poses[gripper_target_index]
                     gripper_loss+=gripper_collision_loss(gripper_target_pose, gripper_target_point, pc, gripper_prediction_,self.gripper_head_statistics)/(n_g*effective_batch_size)
 
-                n_sh=2
+                # n_sh=adaptive_sample_size(self.suction_head_statistics.accuracy)
+                n_sh=20
                 for k in range(n_sh):
                     '''suction seal head'''
                     suction_target_index=model_dependent_sampling(pc, suction_head_predictions, suction_head_max_score, suction_head_score_range,objects_mask,probability_exponent=10,balance_indicator=self.suction_head_statistics.label_balance_indicator)
                     suction_prediction_ = suction_head_predictions[suction_target_index]
                     suction_loss+=suction_seal_loss(pc,normals,suction_target_index,suction_prediction_,self.suction_head_statistics,objects_mask)/(n_sh*effective_batch_size)
 
+                # n_s=adaptive_sample_size(self.shift_head_statistics.accuracy)
                 n_s=10
                 for k in range(n_s):
                     '''shift affordance head'''
@@ -412,6 +438,7 @@ class TrainActionNet:
 
 if __name__ == "__main__":
     lr = 5e-5
+    train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
     for i in range(1000):
         #cuda_memory_report()
 
@@ -421,7 +448,7 @@ if __name__ == "__main__":
         # continue
         try:
             cuda_memory_report()
-            train_action_net=TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+            train_action_net.initialize()
             train_action_net.begin()
         except Exception as error_message:
             torch.cuda.empty_cache()

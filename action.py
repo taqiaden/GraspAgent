@@ -1,5 +1,5 @@
 import numpy as np
-
+from Configurations import config
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.mesh_utils import construct_gripper_mesh_2
@@ -34,10 +34,10 @@ class Action():
         self.file_id=None
 
         '''pose'''
-        self.target_point=None
-        self.transformation=None
+        self.target_point=np.full((3),np.nan)
+        self.transformation=np.full((4,4),np.nan)
         self.width=None
-        self.shift_end_point=None
+        self.shift_end_point=np.full((3),np.nan)
 
         '''quality'''
         self.is_executable=None
@@ -47,8 +47,47 @@ class Action():
         self.shift_result=None
 
     @property
+    def action_name(self):
+        if self.is_grasp:
+            return 'grasp'
+        else:
+            return 'shift'
+
+    @property
+    def arm_name(self):
+        if self.use_gripper_arm:
+            return 'gripper'
+        else:
+            return 'suction'
+
+    @property
+    def result(self):
+        if self.is_grasp:
+            return self.grasp_result
+        else:
+            return self.shift_result
+
+    @property
+    def real_width(self):
+        if self.width is not None:
+            real_width = self.width * config.width_scale
+            if real_width > 25:
+                return 25
+            elif real_width < 0:
+                return 0
+            else:
+                return real_width
+        else:
+            return None
+
+    @property
+    def scaled_width(self):
+        return self.width
+
+    @property
     def is_valid(self):
         return self.use_gripper_arm is not None or self.use_suction_arm is not None
+
     @property
     def arm_name(self):
         if self.use_gripper_arm:

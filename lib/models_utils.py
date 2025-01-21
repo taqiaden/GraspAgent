@@ -1,5 +1,6 @@
 import io
 import os
+import time
 
 import smbclient
 import torch
@@ -76,6 +77,7 @@ def export_model_state(model,path):
     checkpoint_dict = get_model_state(model)
 
     full_path=check_points_directory+path+check_points_extension
+    print(f'check points exported to: {full_path}')
     # print('save check point to {}'.format(path))
     if os.path.isdir(check_points_directory):
         torch.save(checkpoint_dict,full_path)
@@ -97,16 +99,28 @@ def model_exist_check(path):
     else:
         return smbclient.path.exists(full_path)
 
-def load_dictionary(file_name):
+def load_dictionary(file_name,wait=False):
     full_path=check_points_directory+file_name
-    if os.path.exists(full_path):
-        # local path
-        return torch.load(full_path, map_location='cpu')
-    elif smbclient.path.exists(full_path):
-        # on server
-        with smbclient.open_file(full_path, mode='rb') as file:
-            buffer=io.BytesIO(file.read())
-            return torch.load(buffer, map_location='cpu')
+    c=0
+    while True:
+        try:
+            if os.path.exists(full_path):
+                # local path
+                return torch.load(full_path, map_location='cpu')
+            elif smbclient.path.exists(full_path):
+                # on server
+                with smbclient.open_file(full_path, mode='rb') as file:
+                    buffer=io.BytesIO(file.read())
+                    return torch.load(buffer, map_location='cpu')
+            break
+        except Exception as e:
+            if  wait:
+                if c == 0:
+                    print(Fore.RED, f'Unable to access the checkpoint file', Fore.RESET)
+                c+=1
+            else:
+                print(Fore.RED, f'Error while loading the checkpoint file: {str(e)}', Fore.RESET)
+                return
 
 def load_optimizer_state(optimizer,optimizer_state_path):
     pretrained_dict = load_dictionary(optimizer_state_path)
@@ -116,8 +130,8 @@ def load_optimizer_state(optimizer,optimizer_state_path):
         print(Fore.RED, f'Warning: optimizer state dictionary is not found, path : {optimizer_state_path}', Fore.RESET)
     return optimizer
 
-def initialize_model_state(model,model_state_path):
-    pretrained_dict=load_dictionary(model_state_path+check_points_extension)
+def initialize_model_state(model,model_state_path,wait=False):
+    pretrained_dict=load_dictionary(model_state_path+check_points_extension,wait=wait)
 
     if pretrained_dict:
         model.load_state_dict(pretrained_dict['state_dict'], strict=False)
@@ -125,12 +139,13 @@ def initialize_model_state(model,model_state_path):
         print(Fore.RED,f'Warning: model state dictionary is not found, path : {model_state_path}',Fore.RESET)
     return model
 
-def initialize_model(model_obj,path):
+def initialize_model(model_obj,path,wait=False):
     try:
-        model_obj = initialize_model_state(model_obj, path)
+        model_obj = initialize_model_state(model_obj, path,wait=wait)
     except Exception as e:
         print(Fore.RED, 'Load state dictionary exception,  ', str(e), Fore.RESET)
     return model_obj
+
 
 def activate_parameters_training(module_list,activate):
     for p in module_list.parameters():

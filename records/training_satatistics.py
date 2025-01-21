@@ -160,7 +160,9 @@ class TrainingTracker:
     def set_decay_rate(self):
         x=0.1*(1-0.0045)**self.counter
         self.decay_rate=max(x,0.001)
-
+    @property
+    def accuracy(self):
+        return self.confession_matrix.accuracy
 
     @property
     def loss(self):
