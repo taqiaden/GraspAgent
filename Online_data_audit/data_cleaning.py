@@ -8,7 +8,7 @@ from lib.dataset_utils import online_data
 from lib.models_utils import initialize_model_state
 from lib.report_utils import progress_indicator
 from lib.report_utils import progress_indicator as pi
-from models.scope_net import scope_net_vanilla, suction_scope_model_state_path
+from models.scope_net import scope_net_vanilla
 
 online_data = online_data()
 
@@ -126,7 +126,27 @@ def check_collision_in_data():
     pi.end()
     print(f'instances with collision={counters[0]}')
     print(f'instances without collision={counters[1]}')
-check_collision_in_data()
+# check_collision_in_data()
+
+'''remove selective samples'''
+indexes=online_data.get_indexes()
+print(f'total samples = {len(indexes)}')
+
+pi = progress_indicator('progress ', max_limit=len(indexes))
+print()
+for i in range(len(indexes)):
+    current_index=indexes[i]
+    label = online_data.label.load_as_numpy(current_index)
+    label_obj = LabelObj(label=label)
+    if label_obj.success and label_obj.is_gripper: continue
+    # online_data.point_clouds.remove_file(current_index)
+    online_data.depth.remove_file(current_index)
+    online_data.label.remove_file(current_index)
+
+
+    pi.step(i)
+
+pi.end()
 
 
 

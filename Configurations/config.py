@@ -16,11 +16,8 @@ ip_address=r'\\10.5.12.167'
 untested_model_stamp= 'untested'
 
 check_points_extension='.pth.tar'
-local__check_points_path=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
-if os.path.exists(local__check_points_path):
-    check_points_directory = local__check_points_path
-else:
-    check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
+
+check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
 

@@ -1,12 +1,9 @@
-shuffling_probability=0.0
 
-chances_ref = 5
+gripper_grasp=True
+suction_grasp=False
 
-use_gripper =True
-use_suction = True
-
-activate_grasp=True
-activate_shift=True
+gripper_shift=False
+suction_shift=True
 
 view_grasp_suction_points = True
 view_action= True
@@ -14,7 +11,7 @@ view_score_gradient= True
 simulation_mode = False
 offline_point_cloud= False
 report_result=False
-single_arm_operation_mode=False
+single_arm_operation_mode=True
 
 enhance_gripper_firmness=True
 

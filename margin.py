@@ -54,9 +54,10 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
         return 0.
 
 if __name__ == "__main__":
-    adaptive_sample_size = lambda x: max(1, min(100, int(500 * (1 - x) ** 2)))
-    n_g = adaptive_sample_size(0.7)
-    print(n_g)
+    x=np.array([0,1,0,1,0])
+    idx_nonzero, = np.nonzero(x)
+    target_index = np.random.choice(idx_nonzero)
+    print(idx_nonzero)
 
     # x=torch.rand((4,7))
     # t1=x.clone()

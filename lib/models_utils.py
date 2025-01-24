@@ -146,7 +146,6 @@ def initialize_model(model_obj,path,wait=False):
         print(Fore.RED, 'Load state dictionary exception,  ', str(e), Fore.RESET)
     return model_obj
 
-
 def activate_parameters_training(module_list,activate):
     for p in module_list.parameters():
         p.requires_grad = activate
