@@ -30,7 +30,7 @@ from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualizatio
 lock = FileLock("file.lock")
 instances_per_sample=1
 
-module_key='action_net2'
+module_key= 'action_net'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 
@@ -105,7 +105,9 @@ def loop():
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()
             # spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
             suction_head_predictions=suction_quality_classifier[j, 0][mask]
-            gripper_head_predictions=griper_collision_classifier[j, 0][mask]
+            collision_with_objects_predictions=griper_collision_classifier[j, 0][mask]
+            collision_with_bin_predictions=griper_collision_classifier[j, 1][mask]
+
             shift_head_predictions = shift_affordance_classifier[j, 0][mask]
             background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
             objects_mask = background_class_predictions.detach().cpu().numpy() <= 0.5
@@ -123,7 +125,7 @@ def loop():
             estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask)
 
             '''gripper grasp sampler'''
-            gripper_sampling_mask=gripper_head_predictions.cpu().numpy().squeeze()>0.1
+            gripper_sampling_mask=collision_with_objects_predictions.cpu().numpy().squeeze()>0.5
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&objects_mask)
 
             '''shift action sampler'''

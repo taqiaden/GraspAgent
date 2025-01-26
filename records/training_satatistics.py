@@ -222,9 +222,9 @@ class TrainingTracker:
     def print(self):
         self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,f'statistics for {self.name}')
-        if self.running_loss_ is not None:
-            self.running_loss_ = truncate(self.running_loss_, k=100000)
-            print(f'Average loss = {self.running_loss_/self.tmp_counter}, Running loss = {self.running_loss_}')
+        # if self.running_loss_ is not None:
+        #     self.running_loss_ = truncate(self.running_loss_, k=100000)
+        #     print(f'Average loss = {self.running_loss_/self.tmp_counter}, Running loss = {self.running_loss_}')
 
         self.loss_moving_average_ = truncate(self.loss_moving_average_,k=100000)
         self.convergence = truncate(self.convergence,k=100000)

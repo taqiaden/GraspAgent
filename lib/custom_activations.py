@@ -30,10 +30,10 @@ class GripperGraspRegressor(nn.Module):
 class GripperGraspRegressor2(nn.Module):
     def __init__(self):
         super().__init__()
-        # self.sigmoid = nn.Sigmoid()
+        self.sigmoid = nn.Sigmoid()
         self.tanh = nn.Tanh()
 
-    def forward(self, output,clip=False):
+    def forward(self, output,clip=False,sigmoid=False):
         '''approach normalization'''
         approach = output[:, 0:3]
         # approach = self.tanh(approach)
@@ -45,12 +45,15 @@ class GripperGraspRegressor2(nn.Module):
         beta = F.normalize(beta, dim=1)
 
         dist = output[:, 5:6]
-        # dist = (self.tanh(dist)+1)/2
+
         width = output[:, 6:7]
-        # width = (self.tanh(width)+1)/2
+        if sigmoid:
+            dist=self.sigmoid(dist)
+            width=self.sigmoid(width)
+
         if clip:
-            dist=torch.clip(dist,0.,1.)
-            width=torch.clip(width,0.,1.)
+            dist= torch.clip(dist, 0., 1.)
+            width= torch.clip(width, 0., 1.)
 
         normalized_output = torch.cat([approach, beta, dist, width], dim=1)
         return normalized_output
