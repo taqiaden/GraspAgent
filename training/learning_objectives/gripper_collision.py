@@ -67,14 +67,17 @@ def scope_drift_intensity(pose_7):
 
     return sum(k)
 def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visualize=False):
-    T_d, width, distance=pose_7_to_transformation(target_generated_pose, target_point)
 
     gen_out_of_scope=scope_drift_intensity(target_generated_pose)
     ref_out_of_scope=scope_drift_intensity(target_ref_pose)
 
     if gen_out_of_scope==0:
         '''check collision'''
+
+        T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
         gen_has_collision,pred_firmness_val,collision_val = gripper_firmness_check(T_d,width, pc, visualize=visualize )
+        # print(gen_has_collision,pred_firmness_val,collision_val)
+
     else:
         gen_has_collision, pred_firmness_val, collision_val = 1, 0, 1
 
@@ -82,6 +85,7 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visua
         '''check firmness of the label'''
         T_d_label, width_label, distance_label = pose_7_to_transformation(target_ref_pose, target_point)
         ref_has_collision,ref_firmness_val,ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc, visualize=visualize)
+        # print(ref_has_collision,ref_firmness_val,ref_collision_val)
         # if ref_has_collision==0:
         #     print('ref: ', target_ref_pose)
         #     print('G: ', target_generated_pose)

@@ -68,10 +68,10 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000'):
+    def __init__(self,name='000',decay_rate=0.001):
         self.name=name
 
-        self.decay_rate = 0.001
+        self.decay_rate = decay_rate
         self.counter = 0
         self.moving_rate=0.0
         self.momentum=0.0

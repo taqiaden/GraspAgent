@@ -43,7 +43,7 @@ def suction_sampler_loss(pc,target_normal):
 
     return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
 
-def gripper_sampler_loss(pixel_index,j,generated_critic_score,critic_score_label,invalid_grasp_,firmness_state):
+def gripper_sampler_loss(pixel_index,j,generated_critic_score,critic_score_label,enable_instance_training,firmness_state):
     pix_A = pixel_index[j, 0]
     pix_B = pixel_index[j, 1]
 
@@ -147,7 +147,8 @@ class TrainActionNet:
         self.data_tracker = None
         self.swiped_samples=None
 
-    def initialize(self):
+    def initialize(self,n_samples=None):
+        self.n_samples=n_samples
 
         self.prepare_data_loader()
 
@@ -164,9 +165,9 @@ class TrainActionNet:
                                                             iterations_per_epoch=len(self.data_loader),
                                                             track_label_balance=True)
         self.shift_head_statistics = TrainingTracker(name=action_module_key+'_shift_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
-        self.gripper_sampler_statistics = TrainingTracker(name=action_module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
-        self.suction_sampler_statistics = TrainingTracker(name=action_module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
-        self.critic_statistics = TrainingTracker(name=action_module_key+'_critic', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
+        self.gripper_sampler_statistics = TrainingTracker(name=action_module_key+'_gripper_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
+        self.suction_sampler_statistics = TrainingTracker(name=action_module_key+'_suction_sampler', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
+        self.critic_statistics = TrainingTracker(name=action_module_key+'_critic', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
         self.background_detector_statistics = TrainingTracker(name=action_module_key+'_background_detector', iterations_per_epoch=len(self.data_loader), track_label_balance=False)
 
         self.data_tracker = DataTracker(name=gripper_grasp_tracker)
@@ -227,7 +228,7 @@ class TrainActionNet:
                 collision_times += sum(collision_state_list)
                 out_of_scope_times += sum(out_of_scope_list)
                 good_firmness_times += sum(firmness_state_list)
-                invalid_grasp_ = [c or o for c, o in zip(collision_state_list, out_of_scope_list)]
+                enable_instance_training = [c or o or not f for c, o,f in zip(collision_state_list, out_of_scope_list,firmness_state_list)]
 
                 for k in range(len(collision_state_list)):
                     d_=int(collision_state_list[k] or out_of_scope_list[k])
@@ -282,11 +283,11 @@ class TrainActionNet:
 
             non_zero_background_loss_counter=0
 
-            effective_batch_size=b if detach_backbone else sum(invalid_grasp_)
+            effective_batch_size=b if detach_backbone else sum(enable_instance_training)
             decay_= lambda scores:torch.clamp(scores,0).mean()*0.1
 
             for j in range(b):
-                if invalid_grasp_[j]==0 and not detach_backbone:continue
+                if enable_instance_training[j]==0 and not detach_backbone:continue
                 pc=pcs[j]
                 mask=masks[j]
 
@@ -294,7 +295,7 @@ class TrainActionNet:
 
 
                 gripper_sampling_loss += gripper_sampler_loss(pixel_index, j,
-                                                              generated_critic_score, critic_score_labels[j],invalid_grasp_[j],firmness_state_list[j]) #* int(counted_samples[j]==1)
+                                                              generated_critic_score, critic_score_labels[j],enable_instance_training[j],firmness_state_list[j]) #* int(counted_samples[j]==1)
                 gripper_sampling_loss=gripper_sampling_loss/effective_batch_size
 
                 suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[j][mask])
@@ -448,16 +449,14 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-5
+    lr = 1e-6
     train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+    train_action_net.initialize(n_samples=100)
+    train_action_net.begin()
     for i in range(1000):
-        #cuda_memory_report()
-
-        train_action_net.initialize()
-        train_action_net.begin()
         try:
             cuda_memory_report()
-            train_action_net.initialize()
+            train_action_net.initialize(n_samples=None)
             train_action_net.begin()
         except Exception as error_message:
             torch.cuda.empty_cache()

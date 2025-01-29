@@ -9,6 +9,7 @@ from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
+
 from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report
@@ -30,7 +31,7 @@ from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualizatio
 lock = FileLock("file.lock")
 instances_per_sample=1
 
-module_key= 'action_net'
+module_key= 'action_net2'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 
@@ -125,7 +126,7 @@ def loop():
             estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask)
 
             '''gripper grasp sampler'''
-            gripper_sampling_mask=collision_with_objects_predictions.cpu().numpy().squeeze()>0.5
+            gripper_sampling_mask=collision_with_objects_predictions.cpu().numpy().squeeze()<0.5
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&objects_mask)
 
             '''shift action sampler'''
