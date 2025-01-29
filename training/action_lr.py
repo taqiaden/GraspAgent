@@ -153,9 +153,9 @@ class TrainActionNet:
         self.prepare_data_loader()
 
         '''Moving rates'''
-        self.moving_collision_rate=MovingRate('collision')
-        self.moving_firmness=MovingRate('firmness')
-        self.moving_out_of_scope=MovingRate('out_of_scope')
+        self.moving_collision_rate=MovingRate('collision',decay_rate=0.0001)
+        self.moving_firmness=MovingRate('firmness',decay_rate=0.0001)
+        self.moving_out_of_scope=MovingRate('out_of_scope',decay_rate=0.0001)
         '''initialize statistics records'''
         self.suction_head_statistics = TrainingTracker(name=action_module_key+'_suction_head', iterations_per_epoch=len(self.data_loader), track_label_balance=True)
         self.bin_collision_statistics = TrainingTracker(name=action_module_key+ '_bin_collision',

@@ -103,12 +103,13 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         if f_[1] > f_[0]:
             # return (prediction_ - label_ +1.)**2, True
 
-            return (torch.clamp(prediction_ - label_ , 0.)) , True
-        # elif f_[0] >= f_[1]:
-        #     # return  (  label_ -prediction_+1.)**2, True
-        #
-        #     return 0.0*(torch.clamp(label_ - prediction_, 0.)), True
-    return 0.0, False
+            return (torch.clamp(prediction_ - label_ , 0.)) **2, True
+        elif f_[0] >= f_[1]:
+            # return  (  label_ -prediction_+1.)**2, True
+
+            return 0.0*(torch.clamp(label_ - prediction_, 0.)), True
+        else:
+            return 0.0, False
 
 
 class TrainActionNet:
@@ -178,10 +179,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
-
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
 
         return gan
@@ -229,7 +229,13 @@ class TrainActionNet:
             objects_mask = background_class_predictions <= 0.5
             collide_with_objects_p=griper_collision_classifier_2[0, 0][mask].detach()
             collide_with_bins_p=griper_collision_classifier_2[0, 1][mask].detach()
+
+            # selection_p=torch.rand_like(collide_with_objects_p)
             selection_p=(1.0-collide_with_objects_p)*(1.0-collide_with_bins_p)
+            selection_p=torch.sqrt(selection_p)
+            # print(collide_with_objects_p)
+            # print(collide_with_bins_p)
+            # print(selection_p)
 
             # threshold=0.5 if (selection_p[objects_mask]>0.5).sum()>100 else selection_p[objects_mask].mean().item()
             selection_mask=objects_mask & (collide_with_objects_p< 0.5) #if np.random.rand()> r_k else objects_mask
@@ -257,11 +263,12 @@ class TrainActionNet:
                 label_=ref_scores_[target_index]
                 prediction_=gen_scores_[target_index]
                 c_,s_,f_=evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, visualize=False)
-                # continue
-                if (sum(c_)<=1 and sum(s_)<=1) or (collide_with_objects_p[target_index]<0.5 and collide_with_bins_p[target_index]<0.5):
+
+                if (c_[0]==0 and c_[0]==0) or (c_[1]==0 and c_[1]==0) :
                     self.moving_collision_rate.update(c_[0])
-                    self.moving_out_of_scope.update(int(s_[0]>0))
+                if sum(c_)==0 and sum(s_)==0:
                     self.moving_firmness.update(int(f_[0] > f_[1]))
+                self.moving_out_of_scope.update(int(s_[0]>0))
 
                 l,counted=critic_loss(c_, s_, f_, prediction_, label_)
                 if counted:
