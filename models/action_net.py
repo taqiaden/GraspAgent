@@ -111,8 +111,8 @@ class GripperPartSampler(nn.Module):
             beta=F.normalize(beta, dim=-1)
             dist_width=torch.clip(dist_width,0.,1.)
 
-            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')
-            approach_ref[:,-1]=torch.abs(approach_ref[:,-1])
+            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')/2
+            approach_ref[:,-1]=0.5+approach_ref[:,-1]
             # approach_ref=F.normalize(approach_ref, dim=-1)
 
             beta_noise=torch.randn((representation_2d.shape[0],2),device='cuda')
@@ -122,7 +122,7 @@ class GripperPartSampler(nn.Module):
             # dist_width_ref[:,-1]+=0.7
             # dist_width_ref[:,-2]+=0.1
 
-            dist_step=torch.randint(-1,3,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
+            dist_step=torch.randint(-2,3,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
             width_step=torch.randint(-4,4,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
 
             approach=approach*(1.0-randomization_factor)+approach_ref*randomization_factor

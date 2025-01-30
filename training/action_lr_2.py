@@ -107,7 +107,7 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         elif f_[0] >= f_[1]:
             # return  (  label_ -prediction_+1.)**2, True
 
-            return 0.0*(torch.clamp(label_ - prediction_, 0.)), True
+            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
         else:
             return 0.0, False
 
@@ -230,15 +230,15 @@ class TrainActionNet:
             collide_with_objects_p=griper_collision_classifier_2[0, 0][mask].detach()
             collide_with_bins_p=griper_collision_classifier_2[0, 1][mask].detach()
 
-            # selection_p=torch.rand_like(collide_with_objects_p)
-            selection_p=(1.0-collide_with_objects_p)*(1.0-collide_with_bins_p)
-            selection_p=torch.sqrt(selection_p)
-            # print(collide_with_objects_p)
+            selection_p=torch.rand_like(collide_with_objects_p)
+            # selection_p=(1.0-collide_with_objects_p)*(1.0-collide_with_bins_p)
+            # selection_p=torch.sqrt(selection_p)
+            # selection_p=torch.sqrt(selection_p)
             # print(collide_with_bins_p)
             # print(selection_p)
 
             # threshold=0.5 if (selection_p[objects_mask]>0.5).sum()>100 else selection_p[objects_mask].mean().item()
-            selection_mask=objects_mask & (collide_with_objects_p< 0.5) #if np.random.rand()> r_k else objects_mask
+            selection_mask=objects_mask & (collide_with_objects_p< 0.5) #& (collide_with_bins_p< 0.5) #if np.random.rand()> r_k else objects_mask
             #selection_mask= objects_mask
 
             gripper_pose2=gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask]
@@ -264,7 +264,7 @@ class TrainActionNet:
                 prediction_=gen_scores_[target_index]
                 c_,s_,f_=evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, visualize=False)
 
-                if (c_[0]==0 and c_[0]==0) or (c_[1]==0 and c_[1]==0) :
+                if (sum(c_)<=1) or (collide_with_bins_p[target_index]<=0.5 and collide_with_objects_p[target_index]<=0.5):
                     self.moving_collision_rate.update(c_[0])
                 if sum(c_)==0 and sum(s_)==0:
                     self.moving_firmness.update(int(f_[0] > f_[1]))
@@ -304,13 +304,10 @@ class TrainActionNet:
             gripper_loss=griper_collision_classifier.mean()*0.0
             shift_loss=shift_affordance_classifier.mean()*0.0
             background_loss=background_class.mean()*0.0
-            decay_loss=torch.tensor(0.0,device=gripper_pose.device)
             suction_sampling_loss = suction_direction.mean()*0.0
             gripper_sampling_loss = gripper_pose.mean()*0.0
 
             non_zero_background_loss_counter=0
-
-            decay_= lambda scores:torch.clamp(scores,0).mean()*0.1
 
             '''gripper sampler loss'''
             with torch.no_grad():
@@ -325,7 +322,7 @@ class TrainActionNet:
                 weight=tracked_indexes[j][1]
                 label=ref_scores_[target_index]
                 pred_=pred_scores_[target_index]
-                gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)) / m
+                gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**2) / m
 
             #method 2
             # labels=ref_scores_[selection_mask]
@@ -342,8 +339,6 @@ class TrainActionNet:
             shift_head_predictions = shift_affordance_classifier[0, 0][mask]
             background_class_predictions = background_class.permute(0,2, 3, 1)[0, :, :, 0][mask]
 
-            # decay_loss += (decay_(gripper_head_predictions) + decay_(suction_head_predictions) + decay_(
-            #     shift_head_predictions))
 
             '''limits'''
             with torch.no_grad():
@@ -397,7 +392,7 @@ class TrainActionNet:
 
             if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())},  ratios c:{self.moving_collision_rate.val}, s:{self.moving_out_of_scope.val}')
 
-            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*2.0+suction_sampling_loss+background_loss*3.0#+decay_loss*0.1
+            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*2.0+suction_sampling_loss+background_loss*3.0
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()

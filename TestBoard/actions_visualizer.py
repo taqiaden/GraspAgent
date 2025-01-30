@@ -29,6 +29,8 @@ from training.learning_objectives.suction_seal import suction_seal_loss
 from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualization, view_features
 
 lock = FileLock("file.lock")
+
+
 instances_per_sample=1
 
 module_key= 'action_net2'
@@ -123,11 +125,12 @@ def loop():
 
             '''suction grasp sampler'''
             suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
-            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask)
+            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask )
 
             '''gripper grasp sampler'''
-            gripper_sampling_mask=collision_with_objects_predictions.cpu().numpy().squeeze()<0.5
-            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&objects_mask)
+            gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
+
+            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
 
             '''shift action sampler'''
             shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5

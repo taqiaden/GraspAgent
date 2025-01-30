@@ -13,6 +13,7 @@ from lib.image_utils import view_image
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import distribution_summary
+from lib.rl.masked_categorical import MaskedCategorical
 from pose_object import pose_7_to_transformation
 
 parallel_jaw_model= 'new_gripper.ply'
@@ -61,22 +62,30 @@ def visualize_vox(npy):
                 if npy[i, j, k] == 1: points_list.append((i, j, k))
     points_list = np.asarray(points_list)
     view_npy_open3d(points_list)
-def dense_grasps_visualization(pc, generated_pose_7,view_mask):
+def dense_grasps_visualization(pc, generated_pose_7,view_mask,view_all=False):
     T_d_list = []
     width_list = []
     total_size=view_mask.sum()
     if total_size<1: return
-    sampled_indexes=np.where(view_mask==1)[0]
-    np.random.shuffle(sampled_indexes)
+    # sampled_indexes=np.where(view_mask==1)[0]
+    # np.random.shuffle(sampled_indexes)
+    selection_p=torch.rand(view_mask.size()).cuda()
+    sampled_size=total_size if view_all else int(math.log(total_size+1,2)*30)
+    sampled_size=min(total_size,sampled_size)
 
     # skip_step=int(np.log(total_size))^2
-    for i in range(5000):
+    # from torchrl.modules import MaskedCategorical
+
+    for i in range(sampled_size):
         # random_index = np.random.randint(0, pc.shape[0])
-        #
+        dist = MaskedCategorical(probs=selection_p, mask=view_mask)
+
+        picked_index = dist.sample()
+        view_mask[picked_index]=False
         # if not view_mask[ random_index] : continue
-        next_=int(i+(i**2)/10)
-        if total_size<=next_:break
-        picked_index=sampled_indexes[next_]
+        # next_=i if view_all else int(i+(i**2)/10)
+        # if total_size<=next_:break
+        # picked_index=sampled_indexes[next_]
 
         target_pose_7 = generated_pose_7[ picked_index]
 
