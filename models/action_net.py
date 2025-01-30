@@ -123,7 +123,7 @@ class GripperPartSampler(nn.Module):
             # dist_width_ref[:,-2]+=0.1
 
             dist_step=torch.randint(-2,3,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
-            width_step=torch.randint(-4,4,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
+            width_step=torch.randint(-5,5,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
 
             approach=approach*(1.0-randomization_factor)+approach_ref*randomization_factor
             beta=beta*(1.0-randomization_factor)+beta_noise*randomization_factor

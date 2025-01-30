@@ -90,8 +90,10 @@ def critic_loss(c_,s_,f_,prediction_,label_):
     if sum(c_)+sum(s_) > 0:
         '''at least one or both the ref or the pred is out of scope and/or with collision'''
         if c_[1] + s_[1] == 0:
+            # print('c=',c_[0])
+            weight=(1+c_[0])
             # return torch.abs(prediction_ - label_ + 1.)**2, True
-            return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
+            return weight*(torch.clamp(prediction_ - label_ + 1., 0.))**2, True
         # elif c_[0] + s_[0] == 0:
         #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
         #     return 0.0*(torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
@@ -101,13 +103,16 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         '''improve firmness'''
         # print(f'f____{sum(c_)} , {sum(s_) }')
         if f_[1] > f_[0]:
+            # print('f=', f_)
+
             # return (prediction_ - label_ +1.)**2, True
+            weight=abs(f_[0]-f_[1])
 
-            return (torch.clamp(prediction_ - label_ , 0.)) **2, True
-        elif f_[0] >= f_[1]:
-            # return  (  label_ -prediction_+1.)**2, True
-
-            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
+            return weight*(torch.clamp(prediction_ - label_ , 0.)) , True
+        # elif f_[0] >= f_[1]:
+        #     # return  (  label_ -prediction_+1.)**2, True
+        #
+        #     return 0.0*(torch.clamp(label_ - prediction_, 0.)), True
         else:
             return 0.0, False
 
@@ -179,9 +184,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
+        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
 
         return gan
@@ -238,7 +243,7 @@ class TrainActionNet:
             # print(selection_p)
 
             # threshold=0.5 if (selection_p[objects_mask]>0.5).sum()>100 else selection_p[objects_mask].mean().item()
-            selection_mask=objects_mask & (collide_with_objects_p< 0.5) #& (collide_with_bins_p< 0.5) #if np.random.rand()> r_k else objects_mask
+            selection_mask=objects_mask #& (collide_with_objects_p< 0.5) #& (collide_with_bins_p< 0.5) #if np.random.rand()> r_k else objects_mask
             #selection_mask= objects_mask
 
             gripper_pose2=gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask]
@@ -264,8 +269,8 @@ class TrainActionNet:
                 prediction_=gen_scores_[target_index]
                 c_,s_,f_=evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, visualize=False)
 
-                if (sum(c_)<=1) or (collide_with_bins_p[target_index]<=0.5 and collide_with_objects_p[target_index]<=0.5):
-                    self.moving_collision_rate.update(c_[0])
+                if (not (c_[0]>0 and c_[1]>0)) or (collide_with_bins_p[target_index]<=0.5 and collide_with_objects_p[target_index]<=0.5):
+                    self.moving_collision_rate.update(int(c_[0]>0))
                 if sum(c_)==0 and sum(s_)==0:
                     self.moving_firmness.update(int(f_[0] > f_[1]))
                 self.moving_out_of_scope.update(int(s_[0]>0))
@@ -361,7 +366,7 @@ class TrainActionNet:
 
             if bin_mask is not None:
                 label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-                background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=1.5,negative_weight=1)
+                background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
                 self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                 non_zero_background_loss_counter+=1
 
