@@ -63,7 +63,7 @@ def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequen
     '''update index'''
     save_key(grasp_data_counter_key, index)
 
-    print(Fore.LIGHTBLACK_EX,f'Save labeled data to : {online_data2.address}',Fore.RESET)
+    print(Fore.LIGHTBLACK_EX,f'Save labeled data to : {online_data2.address}/{index}*',Fore.RESET)
 
     # tabulated data:
     # [0:3]: gripper_target_point

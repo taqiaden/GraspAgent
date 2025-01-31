@@ -29,7 +29,7 @@ from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
-from models.action_net import ActionNet, action_module_key
+from models.action_net import ActionNet, action_module_key, action_module_key2
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.policy_net import PolicyNet, policy_module_key
 from pose_object import vectors_to_ratio_metrics
@@ -74,8 +74,11 @@ def masked_color(voxel_pc, score, pivot=0.5):
     return colors
 
 def view_mask(voxel_pc, score, pivot=0.5):
-    colors=masked_color(voxel_pc, score, pivot=0.5)
-    view_npy_open3d(voxel_pc, color=colors)
+    means_=voxel_pc.mean(axis=0)
+    voxel_pc_t=voxel_pc-means_
+    voxel_pc_t[:,1:]*=-1
+    colors=masked_color(voxel_pc_t, score, pivot=0.5)
+    view_npy_open3d(voxel_pc_t, color=colors)
 
 def multi_mask_view(pc, scores_list, pivot=0.5):
     colors=[]
@@ -181,6 +184,7 @@ class GraspAgent():
         pi.step(2)
 
         policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
+
         policy_net.ini_model(train=False)
         self.policy_net = policy_net.model
 
@@ -293,8 +297,8 @@ class GraspAgent():
             , background_class, depth_features = self.action_net(depth_torch.clone(),clip=True)
 
         '''depth to point clouds'''
-        voxel_pc_, mask = depth_to_point_clouds(self.depth, camera)
-        self.voxel_pc = transform_to_camera_frame(voxel_pc_, reverse=True)
+        self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
+        self.voxel_pc = transform_to_camera_frame(self.voxel_pc, reverse=True)
         voxel_pc_tensor = torch.from_numpy(self.voxel_pc).to('cuda').float()
         self.normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
         poses = gripper_pose.squeeze().permute(1, 2, 0)[mask]
@@ -302,6 +306,7 @@ class GraspAgent():
         '''grasp reachability'''
         suction_grasp_scope = self.get_suction_grasp_reachability(voxel_pc_tensor,self.normals)
         gripper_grasp_scope=self.get_gripper_grasp_reachability(voxel_pc_tensor,poses)
+
         '''shift reachability'''
         gripper_shift_scope=self.get_gripper_shift_reachability( voxel_pc_tensor,self.normals)
         suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
@@ -319,7 +324,9 @@ class GraspAgent():
             self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask)
 
         '''reshape'''
-        griper_collision_classifier=griper_collision_classifier.squeeze()[mask]
+        griper_object_collision_classifier=griper_collision_classifier[0,0][mask]
+        griper_bin_collision_classifier=griper_collision_classifier[0,0][mask]
+
         griper_grasp_score=griper_grasp_score.squeeze()[mask]
         suction_seal_classifier=suction_seal_classifier.squeeze()[mask]
         suction_grasp_score=suction_grasp_score.squeeze()[mask]
@@ -327,30 +334,45 @@ class GraspAgent():
         shift_appealing=shift_appealing.squeeze()[mask]
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
 
-        # view_mask(voxel_pc_,background_class<0.5)
-        # view_mask(voxel_pc_,shift_appealing>0.5)
-        # view_mask(voxel_pc_,griper_collision_classifier>0.5)
         griper_grasp_score.fill_(1.)
         suction_grasp_score.fill_(1.)
 
+        '''correct backgoround mask'''
+        # min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
+        # background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
+
+        '''actions masks'''
+        object_mask=background_class<0.4
+        gripper_grasp_reachablity_mask=gripper_grasp_scope>0.5
+        gripper_collision_mask=(griper_object_collision_classifier<0.5) & (griper_bin_collision_classifier<0.5)
+        gripper_grasbablity_mask=griper_grasp_score*gripper_factor>0.5
+        suction_grasp_reachablity_mask=suction_grasp_scope>0.5
+        seal_quality_mask=suction_seal_classifier>0.5
+        suctionablity_mask=suction_grasp_score*suction_factor>0.5
+        shift_appealing_mask=shift_appealing>0.5
+        gripper_shift_reachablity_mask=gripper_shift_scope>0.5
+        suction_shift_reachablity_mask=suction_shift_scope>0.5
+
+        view_mask(self.voxel_pc,background_class<0.5)
+        # view_mask(voxel_pc_,shift_appealing>0.5)
+
         '''grasp actions'''
-        self.gripper_grasp_mask=((background_class<0.5)*(gripper_grasp_scope>0.5)
-                               *(griper_collision_classifier>0.5)
-                               *(griper_grasp_score*gripper_factor>0.5)* gripper_grasp)
-        self.suction_grasp_mask=((background_class<0.5)*(suction_grasp_scope>0.5)
-                               *(suction_seal_classifier>0.5)
-                               *(suction_grasp_score*suction_factor>0.5)* (suction_grasp))
+        self.gripper_grasp_mask=(object_mask*gripper_grasp_reachablity_mask
+                               *gripper_collision_mask
+                               *gripper_grasbablity_mask* gripper_grasp)
+        self.suction_grasp_mask=(object_mask*suction_grasp_reachablity_mask
+                               *seal_quality_mask
+                               *suctionablity_mask* suction_grasp)
         # view_mask(voxel_pc_,self.gripper_grasp_mask)
         # view_mask(voxel_pc_,self.suction_grasp_mask)
 
         '''shift actions'''
-        self.gripper_shift_mask=((shift_appealing>0.5)*(gripper_shift_scope>0.5)* (gripper_shift))#*(shift_affordance_classifier>0.5)
-        self.suction_shift_mask=((shift_appealing>0.5)*(suction_shift_scope>0.5)* (suction_shift)) #*(shift_affordance_classifier>0.5)
+        self.gripper_shift_mask=(shift_appealing_mask*gripper_shift_reachablity_mask* gripper_shift)#*(shift_affordance_classifier>0.5)
+        self.suction_shift_mask=(shift_appealing_mask*suction_shift_reachablity_mask* suction_shift) #*(shift_affordance_classifier>0.5)
 
-        view_mask(voxel_pc_,(shift_appealing>0.5))
-        view_mask(voxel_pc_,(suction_shift_scope>0.5))
-
-        view_mask(voxel_pc_,self.suction_shift_mask)
+        # view_mask(voxel_pc_,(shift_appealing>0.5))
+        # view_mask(voxel_pc_,(suction_shift_scope>0.5))
+        # view_mask(voxel_pc_,self.suction_shift_mask)
 
         '''gripper pose convention'''
         self.gripper_poses_7=poses
@@ -489,11 +511,11 @@ class GraspAgent():
 
 
         '''mask occupied space'''
-        arm_knee_margin = 0.2
+        arm_knee_margin = 0.5
         normal=action_obj.normal
         action_obj.target_point=self.voxel_pc[action_obj.point_index]
         arm_knee_extreme=(action_obj.target_point + normal * arm_knee_margin)[1]
-        minimum_safety_margin=0.05
+        minimum_safety_margin=0.1
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])
         dist_mask=(x_dist<minimum_safety_margin) & (y_dist<minimum_safety_margin)
@@ -675,9 +697,23 @@ class GraspAgent():
                 '''check changes in side bins'''
                 if gripper_action.is_grasp:
                     gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
+                    if gripper_action.grasp_result is None:
+                        print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
+                    elif gripper_action.grasp_result:
+                        print(Fore.GREEN, 'A new object is detected at the gripper side of the bin',Fore.RESET)
+                    else:
+                        print(Fore.GREEN, 'No object is detected at to the gripper side of the bin',Fore.RESET)
+
 
                 if suction_action.is_grasp:
                     suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
+                    if suction_action.grasp_result is None:
+                        print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
+                    elif suction_action.grasp_result:
+                        print(Fore.GREEN, 'A new object is detected at the suction side of the bin',Fore.RESET)
+                    else:
+                        print(Fore.GREEN, 'No object is detected at to the suction side of the bin',Fore.RESET)
+
 
                 '''save action instance'''
                 if gripper_action.result is not None or suction_action.result is not None:

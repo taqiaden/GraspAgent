@@ -8,11 +8,12 @@ from datetime import datetime
 import cv2
 import numpy as np
 import smbclient
+from PIL import Image
 
 from Configurations.config import ip_address, where_am_i
 
 from lib.report_utils import counter_progress
-from lib.IO_utils import load_numpy_from_server, save_numpy_to_server
+from lib.IO_utils import load_numpy_from_server, save_pickle_to_server, save_to_server, save_data_to_server
 from Configurations import config
 from lib.report_utils import wait_indicator
 
@@ -45,6 +46,7 @@ def configure_smbclient():
     if config.hide_smbclient_log:logging.disable(sys.maxsize)
 configure_smbclient()
 
+
 def custom_np_load(file_path):
     return np.load(file_path, allow_pickle=True)
 class modality_pool():
@@ -59,7 +61,8 @@ class modality_pool():
         '''set proper local/server functions'''
         self.os=os if self.is_local else smbclient
         self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
-        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+        self.save_numpy_=np.save if self.is_local else save_pickle_to_server
+        self.save_as_image=self.save_image_locally if self.is_local else self.save_image_to_server
 
         '''set directory'''
         if not os.path.exists(self.dir): os.mkdir(self.dir)
@@ -88,8 +91,19 @@ class modality_pool():
             return self.load_as_numpy(idx)
     def save_as_numpy(self, data, idx):
         self.save_numpy_( self.dir + str(idx) + self.sufix, data)
-    def save_as_image(self, data, idx):
-        cv2.imwrite(self.dir + str(idx) + self.sufix,data)
+
+    def save_image_locally(self,data,idx):
+        image=cv2.cvtColor(data,cv2.COLOR_RGB2BGR)
+        cv2.imwrite(self.dir + str(idx) + self.sufix,image)
+
+    def save_image_to_server(self, data, idx):
+        data=data*255
+        data=data.astype(np.uint8)
+        image=cv2.cvtColor(data,cv2.COLOR_RGB2BGR)
+        _,buff=cv2.imencode('.jpg',image)
+        byte_buffer=buff.tobytes()
+        save_to_server( self.dir + str(idx) + self.sufix, byte_buffer)
+
     def save(self, data,idx):
         if self.extension=='jpg':
             return self.save_as_image(data,idx)
@@ -136,7 +150,7 @@ class data_pool():
         '''set local/server functions'''
         self.os=os if self.is_local else smbclient
         self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
-        self.save_numpy_=np.save if self.is_local else save_numpy_to_server
+        self.save_numpy_=np.save if self.is_local else save_pickle_to_server
 
         '''set directory'''
         if not os.path.exists(self.dir): os.mkdir(self.dir)
@@ -258,7 +272,7 @@ class online_data(data_pool):
 
 class online_data2(data_pool):
     def __init__(self):
-        super(online_data2,self).__init__(dir=online_data_dir2,is_local=True,dataset_name='online2')
+        super(online_data2,self).__init__(dir=online_data_dir2,is_local=False,dataset_name='online2')
 
 class online_data_local(data_pool):
     def __init__(self):

@@ -211,19 +211,19 @@ class PPOLearning():
         self.lamda = lamda
         self.n_epochs = n_epochs
         self.batch_size=batch_size
-        self.model_wrapper=self.init_model_wrapper()
+        # self.model_wrapper=self.init_model_wrapper()
 
         self.memory = buffer
 
         self.counter=0
 
-    def init_model_wrapper(self):
-        '''load  models'''
-        policy_net = ModelWrapper(model=PolicyNet(),module_key=policy_module_key)
-
-        '''optimizers'''
-        policy_net.ini_adam_optimizer(learning_rate=learning_rate)
-        return policy_net
+    # def init_model_wrapper(self):
+    #     '''load  models'''
+    #     policy_net = ModelWrapper(model=PolicyNet(),module_key=policy_module_key)
+    #
+    #     '''optimizers'''
+    #     policy_net.ini_adam_optimizer(learning_rate=learning_rate)
+    #     return policy_net
 
     def step(self,model:PolicyNet(),buffer:PPOMemory,data_tracker:DataTracker2):
         self.model_wrapper.model=model

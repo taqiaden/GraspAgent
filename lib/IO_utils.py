@@ -137,10 +137,14 @@ def load_numpy_from_server(path):
 
     return npy
 
-def save_numpy_to_server(path,data):
+def save_pickle_to_server(path,data):
     pickled=pickle.dumps(data)
     with smbclient.open_file(path,mode="wb") as f:
         f.write(pickled)
+
+def save_to_server(path,data):
+    with smbclient.open_file(path,mode="wb") as f:
+        f.write(data)
 
 def save_data_to_server(data,path):
     # try:

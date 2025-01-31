@@ -91,9 +91,9 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         '''at least one or both the ref or the pred is out of scope and/or with collision'''
         if c_[1] + s_[1] == 0:
             # print('c=',c_[0])
-            weight=(1+c_[0])
+            #weight=(1+c_[0])
             # return torch.abs(prediction_ - label_ + 1.)**2, True
-            return weight*(torch.clamp(prediction_ - label_ + 1., 0.))**2, True
+            return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
         # elif c_[0] + s_[0] == 0:
         #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
         #     return 0.0*(torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
@@ -106,13 +106,13 @@ def critic_loss(c_,s_,f_,prediction_,label_):
             # print('f=', f_)
 
             # return (prediction_ - label_ +1.)**2, True
-            weight=abs(f_[0]-f_[1])
+            #weight=abs(f_[0]-f_[1])
 
-            return weight*(torch.clamp(prediction_ - label_ , 0.)) , True
+            return (torch.clamp(prediction_ - label_ , 0.)) **2, True
         # elif f_[0] >= f_[1]:
         #     # return  (  label_ -prediction_+1.)**2, True
         #
-        #     return 0.0*(torch.clamp(label_ - prediction_, 0.)), True
+        #     return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
         else:
             return 0.0, False
 
@@ -184,9 +184,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        #gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
 
         return gan
@@ -209,7 +209,7 @@ class TrainActionNet:
 
                 gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
 
-                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )
+                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )**0.5
                 print(r_k)
 
                 gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)

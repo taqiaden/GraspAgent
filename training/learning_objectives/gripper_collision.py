@@ -92,7 +92,7 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visua
         #     print('G: ', target_generated_pose)
     else:
         ref_has_collision, ref_firmness_val, ref_collision_val=1,0,1
-
+    #
     # print('ref: ', target_ref_pose)
     # print('G: ', target_generated_pose)
 
