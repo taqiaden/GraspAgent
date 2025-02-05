@@ -33,7 +33,7 @@ lock = FileLock("file.lock")
 
 instances_per_sample=1
 
-module_key= 'action_net'
+module_key= 'action_net2'
 training_buffer = online_data()
 training_buffer.main_modality=training_buffer.depth
 

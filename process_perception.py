@@ -10,9 +10,11 @@ from Configurations import config
 from Configurations.config import home_dir
 from Configurations.run_config import simulation_mode, offline_point_cloud
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth
+from lib.image_utils import view_image
 from lib.pc_utils import refine_point_cloud, random_down_sampling, closest_point, scene_point_clouds_mask
 from lib.report_utils import wait_indicator as wi
 from registration import crop_scene_image, camera
+from visualiztion import view_npy_open3d
 
 sensory_pc_path = home_dir+'pc_tmp_data.npy'
 sensory_RGB_path = home_dir+'RGB_tmp_data.npy'
@@ -47,6 +49,7 @@ def trigger_new_perception():
     while (os.path.getctime(rgb_path)==ctime_stamp_rgb or
            ctime_stamp_pc == os.path.getctime(sensory_pc_path) or
            os.path.getctime(texture_image_path)==ctime_stamp_texture):
+
         if  offline_point_cloud == True:
             print(Fore.RED, 'Camera is not available. Load data from pool', Fore.RESET)
             break
@@ -76,12 +79,15 @@ def get_scene_point_clouds():
 
     return full_point_clouds
 
+
+
 def get_scene_RGB():
     '''load and crop'''
     full_RGB=cv2.imread(rgb_path)
-    full_RGB=cv2.cvtColor(np.float32(full_RGB), cv2.COLOR_BGR2RGB) / 255
+    full_RGB=cv2.cvtColor(full_RGB, cv2.COLOR_BGR2RGB)/255
     assert full_RGB.shape == (1200, 1920, 3), f'{full_RGB.shape}'
     scene_RGB = crop_scene_image(full_RGB)
+    # view_image(scene_RGB)
 
     '''save'''
     np.save(sensory_RGB_path, scene_RGB)
@@ -90,7 +96,10 @@ def get_scene_RGB():
 def get_scene_depth():
     '''load transform, and convert'''
     point_clouds = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant
-    point_clouds = refine_point_cloud(point_clouds)
+    # view_npy_open3d(point_clouds)
+    #
+    # point_clouds = refine_point_cloud(point_clouds)
+    # view_npy_open3d(point_clouds)
     transformed_point_clouds = transform_to_camera_frame(point_clouds)
     depth = point_clouds_to_depth(transformed_point_clouds, camera)
 

@@ -10,8 +10,10 @@ from registration import view_colored_point_cloud
 configure_smbclient()
 grasp_agent = GraspAgent()
 grasp_agent.initialize_check_points()
+grasp_agent.report()
 
 trigger_new_perception()
+
 while True:
     img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
     with torch.no_grad():
@@ -23,9 +25,10 @@ while True:
         '''infer dense action value pairs'''
         grasp_agent.model_inference(depth,rgb)
         # grasp_agent.dense_view()
+        # grasp_agent.view_predicted_normals()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
-        # grasp_agent.actions_view(first_action_obj,second_action_obj)
+        grasp_agent.actions_view(first_action_obj,second_action_obj)
         if first_action_obj is not None and not simulation_mode:
             '''execute action/s'''
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)

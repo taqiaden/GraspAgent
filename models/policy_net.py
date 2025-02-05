@@ -70,7 +70,6 @@ class PolicyNet(nn.Module):
 
         '''gripper grasp head'''
         gripper_pose_detached=gripper_pose.detach().clone()
-        gripper_pose_detached[:,-2:]=torch.clip(gripper_pose_detached[:,-2:],0.,1.)
         gripper_pose_detached=reshape_for_layer_norm(gripper_pose_detached, camera=camera, reverse=False)
         griper_grasp_score = self.gripper_grasp(rgb_features, gripper_pose_detached)
 

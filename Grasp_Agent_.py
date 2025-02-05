@@ -1,11 +1,11 @@
-import os.path
 import subprocess
-
+from lib.dataset_utils import online_data2
 import numpy as np
 import torch
 import trimesh
 from colorama import Fore
 import open3d as o3d
+from Configurations.dynamic_config import get_int
 from Online_data_audit.data_tracker2 import DataTracker2
 from action import Action
 from lib.IO_utils import save_pickle, load_pickle
@@ -18,13 +18,13 @@ from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, \
     enhance_gripper_firmness, single_arm_operation_mode, \
     gripper_grasp,gripper_shift,suction_grasp,suction_shift
-from Online_data_audit.process_feedback import save_grasp_sample
+from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds, get_pixel_index
 from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
@@ -36,7 +36,8 @@ from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
-from training.policy_lr import PPOLearning, PPOMemory
+from training.policy_control_board import PPOLearning
+from training.policy_lr import PPOMemory, buffer_file, action_data_tracker_path
 from visualiztion import view_npy_open3d, vis_scene
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
@@ -45,8 +46,8 @@ execute_suction_shift_bash = './bash/run_robot_suction_shift.sh'
 execute_gripper_shift_bash = './bash/run_robot_gripper_shift.sh'
 execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
 
-buffer_file='buffer.pkl'
-action_data_tracker_path=r'online_data_dict'
+
+online_data2=online_data2()
 
 pr=my_print()
 
@@ -105,19 +106,24 @@ class GraspAgent():
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
 
-        self.buffer=load_pickle(buffer_file) if os.path.exists(buffer_file) else PPOMemory()
+        self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         self.online_learning=PPOLearning()
 
-        '''modalities'''
+    def report(self):
+        print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
+        print(f'Episodic buffer size = {len(self.buffer)} ')
+        latest_id=get_int(grasp_data_counter_key)
+        print(f'Latest saved id is {latest_id}')
+
+        '''Modalities'''
         self.point_clouds = None
         self.depth=None
         self.rgb=None
 
-        self.policy_learning=PPOLearning(model=self.policy_net)
+        self.policy_learning=PPOLearning()
 
         '''dense records'''
-        # self.quality_masks=None
         self.gripper_poses_5=None
         self.gripper_poses_7=None
         self.gripper_grasp_mask=None
@@ -141,7 +147,6 @@ class GraspAgent():
         self.run_sequence=0
 
     def clear(self):
-        # self.quality_masks = None
         self.gripper_poses_5 = None
         self.gripper_poses_7 = None
         self.gripper_grasp_mask = None
@@ -316,7 +321,7 @@ class GraspAgent():
 
         '''target mask'''
         self.target_object_mask = background_class.detach() <= 0.5
-        self.mask_numpy=self.target_object_mask.cpu().numpy()
+        self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
 
         '''policy net output'''
         griper_grasp_score, suction_grasp_score,\
@@ -338,11 +343,13 @@ class GraspAgent():
         suction_grasp_score.fill_(1.)
 
         '''correct backgoround mask'''
-        # min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
-        # background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
+        lower_bound_mask=(self.voxel_pc[:,-1]<0.045) | (self.voxel_pc[:,0]<0.25) | (self.voxel_pc[:,0]>0.6)
+        background_class[lower_bound_mask]=1.0
+        min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
+        background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
 
         '''actions masks'''
-        object_mask=background_class<0.4
+        object_mask=background_class<0.5
         gripper_grasp_reachablity_mask=gripper_grasp_scope>0.5
         gripper_collision_mask=(griper_object_collision_classifier<0.5) & (griper_bin_collision_classifier<0.5)
         gripper_grasbablity_mask=griper_grasp_score*gripper_factor>0.5
@@ -353,7 +360,7 @@ class GraspAgent():
         gripper_shift_reachablity_mask=gripper_shift_scope>0.5
         suction_shift_reachablity_mask=suction_shift_scope>0.5
 
-        view_mask(self.voxel_pc,background_class<0.5)
+        # view_mask(self.voxel_pc,background_class<0.5)
         # view_mask(voxel_pc_,shift_appealing>0.5)
 
         '''grasp actions'''
@@ -406,6 +413,9 @@ class GraspAgent():
         self.action_probs = self.action_probs.reshape(-1)
         self.valid_actions_mask = self.valid_actions_mask.reshape(-1)
         self.valid_actions_on_target_mask = self.valid_actions_on_target_mask.reshape(-1)
+
+    def view_predicted_normals(self):
+        view_npy_open3d(pc=self.voxel_pc,normals=self.normals.cpu().numpy())
 
     def dense_view(self):
         print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
@@ -509,31 +519,44 @@ class GraspAgent():
         else:
             self.valid_actions_mask[:, [1, 3]]=False
 
-
         '''mask occupied space'''
-        arm_knee_margin = 0.5
         normal=action_obj.normal
         action_obj.target_point=self.voxel_pc[action_obj.point_index]
+        knee_ref_elevation=0.3
+        res_elevation=knee_ref_elevation-action_obj.target_point[-1]
+        assert res_elevation>0.
+        arm_knee_margin=res_elevation/normal[-1]
+        # view_npy_open3d(self.voxel_pc)
         arm_knee_extreme=(action_obj.target_point + normal * arm_knee_margin)[1]
-        minimum_safety_margin=0.1
+        # print('target_point=',action_obj.target_point,' arm_knee_extreme=',arm_knee_extreme,' normal=',normal)
+        minimum_safety_margin=0.05
+        knee_threeshold=0.15
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])
         dist_mask=(x_dist<minimum_safety_margin) & (y_dist<minimum_safety_margin)
 
         if action_obj.use_gripper_arm:
+            # print(self.gripper_approach[action_obj.point_index],'---',action_obj.approach)
             other_arm_approach=self.suction_approach
             minimum_margin = action_obj.target_point[1] - minimum_safety_margin
+            res_elevation = knee_ref_elevation - self.voxel_pc[-1]
+            assert np.all(res_elevation > 0.)
+            arm_knee_margin = res_elevation / (- other_arm_approach[-1])
             second_arm_extreme=(self.voxel_pc-other_arm_approach*arm_knee_margin)[:,1]
 
-
-            occupancy_mask = (self.voxel_pc[:,1] < minimum_margin) | (arm_knee_extreme>second_arm_extreme) | dist_mask
+            occupancy_mask = (self.voxel_pc[:,1] < minimum_margin) | (arm_knee_extreme>(second_arm_extreme-knee_threeshold)) | dist_mask
         else:
+            # print(self.suction_approach[action_obj.point_index],'---',action_obj.approach)
+
             other_arm_approach=self.gripper_approach.cpu().numpy()
+            res_elevation = knee_ref_elevation - self.voxel_pc[-1]
+            assert np.all(res_elevation > 0.)
+            arm_knee_margin = res_elevation / (- other_arm_approach[-1])
             second_arm_extreme=(self.voxel_pc-other_arm_approach*arm_knee_margin)[:,1]
             minimum_margin = action_obj.target_point[1] + minimum_safety_margin
 
-            occupancy_mask = (self.voxel_pc[:,1] > minimum_margin) | (second_arm_extreme>arm_knee_extreme) |  dist_mask
-
+            occupancy_mask = (self.voxel_pc[:,1] > minimum_margin) | (arm_knee_extreme<(second_arm_extreme+knee_threeshold)) |  dist_mask
+        print('second_arm_extreme=',second_arm_extreme,' arm_knee_extreme=',arm_knee_extreme)
         self.first_action_mask=occupancy_mask
         # print(occupancy_mask.shape)
         # print(self.valid_actions_mask.shape)
@@ -619,8 +642,9 @@ class GraspAgent():
         robot_feedback_ = 'Wait'
         wait = wi('Waiting for robot feedback')
         counter=0
-        while robot_feedback_ == 'Wait':
-            wait.step(0.5)
+        while robot_feedback_ == 'Wait' or robot_feedback_.strip()=='':
+            wait_time=0.5 if counter<2 else 0.01
+            wait.step(wait_time)
             if counter==0:
                 '''reduce buffer size'''
                 self.buffer.pop()
@@ -629,13 +653,13 @@ class GraspAgent():
                 '''save data tracker'''
                 self.data_tracker.save()
             elif counter==1:
-                if self.buffer.episodes_counter>0:
-                    '''step policy training'''
-                    self.online_learning.step(self.policy_net,self.buffer)
+                if len(self.data_tracker)>10000:
+                    self.policy_net=self.online_learning.step(self.policy_net,self.buffer,self.data_tracker)
             robot_feedback_ = read_robot_feedback()
             counter+=1
         else:
             wait.end()
+            print('-',robot_feedback_,'-')
             print('Robot msg: ' + robot_feedback_)
         first_action_obj.robot_feedback = robot_feedback_
         second_action_obj.robot_feedback = robot_feedback_
@@ -702,8 +726,7 @@ class GraspAgent():
                     elif gripper_action.grasp_result:
                         print(Fore.GREEN, 'A new object is detected at the gripper side of the bin',Fore.RESET)
                     else:
-                        print(Fore.GREEN, 'No object is detected at to the gripper side of the bin',Fore.RESET)
-
+                        print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
 
                 if suction_action.is_grasp:
                     suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
@@ -712,12 +735,11 @@ class GraspAgent():
                     elif suction_action.grasp_result:
                         print(Fore.GREEN, 'A new object is detected at the suction side of the bin',Fore.RESET)
                     else:
-                        print(Fore.GREEN, 'No object is detected at to the suction side of the bin',Fore.RESET)
-
+                        print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
 
                 '''save action instance'''
-                if gripper_action.result is not None or suction_action.result is not None:
-                    save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
+                assert gripper_action.result is not None or suction_action.result is not None
+                save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
                 self.run_sequence+=1
 
                 '''update buffer and tracker'''

@@ -6,6 +6,34 @@ from PIL import Image
 from colorama import Fore
 
 
+def imflatfield(I, sigma):
+    """Python equivalent imflatfield implementation
+       I format must be BGR uint8"""
+    A = I.astype(np.float32) / 255  # A = im2single(I);
+    Ihsv = cv2.cvtColor(A, cv2.COLOR_BGR2HSV)  # Ihsv = rgb2hsv(A);
+    A = Ihsv[:, :, 2]  # A = Ihsv(:,:,3);
+
+    filterSize = int(2 * np.ceil(2 * sigma) + 1);  # filterSize = 2*ceil(2*sigma)+1;
+
+    # shading = imgaussfilt(A, sigma, 'Padding', 'symmetric', 'FilterSize', filterSize); % Calculate shading
+    shading = cv2.GaussianBlur(A, (filterSize, filterSize), sigma, borderType=cv2.BORDER_REFLECT)
+
+    meanVal = np.mean(A)  # meanVal = mean(A(:),'omitnan')
+
+    # % Limit minimum to 1e-6 instead of testing using isnan and isinf after division.
+    shading = np.maximum(shading, 1e-6)  # shading = max(shading, 1e-6);
+
+    B = A * meanVal / shading  # B = A*meanVal./shading;
+
+    # % Put processed V channel back into HSV image, convert to RGB
+    Ihsv[:, :, 2] = B  # Ihsv(:,:,3) = B;
+
+    B = cv2.cvtColor(Ihsv, cv2.COLOR_HSV2BGR)  # B = hsv2rgb(Ihsv);
+
+    B = np.round(np.clip(B * 255, 0, 255)).astype(np.uint8)  # B = im2uint8(B);
+
+    return B
+
 def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize=False):
     processed_gray_image=np.copy(depth)
     non_zero_min=np.min(depth[np.nonzero(depth)])
@@ -27,8 +55,8 @@ def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize
 def check_image_similarity(old_image, new_image):
     res = np.sum((old_image.astype("float") - new_image.astype("float")) ** 2)
     res /= (old_image.shape[0] * old_image.shape[1])
-    limit=30
-    safety_threshold=20
+    limit=100
+    safety_threshold=50
     print(f'Image res = {res}')
     if res > limit+safety_threshold:
         return 1

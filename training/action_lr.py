@@ -189,11 +189,12 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*100)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
         # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.5)
 
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
+        # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
 
         return gan
 
@@ -371,7 +372,7 @@ class TrainActionNet:
 
             if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())} alpha = {truncate(alpha)}, beta = {truncate(beta)}, firmness weight = {truncate(firmness_weight)}')
 
-            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+decay_loss*0.1+gripper_sampling_loss*2.0+suction_sampling_loss+background_loss*3.0
+            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+decay_loss*0.1+gripper_sampling_loss*5.0+suction_sampling_loss+background_loss*3.0
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
@@ -449,7 +450,7 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-6
+    lr = 5e-6
     train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
     train_action_net.initialize(n_samples=100)
     train_action_net.begin()

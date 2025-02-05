@@ -98,6 +98,7 @@ def rotation_matrix_from_vectors(source_vec, destination_vec):
     """
     no_rotation_mat=np.array([[1.,0.,0.],[0.,1.,.0],[0.,0.,1.]])
     a, b = (source_vec / np.linalg.norm(source_vec)).reshape(3), (destination_vec / np.linalg.norm(destination_vec)).reshape(3)
+
     v = np.cross(a, b)
     if np.sum(v)==0.0: return no_rotation_mat
     c = np.dot(a, b)

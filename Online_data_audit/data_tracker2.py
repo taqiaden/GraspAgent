@@ -1,13 +1,12 @@
 import random
 import numpy as np
-from Online_data_audit.dictionary_utils import load_dict, save_dict
 from action import Action
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
 from lib.report_utils import progress_indicator as pi
-from lib.statistics import moving_momentum
+from lib.dataset_utils import online_data2
 
-dictionary_directory=r'Online_data_audit/'
+online_data2=online_data2()
 
 #[key] file id
 '''gripper records'''
@@ -35,8 +34,8 @@ def sampling_p(sampling_rate,target_rate=0.25,exponent=10,k=0.75):
 class DataTracker2():
     def __init__(self,name='',list_size=3):
         self.name=name
-        self.path=dictionary_directory+name+',pkl'
-        self.dict=load_dict(self.path)
+        self.path=name+'.pkl'
+        self.dict=online_data2.load_pickle(self.path) if online_data2.file_exist(self.path) else {}
         self.list_size=list_size
         self.empty_list=[0]*list_size
 
@@ -68,9 +67,7 @@ class DataTracker2():
     def selective_grasp_sampling(self, size,sampling_rates=None):
         shuffled_keys=list(self.dict.keys())
         random.shuffle(shuffled_keys)
-
-        sampling_probabilities=[sampling_p(sampling_rates(i)) for i in range(4)]
-
+        sampling_probabilities=[sampling_p(sampling_rates[i]) for i in range(4)]
         ids=[]
         for key in shuffled_keys:
             record=self.dict[key]
@@ -81,24 +78,29 @@ class DataTracker2():
                 if record[3]==1 and np.random.random()<=sampling_probabilities[0]:
                     '''positive'''
                     ids.append(key)
+                    continue
                 elif np.random.random()<=sampling_probabilities[1]:
                     '''negative'''
                     ids.append(key)
+                    continue
 
             if record[4]==1 and record[5]==0:
                 '''suction grasp'''
                 if record[3] == 1 and np.random.random()<=sampling_probabilities[2]:
                     '''positive'''
                     ids.append(key)
+                    continue
                 elif np.random.random()<=sampling_probabilities[3]:
                     '''negative'''
                     ids.append(key)
+                    continue
 
         return ids
 
 
     def save(self):
-        save_dict(self.dict, self.path)
+        online_data2.save_pickle(self.path,self.dict)
+        # save_dict(self.dict, self.path)
 
     def __len__(self):
         return len(self.dict)

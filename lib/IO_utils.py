@@ -34,10 +34,15 @@ def space_key_pressed(): ## starts listener modulefg h
     with Listener(on_press=print_key) as listener:
         listener.join()
     return result
-def save_pickle(path,tuples):
+def save_pickle(path,obj):
     # pickled_tuple=pickle.dumps(tuples)
     with open(path,'wb') as file:
-        pickle.dump(tuples,file)
+        pickle.dump(obj,file)
+
+def save_pickle_to_server2(path,obj):
+    with smbclient.open_file(path,mode="wb") as f:
+        pickle.dump(obj,f)
+
 def save_pickle_to_server(path,tuples):
     pickled_tuple=pickle.dumps(tuples)
     with smbclient.open_file(path,mode="wb") as f:
@@ -129,13 +134,22 @@ def get_sample_index(path):
     index = re.findall(r'\d+', file_name)[0]
     return index
 
-def load_numpy_from_server(path):
+def load_from_server(path):
     with smbclient.open_file(path, mode='rb') as f:
-        buffer = io.BytesIO(f.read())
+        file=f.read()
+    return file
 
-    npy=np.load(buffer,allow_pickle=True)
-
+def load_pickle_from_server(path):
+    with smbclient.open_file(path, mode='rb') as f:
+        # buffer = io.BytesIO(f.read())
+        # pickle=f.read()
+        npy=np.load(f,allow_pickle=True)
     return npy
+
+def load_pickle_from_server2(path):
+    with smbclient.open_file(path, mode='rb') as f:
+        pickle_obj=pickle.load(f)
+    return pickle_obj
 
 def save_pickle_to_server(path,data):
     pickled=pickle.dumps(data)

@@ -1,3 +1,4 @@
+import io
 import logging
 import math
 import os
@@ -8,18 +9,20 @@ from datetime import datetime
 import cv2
 import numpy as np
 import smbclient
-from PIL import Image
 
 from Configurations.config import ip_address, where_am_i
+from lib.image_utils import view_image
 
 from lib.report_utils import counter_progress
-from lib.IO_utils import load_numpy_from_server, save_pickle_to_server, save_to_server, save_data_to_server
+from lib.IO_utils import save_pickle_to_server, save_to_server, load_from_server, load_pickle_from_server, load_pickle, \
+    load_pickle_from_server2, save_pickle, save_pickle_to_server2
 from Configurations import config
 from lib.report_utils import wait_indicator
 
 training_data_dir='dataset/training_data/'
 
 local_online_pools=True
+local_online_pools2=False
 
 if where_am_i=='chaoyun-server': # server
     online_data_dir = r'/home/taqiaden/online_data/'
@@ -35,6 +38,7 @@ else:
     # online_data_dir=r'/home/taqiaden/online_data/'
     online_data_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
     online_data_dir2=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data2/'
+    local_online_pools2=True
 
 
 online_data_local_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
@@ -60,12 +64,13 @@ class modality_pool():
 
         '''set proper local/server functions'''
         self.os=os if self.is_local else smbclient
-        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
+        self.load_numpy_=custom_np_load if self.is_local else load_pickle_from_server
         self.save_numpy_=np.save if self.is_local else save_pickle_to_server
         self.save_as_image=self.save_image_locally if self.is_local else self.save_image_to_server
+        self.load_as_image=self.load_image_from_local if self.is_local else self.load_image_from_server
 
         '''set directory'''
-        if not os.path.exists(self.dir): os.mkdir(self.dir)
+        if not self.os.path.exists(self.dir): os.mkdir(self.dir)
 
     def make_dir(self):
         if not self.os.path.exists(self.dir):
@@ -79,11 +84,22 @@ class modality_pool():
         file_names=self.get_names()
         return [self.get_index(x) for x in file_names]
     def load_as_numpy(self, idx):
-        full_path = self.dir + idx+self.sufix
+        full_path = self.dir + str(idx)+self.sufix
         return self.load_numpy_(full_path)
-    def load_as_image(self, idx):
-        full_path = self.dir + idx + self.sufix
-        return cv2.imread(full_path)
+    def load_image_from_server(self,idx):
+        full_path = self.dir + str(idx) + self.sufix
+        image_bytes = load_from_server(full_path)
+        image_buffer = io.BytesIO(image_bytes)
+        image_np = np.frombuffer(image_buffer.getvalue(), dtype=np.uint8)
+        image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) / 255
+
+        return image
+    def load_image_from_local(self,idx):
+        full_path = self.dir + str(idx) + self.sufix
+        image=cv2.imread(full_path)
+        image=cv2.cvtColor(image, cv2.COLOR_BGR2RGB) / 255
+        return image
     def load(self, idx):
         if self.extension=='jpg':
             return self.load_as_image(idx)
@@ -149,11 +165,11 @@ class data_pool():
 
         '''set local/server functions'''
         self.os=os if self.is_local else smbclient
-        self.load_numpy_=custom_np_load if self.is_local else load_numpy_from_server
+        self.load_numpy_=custom_np_load if self.is_local else load_from_server
         self.save_numpy_=np.save if self.is_local else save_pickle_to_server
 
         '''set directory'''
-        if not os.path.exists(self.dir): os.mkdir(self.dir)
+        if not self.os.path.exists(self.dir): os.mkdir(self.dir)
 
         '''define modalities pool'''
         self.point_clouds=modality_pool('point_clouds',self.dir,'npy',self.is_local)
@@ -169,6 +185,9 @@ class data_pool():
     def address(self):
         return self.dir
 
+    def file_exist(self,file_name):
+        return self.os.path.exists(self.dir+file_name)
+
     def load_numpy(self,file_full_path):
         # check if data and label exist
         assert self.os.path.exists(file_full_path), f' The following file does not exist : {file_full_path}'
@@ -179,6 +198,21 @@ class data_pool():
         return re.findall(r'\d+', file_name_)[0]
     def get_indexes(self):
         return self.main_modality.get_indexes()
+
+    def load_pickle(self,file_name):
+        full_path=self.dir+file_name
+        if self.is_local:
+            return load_pickle(full_path)
+        else:
+            return load_pickle_from_server2(full_path)
+
+    def save_pickle(self,file_name,obj):
+        full_path=self.dir+file_name
+        if self.is_local:
+            return save_pickle(full_path,obj)
+        else:
+            return save_pickle_to_server2(full_path,obj)
+
     def clear(self,wait=False):
         self.point_clouds.remove_all_files()
         self.label.remove_all_files()
@@ -272,7 +306,7 @@ class online_data(data_pool):
 
 class online_data2(data_pool):
     def __init__(self):
-        super(online_data2,self).__init__(dir=online_data_dir2,is_local=False,dataset_name='online2')
+        super(online_data2,self).__init__(dir=online_data_dir2,is_local=local_online_pools2,dataset_name='online2')
 
 class online_data_local(data_pool):
     def __init__(self):

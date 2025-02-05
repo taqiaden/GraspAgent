@@ -1,5 +1,4 @@
 import copy
-import math
 
 import numpy as np
 import torch
@@ -19,11 +18,10 @@ from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
-from models.action_net import ActionNet, Critic, random_approach_tensor, action_module_key2
+from models.action_net import ActionNet, Critic, action_module_key2
 from records.training_satatistics import TrainingTracker, MovingRate, truncate
 from registration import camera
-from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps, evaluate_grasps2, \
-    evaluate_grasps3
+from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps3
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
 
@@ -48,17 +46,6 @@ def suction_sampler_loss(pc,target_normal):
 
     return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
 
-def gripper_sampler_loss(pixel_index,j,generated_critic_score,critic_score_label,invalid):
-    pix_A = pixel_index[j, 0]
-    pix_B = pixel_index[j, 1]
-    prediction_score = generated_critic_score[j, 0, pix_A, pix_B]
-    # print(f'-  {critic_score_label}, {prediction_score}')
-    # if invalid:
-    #     loss=-prediction_score
-    # else:
-    loss = torch.clamp(critic_score_label - prediction_score, 0) ** 2
-
-    return loss
 
 def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_range,mask=None,maximum_iterations=10000,probability_exponent=2.0,balance_indicator=1.0,random_sampling_probability=0.003):
     for i in range(maximum_iterations):
@@ -109,10 +96,10 @@ def critic_loss(c_,s_,f_,prediction_,label_):
             #weight=abs(f_[0]-f_[1])
 
             return (torch.clamp(prediction_ - label_ , 0.)) **2, True
-        # elif f_[0] >= f_[1]:
-        #     # return  (  label_ -prediction_+1.)**2, True
-        #
-        #     return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
+        elif f_[0] >= f_[1]:
+            # return  (  label_ -prediction_+1.)**2, True
+
+            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
         else:
             return 0.0, False
 
@@ -184,10 +171,11 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        #gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
+        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
+        # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
 
         return gan
 
@@ -209,7 +197,7 @@ class TrainActionNet:
 
                 gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
 
-                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )**0.5
+                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )#**0.5
                 print(r_k)
 
                 gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)
@@ -235,8 +223,8 @@ class TrainActionNet:
             collide_with_objects_p=griper_collision_classifier_2[0, 0][mask].detach()
             collide_with_bins_p=griper_collision_classifier_2[0, 1][mask].detach()
 
-            selection_p=torch.rand_like(collide_with_objects_p)
-            # selection_p=(1.0-collide_with_objects_p)*(1.0-collide_with_bins_p)
+            # selection_p=torch.rand_like(collide_with_objects_p)
+            selection_p=(1.0-collide_with_objects_p)#*(1.0-collide_with_bins_p)
             # selection_p=torch.sqrt(selection_p)
             # selection_p=torch.sqrt(selection_p)
             # print(collide_with_bins_p)
@@ -397,7 +385,7 @@ class TrainActionNet:
 
             if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())},  ratios c:{self.moving_collision_rate.val}, s:{self.moving_out_of_scope.val}')
 
-            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*2.0+suction_sampling_loss+background_loss*3.0
+            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*5.0+suction_sampling_loss+background_loss*3.0
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()
@@ -474,7 +462,7 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-5
+    lr = 5e-6
     train_action_net = TrainActionNet( n_samples=None, learning_rate=lr)
     train_action_net.initialize(n_samples=100)
     train_action_net.begin()

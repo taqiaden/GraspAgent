@@ -10,7 +10,7 @@ shift_effective_length=0.035
 shift_execution_length=0.15
 
 
-shift_elevation_threshold = 0.001
+shift_elevation_threshold = 0.00
 shift_contact_margin = 0.003
 interference_allowance=0.003
 bce_loss=nn.BCELoss()

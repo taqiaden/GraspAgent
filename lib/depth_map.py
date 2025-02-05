@@ -68,17 +68,19 @@ def depth_to_ordered_cloud(depth,camera):
     return cloud
 
 
-def get_pixel_index(depth, camera,target_point,radius=0.0025):
-    cloud = depth_to_ordered_cloud(depth, camera)
+def get_pixel_index( camera,target_point):
+    # cloud = depth_to_ordered_cloud(depth, camera)
     transformed_target_point = transform_to_camera_frame(target_point[None,:])
 
-    distance=cloud-transformed_target_point[None,:]
-    distance = np.linalg.norm(distance, axis=-1,keepdims=True)
-    pixel_index=np.unravel_index(distance.argmin(),distance.shape)[0:2]
+    # distance=cloud-transformed_target_point[None,:]
+    # distance = np.linalg.norm(distance, axis=-1,keepdims=True)
+    # pixel_index=np.unravel_index(distance.argmin(),distance.shape)[0:2]
 
-    '''verify closest pixel to the point'''
-    assert cloud[pixel_index][2]>0.0 , f'{cloud[pixel_index][2]}'
-    assert distance[pixel_index] < radius , f'{distance[pixel_index]}'
+    # '''verify closest pixel to the point'''
+    # assert cloud[pixel_index][2]>0.0 , f'{cloud[pixel_index][2]}'
+    # assert distance[pixel_index] < radius , f'{distance[pixel_index]}'
+
+    pixel_index=target_to_pixel(transformed_target_point[0],camera)
 
     pixel_index = np.array(pixel_index)
     return pixel_index
@@ -123,6 +125,17 @@ def point_clouds_to_depth(pc, camera):
     for i, j, d in zip(x, y, depth):
         depth_map[i, j] = d
     return depth_map
+
+def target_to_pixel(target_point,camera):
+    depth = target_point[ 2]
+    y = target_point[ 0] * camera.fx / depth + camera.cx
+    x = target_point[ 1] * camera.fy / depth + camera.cy
+    x = np.round(x).astype(int)
+    y = np.round(y).astype(int)
+    x = np.clip(x, 0, camera.height - 1)
+    y = np.clip(y, 0, camera.width - 1)
+    return (x,y)
+
 
 
 if __name__ == '__main__':
