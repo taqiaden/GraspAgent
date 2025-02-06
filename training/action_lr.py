@@ -334,7 +334,9 @@ class TrainActionNet:
 
                 if bin_mask is not None:
                     label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-                    background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
+                    # background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
+                    background_loss += bce_loss(background_class_predictions, label)
+
                     self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                     non_zero_background_loss_counter+=1
 

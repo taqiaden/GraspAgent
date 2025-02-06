@@ -84,6 +84,14 @@ def export_model_state(model,path):
     else:
         save_data_to_server(checkpoint_dict,full_path)
 
+def get_model_time_stamp(path):
+    full_path=check_points_directory+path+check_points_extension
+    if os.path.isdir(check_points_directory):
+        return os.path.getctime(full_path)
+    else:
+        return smbclient.path.getctime(full_path)
+
+
 def delete_check_point(path):
     full_path = check_points_directory + path + check_points_extension
     # print('save check point to {}'.format(path))

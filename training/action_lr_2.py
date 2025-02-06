@@ -223,8 +223,8 @@ class TrainActionNet:
             collide_with_objects_p=griper_collision_classifier_2[0, 0][mask].detach()
             collide_with_bins_p=griper_collision_classifier_2[0, 1][mask].detach()
 
-            # selection_p=torch.rand_like(collide_with_objects_p)
-            selection_p=(1.0-collide_with_objects_p)#*(1.0-collide_with_bins_p)
+            selection_p=torch.rand_like(collide_with_objects_p)
+            # selection_p=(1.0-collide_with_objects_p)#*(1.0-collide_with_bins_p)
             # selection_p=torch.sqrt(selection_p)
             # selection_p=torch.sqrt(selection_p)
             # print(collide_with_bins_p)
@@ -317,12 +317,6 @@ class TrainActionNet:
                 pred_=pred_scores_[target_index]
                 gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**2) / m
 
-            #method 2
-            # labels=ref_scores_[selection_mask]
-            # predictions=pred_scores_[selection_mask]
-            # gripper_sampling_loss+=torch.clamp(labels - predictions, 0).mean()
-
-
 
             suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[0][mask])
 
@@ -354,7 +348,8 @@ class TrainActionNet:
 
             if bin_mask is not None:
                 label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
-                background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
+                # background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
+                background_loss+=bce_loss(background_class_predictions,label)
                 self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                 non_zero_background_loss_counter+=1
 

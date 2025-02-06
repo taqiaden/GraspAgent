@@ -1,9 +1,7 @@
 import random
 import numpy as np
 from action import Action
-from label_unpack import LabelObj
 from lib.dataset_utils import online_data
-from lib.report_utils import progress_indicator as pi
 from lib.dataset_utils import online_data2
 
 online_data2=online_data2()
@@ -34,10 +32,12 @@ def sampling_p(sampling_rate,target_rate=0.25,exponent=10,k=0.75):
 class DataTracker2():
     def __init__(self,name='',list_size=3):
         self.name=name
-        self.path=name+'.pkl'
-        self.dict=online_data2.load_pickle(self.path) if online_data2.file_exist(self.path) else {}
+        self.dict=online_data2.load_pickle(self.name) if online_data2.file_exist(self.name) else {}
         self.list_size=list_size
         self.empty_list=[0]*list_size
+
+    def dict_time_stamp(self):
+        return online_data2.file_time_stamp(self.name)
 
     def get_value(self,key):
         if key in self.dict:
@@ -99,28 +99,12 @@ class DataTracker2():
 
 
     def save(self):
-        online_data2.save_pickle(self.path,self.dict)
+        online_data2.save_pickle(self.name,self.dict)
         # save_dict(self.dict, self.path)
 
     def __len__(self):
         return len(self.dict)
 
-
-def set_arm_dictionary(name,gripper=False,suction=False,clean_old_records=True,list_size=10):
-    indexes = online_data.get_indexes()
-
-    data_tracker = DataTracker2(name=name, list_size=list_size)
-    if clean_old_records:data_tracker.dict.clear()
-    progress_indicator = pi(f'total samples size = {len(indexes)}, progress:  ', len(indexes))
-
-    for i in range(len(indexes)):
-        label_obj = LabelObj(label=online_data.label.load_as_numpy(indexes[i]))
-        if label_obj.is_suction and suction==False: continue
-        if label_obj.is_gripper and gripper==False:continue
-        data_tracker.update_ground_truth_(indexes[i], label_obj.success)
-        progress_indicator.step(i)
-
-    data_tracker.save()
 
 def sample_positive_buffer(dict_name,size=None,disregard_collision_samples=False):
     positive_labels=[]

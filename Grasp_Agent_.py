@@ -8,7 +8,7 @@ import open3d as o3d
 from Configurations.dynamic_config import get_int
 from Online_data_audit.data_tracker2 import DataTracker2
 from action import Action
-from lib.IO_utils import save_pickle, load_pickle
+from lib.IO_utils import save_pickle
 from lib.grasp_utils import shift_a_distance
 from lib.models_utils import number_of_parameters
 from lib.report_utils import wait_indicator as wi
@@ -24,7 +24,7 @@ from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_f
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds, get_pixel_index
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
@@ -36,8 +36,8 @@ from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
-from training.policy_control_board import PPOLearning
-from training.policy_lr import PPOMemory, buffer_file, action_data_tracker_path
+from training.policy_lr import  buffer_file, action_data_tracker_path
+from training.ppo_memory import PPOMemory
 from visualiztion import view_npy_open3d, vis_scene
 
 execute_suction_grasp_bash = './bash/run_robot_suction.sh'
@@ -108,7 +108,9 @@ class GraspAgent():
 
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
-        self.online_learning=PPOLearning()
+        # self.online_learning=PPOLearning()
+
+        self.model_time_stamp=None
 
     def report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
@@ -120,8 +122,6 @@ class GraspAgent():
         self.point_clouds = None
         self.depth=None
         self.rgb=None
-
-        self.policy_learning=PPOLearning()
 
         '''dense records'''
         self.gripper_poses_5=None
@@ -191,6 +191,7 @@ class GraspAgent():
         policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
 
         policy_net.ini_model(train=False)
+        self.model_time_stamp=policy_net.model_time_stamp()
         self.policy_net = policy_net.model
 
         pi.step(3)
@@ -641,26 +642,35 @@ class GraspAgent():
         # wait until grasp or suction finished
         robot_feedback_ = 'Wait'
         wait = wi('Waiting for robot feedback')
+        print()
         counter=0
         while robot_feedback_ == 'Wait' or robot_feedback_.strip()=='':
-            wait_time=0.5 if counter<2 else 0.01
-            wait.step(wait_time)
-            if counter==0:
+            if counter == 0:
                 '''reduce buffer size'''
                 self.buffer.pop()
+                print('buffer pop')
+            elif counter == 1:
                 '''dump the buffer as pickl'''
                 save_pickle(buffer_file,self.buffer)
+                print('save buffer')
+            elif counter == 2:
                 '''save data tracker'''
                 self.data_tracker.save()
-            elif counter==1:
-                if len(self.data_tracker)>10000:
-                    self.policy_net=self.online_learning.step(self.policy_net,self.buffer,self.data_tracker)
+                print('save data tracker')
+            elif counter == 3:
+                policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
+                new_time_stamp=policy_net.model_time_stamp()
+                if new_time_stamp != self.model_time_stamp:
+                    policy_net.ini_model(train=False)
+                    self.model_time_stamp=new_time_stamp
+                    print('Update policy')
+            else:
+                wait.step(0.5)
             robot_feedback_ = read_robot_feedback()
             counter+=1
         else:
             wait.end()
-            print('-',robot_feedback_,'-')
-            print('Robot msg: ' + robot_feedback_)
+            print('Robot returned msg: ' + robot_feedback_)
         first_action_obj.robot_feedback = robot_feedback_
         second_action_obj.robot_feedback = robot_feedback_
         return first_action_obj,second_action_obj

@@ -1,5 +1,4 @@
-import time
-
+import numpy as np
 import torch
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
@@ -9,17 +8,22 @@ from lib.dataset_utils import online_data2
 from lib.report_utils import progress_indicator
 from models.policy_net import policy_module_key, PolicyNet
 from records.training_satatistics import TrainingTracker
-from training.policy_control_board import PPOMemory
-# os.environ["CUDA_LAUNCH_BLOCKING"]="1"
-# os.environ["TORCH_USE_CUDA_DSA"]="1"
-# os.environ["PYTORCH_USE_CUDA_DSA"]="1"
+from training.ppo_memory import PPOMemory
+import random
+from lib.report_utils import wait_indicator as wi
 
 buffer_file='buffer.pkl'
-action_data_tracker_path=r'online_data_dict'
+action_data_tracker_path=r'online_data_dict.pkl'
 
 online_data2=online_data2()
 
 bce_loss= torch.nn.BCELoss()
+
+def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
+    ratio = new_policy_probs / old_policy_probs
+    clipped_ratio = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
+    objective = torch.min(ratio * advantages, clipped_ratio * advantages)
+    return objective
 
 class TrainPolicyNet:
     def __init__(self,learning_rate=5e-5):
@@ -39,6 +43,9 @@ class TrainPolicyNet:
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         self.last_tracker_size=len(self.data_tracker)
 
+        self.buffer_time_stamp=None
+        self.data_tracker_time_stamp=None
+
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
         self.model_wrapper.ini_adam_optimizer(learning_rate=self.learning_rate)
@@ -48,13 +55,40 @@ class TrainPolicyNet:
         return len(self.data_tracker)>self.last_tracker_size
 
     def synchronize_buffer(self):
-        self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
-        self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
+        new_buffer=False
+        new_data_tracker=False
+        new_buffer_time_stamp=online_data2.file_time_stamp(buffer_file)
+        if self.buffer_time_stamp is None or new_buffer_time_stamp!=self.buffer_time_stamp:
+            self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
+            self.buffer_time_stamp=new_buffer_time_stamp
+            new_buffer=True
+
+        new_data_tracker_time_stamp=online_data2.file_time_stamp(action_data_tracker_path)
+        if self.data_tracker_time_stamp is None or self.data_tracker_time_stamp!=new_data_tracker_time_stamp:
+            self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
+            self.data_tracker_time_stamp=new_data_tracker_time_stamp
+            new_data_tracker=True
+
+        return new_buffer,new_data_tracker
 
     def experience_sampling(self,replay_size):
         replay_ids=self.data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(self.buffer.g_p_sampling_rate.val,self.buffer.g_n_sampling_rate.val,
                                                                                     self.buffer.s_p_sampling_rate.val,self.buffer.s_n_sampling_rate.val))
         return replay_ids
+
+    def mixed_buffer_sampling(self,buffer:PPOMemory,data_tracker:DataTracker2,batch_size,n_batches,online_ratio):
+        total_size=int(batch_size*n_batches)
+        online_size=int(total_size*online_ratio)
+        replay_size=total_size-online_size
+
+        '''sample from online pool'''
+        indexes=random.sample(np.arange(len(buffer.non_episodic_buffer_file_ids),dtype=np.int64),online_size)
+        online_ids=buffer.non_episodic_buffer_file_ids[indexes]
+
+        '''sample from old experience'''
+        replay_ids=data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(buffer.g_p_sampling_rate.val,buffer.g_n_sampling_rate.val,
+                                                                                    buffer.s_p_sampling_rate.val,buffer.s_n_sampling_rate.val))
+        return online_ids+replay_ids
 
 
     def init_quality_data_loader(self,file_ids,batch_size):
@@ -159,20 +193,25 @@ class TrainPolicyNet:
         self.suction_quality_net_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-5
+    lr = 1e-4
     train_action_net = TrainPolicyNet(  learning_rate=lr)
+    train_action_net.initialize_model()
+    train_action_net.synchronize_buffer()
+
+    wait = wi('Begin synchronized trianing')
 
     while True:
-        train_action_net.initialize_model()
-        train_action_net.synchronize_buffer()
-        train_action_net.step_quality_training()
-        train_action_net.export_check_points()
-        train_action_net.save_statistics()
-        train_action_net.view_result()
+        new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
+        if new_data_tracker:
+            train_action_net.step_quality_training()
+            train_action_net.export_check_points()
+            train_action_net.save_statistics()
+            train_action_net.view_result()
+        else:
+            wait.step(0.5)
         # if train_action_net.training_trigger:
         #     train_action_net.initialize_model()
         #     train_action_net.synchronize_buffer()
         #     train_action_net.step_quality_training()
         # else:
         #     time.sleep(3)
-

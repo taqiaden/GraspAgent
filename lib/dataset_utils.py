@@ -205,6 +205,12 @@ class data_pool():
             return load_pickle(full_path)
         else:
             return load_pickle_from_server2(full_path)
+    def file_time_stamp(self,file_name):
+        full_path = self.dir + file_name
+        if self.is_local:
+            return os.path.getctime(full_path)
+        else:
+            return smbclient.path.getctime(full_path)
 
     def save_pickle(self,file_name,obj):
         full_path=self.dir+file_name

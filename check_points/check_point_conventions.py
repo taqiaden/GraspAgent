@@ -1,7 +1,7 @@
 import torch
 
 from Configurations.config import weight_decay
-from lib.models_utils import initialize_model, export_model_state
+from lib.models_utils import initialize_model, export_model_state, get_model_time_stamp
 from lib.optimizer import export_optm, load_opt
 
 
@@ -28,6 +28,9 @@ class ModelWrapper():
         export_model_state(self.model, file_name)
 
         print(f'{self.model_name} check point exported')
+
+    def model_time_stamp(self):
+        return  get_model_time_stamp(self.model_name)
 
     '''optimizer operations'''
     def ini_adam_optimizer(self,learning_rate=None,file_index=None):
