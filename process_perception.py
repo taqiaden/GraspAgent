@@ -63,9 +63,28 @@ def crop_side_tray_image(img):
     img_main=img[190:560, 170:770, 0]
     return img_suction, img_grasp,img_main
 
+def crop_side_tray_RGB_image(img):
+    img_suction = img[220:700, 0:240, :]
+    img_grasp = img[220:700, 1070:1400, :]
+    img_main = img[220:700, 295:1007, :]
+    return img_suction, img_grasp,img_main
+
 def get_side_bins_images():
     im = cv.imread(texture_image_path)
     img_suction, img_grasp ,img_main= crop_side_tray_image(im)
+    view_image(img_main)
+    view_image(img_suction)
+    view_image(img_grasp)
+    return img_suction, img_grasp,img_main
+
+def get_side_bins_RGB_images():
+    im = cv.imread(rgb_path)
+    im = cv2.rotate(im, cv2.ROTATE_180)
+    # view_image(im)
+    img_suction, img_grasp ,img_main= crop_side_tray_RGB_image(im)
+    # view_image(img_main)
+    # view_image(img_suction)
+    # view_image(img_grasp)
     return img_suction, img_grasp,img_main
 
 def get_scene_point_clouds():
@@ -78,8 +97,6 @@ def get_scene_point_clouds():
     full_point_clouds = scene_point_clouds_mask(point_data)
 
     return full_point_clouds
-
-
 
 def get_scene_RGB():
     '''load and crop'''

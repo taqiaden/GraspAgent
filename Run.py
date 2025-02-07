@@ -4,7 +4,8 @@ from Configurations.run_config import simulation_mode
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale, view_image
-from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth, get_scene_RGB
+from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth, get_scene_RGB, \
+    get_side_bins_RGB_images
 from registration import view_colored_point_cloud
 
 configure_smbclient()
@@ -15,7 +16,9 @@ grasp_agent.report()
 trigger_new_perception()
 
 while True:
-    img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
+    # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
+    img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_RGB_images()
+
     with torch.no_grad():
         '''get modalities'''
         depth=get_scene_depth()

@@ -66,16 +66,13 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
     return target_index
 
 def critic_loss(c_,s_,f_,prediction_,label_):
-    if  sum(s_) > 0:
-        '''at least one or both the ref or the pred is out of scope and/or with collision'''
+    if  s_[0] > 0:
         if s_[1] == 0:
-            # return torch.abs(prediction_ - label_ + 1.)**2, True
             return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
         else:
             return 0.0, False
 
     if sum(c_)+sum(s_) > 0:
-        '''at least one or both the ref or the pred is out of scope and/or with collision'''
         if c_[1] + s_[1] == 0:
             # print('c=',c_[0])
             #weight=(1+c_[0])
@@ -171,9 +168,9 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        #gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
 
@@ -197,7 +194,7 @@ class TrainActionNet:
 
                 gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
 
-                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )#**0.5
+                r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )
                 print(r_k)
 
                 gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)
@@ -265,12 +262,9 @@ class TrainActionNet:
 
                 l,counted=critic_loss(c_, s_, f_, prediction_, label_)
                 if counted:
-                    # print('ref: ', target_ref_pose.detach().cpu().numpy())
-                    # print('G: ', target_generated_pose.detach().cpu().numpy())
-                    # print(predictio  n_.item(), '---',label_.item())
                     counter+=1
                     loss+=l/m
-                    tracked_indexes.append((target_index,(c_[0]>0. and s_[0]>0.)))
+                    tracked_indexes.append((target_index,(c_[0]>0. or s_[0]>0.)))
                 if counter==m:break
             l_c=loss.item()
             self.critic_statistics.loss=l_c
@@ -302,6 +296,7 @@ class TrainActionNet:
 
             non_zero_background_loss_counter=0
 
+
             '''gripper sampler loss'''
             with torch.no_grad():
                 ref_critic_score = self.gan.critic(depth.clone(), gripper_pose_ref)
@@ -316,7 +311,6 @@ class TrainActionNet:
                 label=ref_scores_[target_index]
                 pred_=pred_scores_[target_index]
                 gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**2) / m
-
 
             suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[0][mask])
 
@@ -457,7 +451,7 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 5e-6
+    lr = 1e-5
     train_action_net = TrainActionNet( n_samples=None, learning_rate=lr)
     train_action_net.initialize(n_samples=100)
     train_action_net.begin()

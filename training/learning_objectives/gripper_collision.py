@@ -1,8 +1,6 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-
-from Configurations import config
 from Configurations.config import theta_cos_scope
 from lib.collision_unit import grasp_collision_detection, gripper_firmness_check
 from lib.depth_map import pixel_to_point, transform_to_camera_frame, depth_to_point_clouds
@@ -44,7 +42,6 @@ def evaluate_grasps(batch_size,pixel_index,depth,generated_grasps,pose_7,visuali
         '''check firmness of the label'''
         T_d_label, width_label, distance_label = pose_7_to_transformation(pose_7[j], target_point)
         _, label_firmness_val,_ = gripper_firmness_check(T_d_label, width_label, pc, visualize=visualize)
-
 
         '''check parameters are within scope'''
 

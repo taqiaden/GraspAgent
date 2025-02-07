@@ -74,74 +74,53 @@ class GripperPartSampler(nn.Module):
             nn.Linear(16, 3),
         ).to('cuda')
 
-
         # self.decoder_=self_att_res_mlp_LN(in_c1=64,out_c=7,relu_negative_slope=0.0).to('cuda')
         self.residual_1=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
         self.residual_2=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
-
-        # self.approach_regressor = nn.Sequential(
-        #     nn.LayerNorm(8),
-        #     nn.LeakyReLU(negative_slope=gripper_sampler_relu_slope) if gripper_sampler_relu_slope > 0. else nn.ReLU(),
-        #     nn.Linear(8, 3),
-        # ).to('cuda')
-        #
-        # self.beta_regressor = nn.Sequential(
-        #     nn.LayerNorm(8),
-        #     nn.LeakyReLU(negative_slope=gripper_sampler_relu_slope) if gripper_sampler_relu_slope > 0. else nn.ReLU(),
-        #     nn.Linear(8, 2),
-        # ).to('cuda')
-        #
-        # self.dist_width_regressor = nn.Sequential(
-        #     nn.LayerNorm(8),
-        #     nn.LeakyReLU(negative_slope=gripper_sampler_relu_slope) if gripper_sampler_relu_slope > 0. else nn.ReLU(),
-        #     nn.Linear(8, 2),
-        # ).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
     def forward(self,representation_2d,alpha=0.,random_tensor=None,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
 
-
         approach = self.decoder(representation_2d)
         beta = self.residual_1(representation_2d, approach)
         dist_width = self.residual_2(representation_2d, torch.cat([approach, beta], dim=-1))
+        pose = torch.cat([approach, beta, dist_width], dim=-1)
+        pose=self.gripper_regressor_layer(pose,clip=clip,sigmoid=dist_width_sigmoid)
+
 
         if randomization_factor>0.:
             approach=F.normalize(approach, dim=-1)
             beta=F.normalize(beta, dim=-1)
             dist_width=torch.clip(dist_width,0.,1.)
 
-            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')/5
-            approach_ref[:,-1]=0.8+approach_ref[:,-1]
+            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')/3
+            approach_ref[:,-1]=0.67+approach_ref[:,-1]
             # approach_ref=F.normalize(approach_ref, dim=-1)
 
             beta_noise=torch.randn((representation_2d.shape[0],2),device='cuda')
             # beta_noise=F.normalize(beta_noise, dim=-1)
+            width_noise=1.0-torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**2
+            dist_noise=torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**3
 
             # dist_width_ref=torch.zeros((representation_2d.shape[0],2),device='cuda')
             # dist_width_ref[:,-1]+=0.99
             # dist_width_ref[:,-2]+=0.01
-            s=int(randomization_factor*10)
-            dist_step=torch.randint(-s,s+1,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
-            width_step=torch.randint(-s,s+1,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
+            # s=int(randomization_factor*10)
+            # dist_step=torch.randint(-s,s+1,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
 
             approach=approach*(1.0-randomization_factor)+approach_ref*randomization_factor
             beta=beta*(1.0-randomization_factor)+beta_noise*randomization_factor
             # dist_width=dist_width*(1-randomization_factor)+dist_width_ref*randomization_factor
 
-            dist_width[:,0:1]=dist_width[:,0:1]+dist_step*randomization_factor
-            dist_width[:,1:2]=dist_width[:,1:2]+width_step*randomization_factor
+            dist_width[:,0:1]=(1.0-randomization_factor)*dist_width[:,0:1]+dist_noise*randomization_factor
+            dist_width[:,1:2]=(1.0-randomization_factor)*dist_width[:,1:2]+width_noise*randomization_factor
+
             dist_width=torch.clip(dist_width,0.,1.)
+            approach = F.normalize(approach, dim=-1)
+            beta = F.normalize(beta, dim=-1)
 
-
-            # print(approach[0:10])
-            # print(beta[0:10])
-            # print(dist_width[0:10])
-            # exit()
-
-
-        pose = torch.cat([approach, beta, dist_width], dim=-1)
-        pose=self.gripper_regressor_layer(pose,clip=clip,sigmoid=dist_width_sigmoid)
+            pose = torch.cat([approach, beta, dist_width], dim=-1)
 
         return pose
 

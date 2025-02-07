@@ -25,7 +25,7 @@ from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
-from lib.image_utils import check_image_similarity, view_image
+from lib.image_utils import check_image_similarity, view_image, check_image_similarity2
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
@@ -33,7 +33,7 @@ from models.action_net import ActionNet, action_module_key, action_module_key2
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.policy_net import PolicyNet, policy_module_key
 from pose_object import vectors_to_ratio_metrics
-from process_perception import get_side_bins_images, trigger_new_perception
+from process_perception import get_side_bins_images, trigger_new_perception, get_side_bins_RGB_images
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
 from training.policy_lr import  buffer_file, action_data_tracker_path
@@ -111,6 +111,8 @@ class GraspAgent():
         # self.online_learning=PPOLearning()
 
         self.model_time_stamp=None
+        self.buffer_modify_alert=False
+        self.data_tracker_modify_alert=False
 
     def report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
@@ -646,17 +648,22 @@ class GraspAgent():
         counter=0
         while robot_feedback_ == 'Wait' or robot_feedback_.strip()=='':
             if counter == 0:
-                '''reduce buffer size'''
-                self.buffer.pop()
-                print('buffer pop')
+                if self.buffer_modify_alert:
+                    '''reduce buffer size'''
+                    self.buffer.pop()
+                    print('buffer pop')
             elif counter == 1:
-                '''dump the buffer as pickl'''
-                save_pickle(buffer_file,self.buffer)
-                print('save buffer')
+                if self.buffer_modify_alert:
+                    '''dump the buffer as pickl'''
+                    save_pickle(buffer_file,self.buffer)
+                    self.buffer_modify_alert=False
+                    print('save buffer')
             elif counter == 2:
-                '''save data tracker'''
-                self.data_tracker.save()
-                print('save data tracker')
+                if self.data_tracker_modify_alert:
+                    '''save data tracker'''
+                    self.data_tracker.save()
+                    self.data_tracker_modify_alert=False
+                    print('save data tracker')
             elif counter == 3:
                 policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
                 new_time_stamp=policy_net.model_time_stamp()
@@ -712,7 +719,8 @@ class GraspAgent():
         if  report_result:
             if first_action_obj.policy_index==1:self.run_sequence=0
 
-            img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
+            # img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
+            img_suction_after, img_grasp_after,img_main_after = get_side_bins_RGB_images()
 
             '''save feedback to data pool'''
             if first_action_obj.robot_feedback == 'Succeed':
@@ -730,7 +738,7 @@ class GraspAgent():
 
                 '''check changes in side bins'''
                 if gripper_action.is_grasp:
-                    gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
+                    gripper_action.grasp_result=check_image_similarity2(img_grasp_pre, img_grasp_after)
                     if gripper_action.grasp_result is None:
                         print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
                     elif gripper_action.grasp_result:
@@ -739,7 +747,7 @@ class GraspAgent():
                         print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
 
                 if suction_action.is_grasp:
-                    suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
+                    suction_action.grasp_result=check_image_similarity2(img_suction_pre, img_suction_after)
                     if suction_action.grasp_result is None:
                         print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
                     elif suction_action.grasp_result:
@@ -756,9 +764,13 @@ class GraspAgent():
                 if gripper_action.is_executable:
                     self.buffer.push(gripper_action)
                     self.data_tracker.push(gripper_action)
+                    self.buffer_modify_alert=True
+                    self.data_tracker_modify_alert=True
                 if suction_action.is_executable:
                     self.buffer.push(suction_action)
                     self.data_tracker.push(suction_action)
+                    self.buffer_modify_alert=True
+                    self.data_tracker_modify_alert=True
             else:
                 first_action_obj.executed=False
                 second_action_obj.executed=False

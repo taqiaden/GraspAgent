@@ -30,7 +30,6 @@ from visualiztion import view_score2, view_npy_open3d, dense_grasps_visualizatio
 
 lock = FileLock("file.lock")
 
-
 instances_per_sample=1
 
 module_key= 'action_net2'
