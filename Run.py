@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import argparse
 import torch
 from Configurations.run_config import simulation_mode
 from Grasp_Agent_ import GraspAgent
@@ -9,11 +10,16 @@ from process_perception import trigger_new_perception, get_side_bins_images, get
 from registration import view_colored_point_cloud
 
 configure_smbclient()
-grasp_agent = GraspAgent()
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--text-prompt", default="plate. banana. apple. box")
+args = parser.parse_args()
+
+grasp_agent = GraspAgent(args)
 grasp_agent.initialize_check_points()
 grasp_agent.report()
 
-trigger_new_perception()
+# trigger_new_perception()
 
 while True:
     # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
@@ -23,10 +29,14 @@ while True:
         '''get modalities'''
         depth=get_scene_depth()
         rgb=get_scene_RGB()
+        grasp_agent.inputs(depth, rgb,args)
+        grasp_agent.publish_segmentation_query()
+        grasp_agent.retrieve_segmentation_mask()
         # view_image(rgb)
         # view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
-        grasp_agent.model_inference(depth,rgb)
+        grasp_agent.model_inference()
+        # grasp_agent.view_mask_as_2dimage()
         # grasp_agent.dense_view()
         # grasp_agent.view_predicted_normals()
         '''make decision'''

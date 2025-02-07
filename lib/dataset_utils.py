@@ -15,7 +15,7 @@ from lib.image_utils import view_image
 
 from lib.report_utils import counter_progress
 from lib.IO_utils import save_pickle_to_server, save_to_server, load_from_server, load_pickle_from_server, load_pickle, \
-    load_pickle_from_server2, save_pickle, save_pickle_to_server2
+    load_pickle_from_server2, save_pickle, save_pickle_to_server2, save_image_to_server
 from Configurations import config
 from lib.report_utils import wait_indicator
 
@@ -113,12 +113,8 @@ class modality_pool():
         cv2.imwrite(self.dir + str(idx) + self.sufix,image)
 
     def save_image_to_server(self, data, idx):
-        data=data*255
-        data=data.astype(np.uint8)
-        image=cv2.cvtColor(data,cv2.COLOR_RGB2BGR)
-        _,buff=cv2.imencode('.jpg',image)
-        byte_buffer=buff.tobytes()
-        save_to_server( self.dir + str(idx) + self.sufix, byte_buffer)
+        save_image_to_server(self.dir + str(idx) + self.sufix,data)
+
 
     def save(self, data,idx):
         if self.extension=='jpg':

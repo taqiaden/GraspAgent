@@ -1,4 +1,8 @@
 import subprocess
+
+import cv2
+import smbclient.path
+
 from lib.dataset_utils import online_data2
 import numpy as np
 import torch
@@ -8,12 +12,12 @@ import open3d as o3d
 from Configurations.dynamic_config import get_int
 from Online_data_audit.data_tracker2 import DataTracker2
 from action import Action
-from lib.IO_utils import save_pickle
+from lib.IO_utils import save_pickle, save_data_to_server, save_to_server, load_pickle_from_server, save_image_to_server
 from lib.grasp_utils import shift_a_distance
 from lib.models_utils import number_of_parameters
 from lib.report_utils import wait_indicator as wi
 from Configurations.ENV_boundaries import bin_center, dist_allowance
-from Configurations.config import distance_scope, gripper_width_during_shift
+from Configurations.config import distance_scope, gripper_width_during_shift, ip_address
 from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, \
     enhance_gripper_firmness, single_arm_operation_mode, \
@@ -99,8 +103,9 @@ def multi_mask_view(pc, scores_list, pivot=0.5):
     view_npy_open3d(cat_pc,color=colors)
 
 class GraspAgent():
-    def __init__(self):
+    def __init__(self,args):
         '''models'''
+        self.args=args
         self.action_net = None
         self.policy_net = None
         self.suction_arm_reachability_net = None
@@ -110,15 +115,9 @@ class GraspAgent():
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         # self.online_learning=PPOLearning()
 
-        self.model_time_stamp=None
+        self.segmentation_result_time_stamp=None
         self.buffer_modify_alert=False
         self.data_tracker_modify_alert=False
-
-    def report(self):
-        print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
-        print(f'Episodic buffer size = {len(self.buffer)} ')
-        latest_id=get_int(grasp_data_counter_key)
-        print(f'Latest saved id is {latest_id}')
 
         '''Modalities'''
         self.point_clouds = None
@@ -144,6 +143,7 @@ class GraspAgent():
         self.target_object_mask=None
         self.mask_numpy=None
         self.valid_actions_on_target_mask=None
+        self.seg_mask=None
 
         '''track task sequence'''
         self.run_sequence=0
@@ -167,7 +167,13 @@ class GraspAgent():
         self.target_object_mask = None
         self.valid_actions_on_target_mask = None
         self.mask_numpy=None
+        self.seg_mask=None
 
+    def report(self):
+        print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
+        print(f'Episodic buffer size = {len(self.buffer)} ')
+        latest_id=get_int(grasp_data_counter_key)
+        print(f'Latest saved id is {latest_id}')
 
     @property
     def gripper_approach(self):
@@ -178,6 +184,34 @@ class GraspAgent():
     @property
     def suction_approach(self):
         return self.normals*-1
+
+    def publish_segmentation_query(self):
+        TEXT_PROMPT = self.args.text_prompt
+        if TEXT_PROMPT.strip()!='':
+            print('Publish segmentation query')
+            segmentation_query_file_path=ip_address+r'\taqiaden_hub\segmentation_query//text_prompts.txt'
+            segmentation_image_path=ip_address+r'\taqiaden_hub\segmentation_query//seg_image.jpg'
+            save_to_server(segmentation_query_file_path,TEXT_PROMPT,binary_mode=False)
+
+            '''save image'''
+            save_image_to_server(segmentation_image_path,self.rgb)
+
+    def retrieve_segmentation_mask(self):
+        TEXT_PROMPT = self.args.text_prompt
+        segmentation_result_file_path = ip_address + r'\taqiaden_hub\segmentation_query//segmentation_mask.npy'
+        if TEXT_PROMPT.strip() != '':
+            wait = wi('Waiting for segmentation result')
+            while True:
+                if smbclient.path.exists(segmentation_result_file_path):
+                    mask=load_pickle_from_server(segmentation_result_file_path)
+                    if smbclient.path.isfile(segmentation_result_file_path) or smbclient.path.islink(segmentation_result_file_path):
+                        smbclient.unlink(segmentation_result_file_path)
+                    self.seg_mask=(torch.from_numpy(mask)[None,None,...]>0.5).cuda()
+                    break
+                else:
+                    wait.step(0.5)
+
+
 
     def initialize_check_points(self):
         pi = progress_indicator('Loading check points  ', max_limit=5)
@@ -292,11 +326,20 @@ class GraspAgent():
                                  suction_grasp_mask,gripper_shift_mask,suction_shift_mask,self.target_object_mask],dim=1)
 
         return quality_masks
-
-    def model_inference(self,depth,rgb):
-        pr.title('model inference')
+    def inputs(self,depth,rgb,args):
         self.depth=depth
         self.rgb=rgb
+        self.args=args
+
+    def view_mask_as_2dimage(self):
+        cv2.imshow('title', self.seg_mask[0,0].cpu().numpy().astype(np.float64))
+        cv2.waitKey(0)
+        cv2.imshow('title', self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
+        cv2.waitKey(0)
+
+    def model_inference(self):
+        pr.title('model inference')
+
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
         rgb_torch = torch.from_numpy(self.rgb).permute(2,0,1)[None, ...].to('cuda').float()
 
@@ -323,7 +366,7 @@ class GraspAgent():
         suction_shift_scope[gripper_shift_scope>suction_shift_scope]*=0.
 
         '''target mask'''
-        self.target_object_mask = background_class.detach() <= 0.5
+        self.target_object_mask = (background_class <= 0.5) & self.seg_mask
         self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
 
         '''policy net output'''

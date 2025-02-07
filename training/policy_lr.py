@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from Configurations.config import workers
@@ -202,20 +204,20 @@ if __name__ == "__main__":
 
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
-        train_action_net.step_quality_training()
-        train_action_net.export_check_points()
-        train_action_net.save_statistics()
-        train_action_net.view_result()
-        # if new_data_tracker:
-        #     train_action_net.step_quality_training()
-        #     train_action_net.export_check_points()
-        #     train_action_net.save_statistics()
-        #     train_action_net.view_result()
-        # else:
-        #     wait.step(0.5)
-        # if train_action_net.training_trigger:
-        #     train_action_net.initialize_model()
-        #     train_action_net.synchronize_buffer()
-        #     train_action_net.step_quality_training()
-        # else:
-        #     time.sleep(3)
+        # train_action_net.step_quality_training()
+        # train_action_net.export_check_points()
+        # train_action_net.save_statistics()
+        # train_action_net.view_result()
+        if new_data_tracker:
+            train_action_net.step_quality_training()
+            train_action_net.export_check_points()
+            train_action_net.save_statistics()
+            train_action_net.view_result()
+        else:
+            wait.step(0.5)
+        if train_action_net.training_trigger:
+            train_action_net.initialize_model()
+            train_action_net.synchronize_buffer()
+            train_action_net.step_quality_training()
+        else:
+            time.sleep(3)

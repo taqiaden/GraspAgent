@@ -5,6 +5,7 @@ import pickle
 import re
 import sys
 
+import cv2
 import numpy as np
 import smbclient
 import torch
@@ -156,9 +157,18 @@ def save_pickle_to_server(path,data):
     with smbclient.open_file(path,mode="wb") as f:
         f.write(pickled)
 
-def save_to_server(path,data):
-    with smbclient.open_file(path,mode="wb") as f:
+def save_to_server(path,data,binary_mode=True):
+    mode_="wb" if binary_mode else "w"
+    with smbclient.open_file(path,mode=mode_) as f:
         f.write(data)
+
+def save_image_to_server(path,data):
+    data = data * 255
+    data = data.astype(np.uint8)
+    image = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
+    _, buff = cv2.imencode('.jpg', image)
+    byte_buffer = buff.tobytes()
+    save_to_server(path, byte_buffer)
 
 def save_data_to_server(data,path):
     # try:
