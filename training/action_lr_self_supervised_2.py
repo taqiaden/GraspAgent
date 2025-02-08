@@ -9,11 +9,11 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker, DataTracker
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
-from dataloaders.action_dl import ActionDataset
+from dataloaders.action_dl import ActionDataset, ActionDataset2
 from lib.IO_utils import custom_print
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
-from lib.dataset_utils import online_data
+from lib.dataset_utils import online_data2
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.report_utils import progress_indicator
@@ -29,7 +29,7 @@ detach_backbone=False
 
 lock = FileLock("file.lock")
 
-training_buffer = online_data()
+training_buffer = online_data2()
 training_buffer.main_modality=training_buffer.depth
 
 bce_loss=nn.BCELoss()
@@ -100,10 +100,8 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         else:
             return 0.0, False
 
-
 class TrainActionNet:
     def __init__(self,n_samples=None,epochs=1,learning_rate=5e-5):
-
         self.n_samples=n_samples
         self.size=n_samples
         self.epochs=epochs
@@ -153,10 +151,11 @@ class TrainActionNet:
         self.data_tracker = DataTracker(name=gripper_grasp_tracker)
 
     def prepare_data_loader(self):
-        file_ids = sample_positive_buffer(size=self.n_samples, dict_name=gripper_grasp_tracker,
-                                          disregard_collision_samples=True,sample_with_probability=False)
+        file_ids=training_buffer.get_indexes()
+        # file_ids = sample_positive_buffer(size=self.n_samples, dict_name=gripper_grasp_tracker,
+        #                                   disregard_collision_samples=True,sample_with_probability=False)
         print(Fore.CYAN, f'Buffer size = {len(file_ids)}',Fore.RESET)
-        dataset = ActionDataset(data_pool=training_buffer, file_ids=file_ids)
+        dataset = ActionDataset2(data_pool=training_buffer, file_ids=file_ids)
         data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=workers,
                                                        shuffle=True)
         self.size=len(dataset)
@@ -173,7 +172,6 @@ class TrainActionNet:
         gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
-
         return gan
 
     def begin(self):
@@ -181,7 +179,8 @@ class TrainActionNet:
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
         gripper_pose=None
         for i, batch in enumerate(self.data_loader, 0):
-            depth,_,pixel_index,file_ids= batch
+
+            depth,file_ids= batch
             depth = depth.cuda().float()  # [b,1,480.712]
             pi.step(i)
             max_n = 300
@@ -334,19 +333,20 @@ class TrainActionNet:
 
             '''background detection head'''
             try:
-                bin_mask = bin_planes_detection(pc, sides_threshold = 0.0035,floor_threshold=0.002, view=False, file_index=file_ids[0])
+                bin_mask = bin_planes_detection(pc, sides_threshold = 0.005,floor_threshold=0.002, view=False, file_index=file_ids[0],cache_name='bin_planes2')
             except Exception as error_message:
                 print(file_ids[0])
                 print(error_message)
                 bin_mask=None
 
-            if bin_mask is not None:
+            if bin_mask is None:
+                print(Fore.RED,f'Failed to generate label for background segmentation, file id ={file_ids[0]}',Fore.RESET)
+            else:
                 label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
                 # background_loss += balanced_bce_loss(background_class_predictions,label,positive_weight=2.0,negative_weight=1)
                 background_loss+=bce_loss(background_class_predictions,label)
                 self.background_detector_statistics.update_confession_matrix(label,background_class_predictions.detach())
                 non_zero_background_loss_counter+=1
-
 
             for k in range(m):
                 '''gripper collision head'''
@@ -464,4 +464,3 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             print(Exception,error_message)
 
-        # lr=max(lr/1.1,1e-6)

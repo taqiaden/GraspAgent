@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import torch
-from Configurations.run_config import simulation_mode
+from Configurations.run_config import simulation_mode, activate_segmentation_queries
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
 from lib.image_utils import depth_to_gray_scale, view_image
@@ -12,7 +12,10 @@ from registration import view_colored_point_cloud
 configure_smbclient()
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--text-prompt", default="plate. banana. apple. box")
+# parser.add_argument("--text-prompt", default="plate. banana. apple. box. shampoo.
+# small ball.")
+parser.add_argument("--text-prompt", default="apple. ")
+
 args = parser.parse_args()
 
 grasp_agent = GraspAgent(args)
@@ -30,8 +33,9 @@ while True:
         depth=get_scene_depth()
         rgb=get_scene_RGB()
         grasp_agent.inputs(depth, rgb,args)
-        grasp_agent.publish_segmentation_query()
-        grasp_agent.retrieve_segmentation_mask()
+        if activate_segmentation_queries:
+            grasp_agent.publish_segmentation_query()
+            grasp_agent.retrieve_segmentation_mask()
         # view_image(rgb)
         # view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
@@ -41,7 +45,7 @@ while True:
         # grasp_agent.view_predicted_normals()
         '''make decision'''
         first_action_obj,second_action_obj=grasp_agent.pick_action()
-        grasp_agent.actions_view(first_action_obj,second_action_obj)
+        # grasp_agent.actions_view(first_action_obj,second_action_obj)
         if first_action_obj is not None and not simulation_mode:
             '''execute action/s'''
             first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)

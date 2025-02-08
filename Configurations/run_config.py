@@ -1,6 +1,6 @@
 
 gripper_grasp=True
-suction_grasp=False
+suction_grasp=True
 
 gripper_shift=True
 suction_shift=True
@@ -11,7 +11,8 @@ view_score_gradient= True
 simulation_mode = False
 offline_point_cloud= False
 report_result=True
-single_arm_operation_mode=False
+single_arm_operation_mode=True
+activate_segmentation_queries=False
 
 enhance_gripper_firmness=True
 

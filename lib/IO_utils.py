@@ -53,10 +53,10 @@ def load_pickle(path):
         tuple=pickle.load(file)
     return tuple
 
-def load_pickle_from_server(path):
-    with smbclient.open_file(path,'rb') as file:
-        tuple=pickle.load(file)
-    return tuple
+# def load_pickle_from_server(path):
+#     with smbclient.open_file(path,'rb') as file:
+#         tuple=pickle.load(file)
+#     return tuple
 def save_dict(dictionary,path):
     with open(path, 'w') as f:
         f.write(json.dumps(dictionary))
@@ -140,11 +140,13 @@ def load_from_server(path):
         file=f.read()
     return file
 
-def load_pickle_from_server(path):
+def load_pickle_from_server(path,allow_pickle=True):
     with smbclient.open_file(path, mode='rb') as f:
+        file=f.read()
+        file_like_object= io.BytesIO(file)
         # buffer = io.BytesIO(f.read())
         # pickle=f.read()
-        npy=np.load(f,allow_pickle=True)
+        npy=np.load(file_like_object,allow_pickle=allow_pickle)
     return npy
 
 def load_pickle_from_server2(path):

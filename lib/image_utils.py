@@ -34,6 +34,11 @@ def imflatfield(I, sigma):
 
     return B
 
+def image_auto_enhancment(img):
+    img = np.clip(1.5 * (img - 0.5) + 0.5, 0, 1)
+
+    img -= 0.12
+    return img
 def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize=False):
     processed_gray_image=np.copy(depth)
     non_zero_min=np.min(depth[np.nonzero(depth)])
@@ -69,8 +74,8 @@ def check_image_similarity(old_image, new_image):
 def check_image_similarity2(old_image, new_image):
     res = np.sum((old_image.astype("float") - new_image.astype("float")) ** 2)
     res /= (old_image.shape[0] * old_image.shape[1]*old_image.shape[2])
-    limit=100
-    safety_threshold=50
+    limit=30
+    safety_threshold=20
     print(f'Image res = {res}')
     if res > limit+safety_threshold:
         return 1

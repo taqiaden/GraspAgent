@@ -20,7 +20,7 @@ from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, Critic, random_approach_tensor
 from records.training_satatistics import TrainingTracker
 from registration import camera
-from training.action_lr import model_dependent_sampling
+from training.action_lr_semi_supervised import model_dependent_sampling
 from training.learning_objectives.suction_seal import suction_seal_loss
 # from training.action_lr import model_dependent_sampling
 # from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps

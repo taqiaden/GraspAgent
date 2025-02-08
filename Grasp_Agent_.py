@@ -1,6 +1,4 @@
 import subprocess
-
-import cv2
 import smbclient.path
 
 from lib.dataset_utils import online_data2
@@ -21,7 +19,7 @@ from Configurations.config import distance_scope, gripper_width_during_shift, ip
 from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, \
     enhance_gripper_firmness, single_arm_operation_mode, \
-    gripper_grasp,gripper_shift,suction_grasp,suction_shift
+    gripper_grasp, gripper_shift, suction_grasp, suction_shift, activate_segmentation_queries
 from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
@@ -49,7 +47,7 @@ execute_gripper_grasp_bash = './bash/run_robot_grasp.sh'
 execute_suction_shift_bash = './bash/run_robot_suction_shift.sh'
 execute_gripper_shift_bash = './bash/run_robot_gripper_shift.sh'
 execute_both_grasp_bash = './bash/run_robot_grasp_and_suction.sh'
-
+segmentation_result_file_path = ip_address + r'\taqiaden_hub\segmentation_query//segmentation_mask.npy'
 
 online_data2=online_data2()
 
@@ -81,7 +79,7 @@ def masked_color(voxel_pc, score, pivot=0.5):
 def view_mask(voxel_pc, score, pivot=0.5):
     means_=voxel_pc.mean(axis=0)
     voxel_pc_t=voxel_pc-means_
-    voxel_pc_t[:,1:]*=-1
+    voxel_pc_t[:,1]*=-1
     colors=masked_color(voxel_pc_t, score, pivot=0.5)
     view_npy_open3d(voxel_pc_t, color=colors)
 
@@ -134,7 +132,7 @@ class GraspAgent():
         self.voxel_pc=None
         self.normals=None
         self.q_value=None
-        self.action_probs=None
+        self.clear_policy=None
         self.shift_end_points=None
         self.valid_actions_mask=None
         self.n_grasps=0
@@ -144,9 +142,12 @@ class GraspAgent():
         self.mask_numpy=None
         self.valid_actions_on_target_mask=None
         self.seg_mask=None
+        self.seize_policy=None
 
         '''track task sequence'''
         self.run_sequence=0
+
+        self.remove_seg_file()
 
     def clear(self):
         self.gripper_poses_5 = None
@@ -158,7 +159,7 @@ class GraspAgent():
         self.voxel_pc = None
         self.normals = None
         self.q_value = None
-        self.action_probs = None
+        self.clear_policy = None
         self.shift_end_points = None
         self.valid_actions_mask = None
         self.n_grasps = 0
@@ -168,6 +169,7 @@ class GraspAgent():
         self.valid_actions_on_target_mask = None
         self.mask_numpy=None
         self.seg_mask=None
+        self.seize_policy=None
 
     def report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
@@ -195,30 +197,29 @@ class GraspAgent():
 
             '''save image'''
             save_image_to_server(segmentation_image_path,self.rgb)
+    def remove_seg_file(self):
+        if smbclient.path.isfile(segmentation_result_file_path) or smbclient.path.islink(segmentation_result_file_path):
+            smbclient.unlink(segmentation_result_file_path)
 
     def retrieve_segmentation_mask(self):
         TEXT_PROMPT = self.args.text_prompt
-        segmentation_result_file_path = ip_address + r'\taqiaden_hub\segmentation_query//segmentation_mask.npy'
         if TEXT_PROMPT.strip() != '':
             wait = wi('Waiting for segmentation result')
             while True:
                 if smbclient.path.exists(segmentation_result_file_path):
-                    mask=load_pickle_from_server(segmentation_result_file_path)
-                    if smbclient.path.isfile(segmentation_result_file_path) or smbclient.path.islink(segmentation_result_file_path):
-                        smbclient.unlink(segmentation_result_file_path)
+                    mask=load_pickle_from_server(segmentation_result_file_path,allow_pickle=False)
+                    self.remove_seg_file()
                     self.seg_mask=(torch.from_numpy(mask)[None,None,...]>0.5).cuda()
                     break
                 else:
                     wait.step(0.5)
-
-
 
     def initialize_check_points(self):
         pi = progress_indicator('Loading check points  ', max_limit=5)
 
         pi.step(1)
 
-        action_net = GANWrapper(action_module_key, ActionNet)
+        action_net = GANWrapper(action_module_key2, ActionNet)
         action_net.ini_generator(train=False)
         self.action_net = action_net.generator
 
@@ -295,15 +296,20 @@ class GraspAgent():
         return result
 
     def next_action(self,sample_from_target_actions=False):
+        selected_policy = self.seize_policy if sample_from_target_actions else self.clear_policy
         mask_=self.valid_actions_on_target_mask if sample_from_target_actions else self.valid_actions_mask
-        dist=MaskedCategorical(probs=self.action_probs,mask=mask_)
+        dist=MaskedCategorical(probs=selected_policy,mask=mask_)
         flattened_action_index= dist.sample()
-        probs = torch.squeeze(dist.log_prob(flattened_action_index)).item()
-        flattened_action_index = torch.squeeze(flattened_action_index).item()
-        value = self.q_value[flattened_action_index]
-        value = torch.squeeze(value).item()
         if sample_from_target_actions:
-            self.valid_actions_on_target_mask[flattened_action_index]=False
+            probs=None
+            value=None
+            flattened_action_index = torch.squeeze(flattened_action_index).item()
+            self.valid_actions_on_target_mask[flattened_action_index] = False
+        else:
+            probs = torch.squeeze(dist.log_prob(flattened_action_index)).item()
+            flattened_action_index = torch.squeeze(flattened_action_index).item()
+            value = self.q_value[flattened_action_index]
+            value = torch.squeeze(value).item()
         self.valid_actions_mask[flattened_action_index]=False
         return flattened_action_index, probs, value
 
@@ -332,14 +338,11 @@ class GraspAgent():
         self.args=args
 
     def view_mask_as_2dimage(self):
-        cv2.imshow('title', self.seg_mask[0,0].cpu().numpy().astype(np.float64))
-        cv2.waitKey(0)
-        cv2.imshow('title', self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
-        cv2.waitKey(0)
+        # view_image(self.seg_mask[0,0].cpu().numpy().astype(np.float64))
+        view_image(self.mask_numpy.astype(np.float64))
 
     def model_inference(self):
         pr.title('model inference')
-
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
         rgb_torch = torch.from_numpy(self.rgb).permute(2,0,1)[None, ...].to('cuda').float()
 
@@ -366,12 +369,16 @@ class GraspAgent():
         suction_shift_scope[gripper_shift_scope>suction_shift_scope]*=0.
 
         '''target mask'''
-        self.target_object_mask = (background_class <= 0.5) & self.seg_mask
+        if activate_segmentation_queries and self.seg_mask.shape==background_class.shape:
+            self.target_object_mask = (background_class <= 0.5) & self.seg_mask
+        else:
+            print('No specific object is detected')
+            self.target_object_mask = (background_class <= 0.5)
         self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
 
         '''policy net output'''
         griper_grasp_score, suction_grasp_score,\
-        shift_affordance_classifier, q_value, action_probs = \
+        shift_affordance_classifier, q_value, clear_policy = \
             self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask)
 
         '''reshape'''
@@ -383,16 +390,17 @@ class GraspAgent():
         suction_grasp_score=suction_grasp_score.squeeze()[mask]
         background_class=background_class.squeeze()[mask]
         shift_appealing=shift_appealing.squeeze()[mask]
+        # view_image(self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
 
-        griper_grasp_score.fill_(1.)
-        suction_grasp_score.fill_(1.)
+        # griper_grasp_score.fill_(1.)
+        # suction_grasp_score.fill_(1.)
 
         '''correct backgoround mask'''
-        lower_bound_mask=(self.voxel_pc[:,-1]<0.045) | (self.voxel_pc[:,0]<0.25) | (self.voxel_pc[:,0]>0.6)
-        background_class[lower_bound_mask]=1.0
-        min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
-        background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
+        # lower_bound_mask=(self.voxel_pc[:,-1]<0.045) | (self.voxel_pc[:,0]<0.25) | (self.voxel_pc[:,0]>0.6)
+        # background_class[lower_bound_mask]=1.0
+        # min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
+        # background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
 
         '''actions masks'''
         object_mask=background_class<0.5
@@ -406,8 +414,10 @@ class GraspAgent():
         gripper_shift_reachablity_mask=gripper_shift_scope>0.5
         suction_shift_reachablity_mask=suction_shift_scope>0.5
 
-        # view_mask(self.voxel_pc,background_class<0.5)
-        # view_mask(voxel_pc_,shift_appealing>0.5)
+        view_mask(self.voxel_pc,background_class<0.5)
+        view_mask(self.voxel_pc,shift_appealing>0.5)
+        # view_mask(self.voxel_pc,griper_grasp_score * object_mask )
+        # view_mask(self.voxel_pc,suction_grasp_score * object_mask )
 
         '''grasp actions'''
         self.gripper_grasp_mask=(object_mask*gripper_grasp_reachablity_mask
@@ -434,12 +444,20 @@ class GraspAgent():
         '''initiate random policy'''
         # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
         self.q_value=q_value.squeeze().permute(1,2,0)[mask]
-        self.action_probs=action_probs.squeeze().permute(1,2,0)[mask]
+
+        self.clear_policy=clear_policy.squeeze().permute(1,2,0)[mask]
+        self.seize_policy=torch.zeros_like(self.clear_policy)
+        self.seize_policy[:,0]=griper_grasp_score
+        self.seize_policy[:,1]=suction_grasp_score
 
         self.valid_actions_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
         self.valid_actions_on_target_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
-        self.valid_actions_on_target_mask[:,0].masked_fill_(self.gripper_grasp_mask,True)
-        self.valid_actions_on_target_mask[:,1].masked_fill_(self.suction_grasp_mask,True)
+
+        gripper_actions_mask_on_target= self.gripper_grasp_mask & self.target_object_mask
+        suction_actions_mask_on_target= self.suction_grasp_mask & self.target_object_mask
+
+        self.valid_actions_on_target_mask[:,0].masked_fill_(gripper_actions_mask_on_target,True)
+        self.valid_actions_on_target_mask[:,1].masked_fill_(suction_actions_mask_on_target,True)
 
         '''initialize valid actions mask'''
         self.valid_actions_mask[:,0].masked_fill_(self.gripper_grasp_mask,True)
@@ -456,9 +474,12 @@ class GraspAgent():
 
         '''flatten'''
         self.q_value = self.q_value.reshape(-1)
-        self.action_probs = self.action_probs.reshape(-1)
+        self.clear_policy = self.clear_policy.reshape(-1)
+        self.seize_policy=self.seize_policy.reshape(-1)
         self.valid_actions_mask = self.valid_actions_mask.reshape(-1)
         self.valid_actions_on_target_mask = self.valid_actions_on_target_mask.reshape(-1)
+
+
 
     def view_predicted_normals(self):
         view_npy_open3d(pc=self.voxel_pc,normals=self.normals.cpu().numpy())
@@ -575,7 +596,7 @@ class GraspAgent():
         # view_npy_open3d(self.voxel_pc)
         arm_knee_extreme=(action_obj.target_point + normal * arm_knee_margin)[1]
         # print('target_point=',action_obj.target_point,' arm_knee_extreme=',arm_knee_extreme,' normal=',normal)
-        minimum_safety_margin=0.05
+        minimum_safety_margin=0.1
         knee_threeshold=0.15
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])
@@ -602,7 +623,7 @@ class GraspAgent():
             minimum_margin = action_obj.target_point[1] + minimum_safety_margin
 
             occupancy_mask = (self.voxel_pc[:,1] > minimum_margin) | (arm_knee_extreme<(second_arm_extreme+knee_threeshold)) |  dist_mask
-        print('second_arm_extreme=',second_arm_extreme,' arm_knee_extreme=',arm_knee_extreme)
+        # print('second_arm_extreme=',second_arm_extreme,' arm_knee_extreme=',arm_knee_extreme)
         self.first_action_mask=occupancy_mask
         # print(occupancy_mask.shape)
         # print(self.valid_actions_mask.shape)
@@ -639,6 +660,7 @@ class GraspAgent():
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
         available_actions_on_target=torch.count_nonzero(self.valid_actions_on_target_mask).item()
         for i in range(total_available_actions):
+
             flattened_action_index, probs, value=self.next_action(sample_from_target_actions=i<available_actions_on_target)
             unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0],4))
             action_obj=Action(point_index=unflatten_index[0],action_index=unflatten_index[1], probs=probs, value=value)
@@ -666,13 +688,15 @@ class GraspAgent():
 
         '''second action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
+        available_actions_on_target = torch.count_nonzero(self.valid_actions_on_target_mask).item()
         for i in range(total_available_actions):
-            flattened_action_index, probs, value = self.next_action()
+            flattened_action_index, probs, value = self.next_action(sample_from_target_actions=i<available_actions_on_target)
             unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0], 4))
             action_obj = Action(point_index=unflatten_index[0],action_index=unflatten_index[1], probs=probs, value=value)
             self.process_action(action_obj)
             if action_obj.is_executable:
                 second_action_obj=action_obj
+                if i < available_actions_on_target: second_action_obj.policy_index = 1
                 break
 
         if second_action_obj.is_executable:

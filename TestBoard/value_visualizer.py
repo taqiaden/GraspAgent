@@ -19,7 +19,7 @@ from lib.report_utils import progress_indicator
 from models.action_net import ActionNet
 from models.policy_net import ValueNet
 from registration import camera
-from training.action_lr import module_key as action_module_key
+from training.action_lr_semi_supervised import module_key as action_module_key
 from visualiztion import view_score2
 
 instances_per_sample=1

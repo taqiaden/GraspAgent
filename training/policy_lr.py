@@ -52,9 +52,9 @@ class TrainPolicyNet:
         self.model_wrapper.ini_model(train=True)
         self.model_wrapper.ini_adam_optimizer(learning_rate=self.learning_rate)
 
-    @property
-    def training_trigger(self):
-        return len(self.data_tracker)>self.last_tracker_size
+    # @property
+    # def training_trigger(self):
+    #     return len(self.data_tracker)>self.last_tracker_size
 
     def synchronize_buffer(self):
         new_buffer=False
@@ -99,14 +99,13 @@ class TrainPolicyNet:
                                                        shuffle=True)
         return  data_loader
 
-    def step_quality_training(self,size=2,batch_size=1):
+    def step_quality_training(self,size=10,batch_size=1):
         file_ids=self.experience_sampling(size)
         data_loader=self.init_quality_data_loader(file_ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         assert size==len(file_ids)
 
         for i, batch in enumerate(data_loader, 0):
-
 
             rgb, mask, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
@@ -142,6 +141,8 @@ class TrainPolicyNet:
                 shift_affordance_classifier, q_value, action_probs = \
                 self.model_wrapper.model(rgb, pose_7_stack, normal_stack, mask)
 
+            reversed_decay_ = lambda scores: torch.clamp(torch.ones_like(scores) - scores, 0).mean()
+
             '''accumulate loss'''
             loss = torch.tensor(0., device=rgb.device)*griper_grasp_score.mean()
             for j in range(b):
@@ -155,7 +156,7 @@ class TrainPolicyNet:
 
                     self.gripper_quality_net_statistics.loss=l.item()
                     self.gripper_quality_net_statistics.update_confession_matrix(label,prediction)
-                    loss += l
+                    loss += l * reversed_decay_(griper_grasp_score) *0.3
 
                 if used_suction[j]:
                     label = suction_score[j]
@@ -168,14 +169,13 @@ class TrainPolicyNet:
                     self.suction_quality_net_statistics.loss=l.item()
                     self.suction_quality_net_statistics.update_confession_matrix(label,prediction)
 
-                    loss += l
+                    loss += l+reversed_decay_(suction_grasp_score) *0.3
 
             loss.backward()
             self.model_wrapper.optimizer.step()
 
             pi.step(i)
         pi.end()
-
 
     def view_result(self):
         with torch.no_grad():
@@ -209,15 +209,15 @@ if __name__ == "__main__":
         # train_action_net.save_statistics()
         # train_action_net.view_result()
         if new_data_tracker:
-            train_action_net.step_quality_training()
+            train_action_net.step_quality_training(size=30)
             train_action_net.export_check_points()
             train_action_net.save_statistics()
             train_action_net.view_result()
         else:
             wait.step(0.5)
-        if train_action_net.training_trigger:
-            train_action_net.initialize_model()
-            train_action_net.synchronize_buffer()
-            train_action_net.step_quality_training()
-        else:
-            time.sleep(3)
+        # if train_action_net.training_trigger:
+        #     train_action_net.initialize_model()
+        #     train_action_net.synchronize_buffer()
+        #     train_action_net.step_quality_training()
+        # else:
+        #     time.sleep(0.5)

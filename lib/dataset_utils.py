@@ -27,6 +27,7 @@ local_online_pools2=False
 if where_am_i=='chaoyun-server': # server
     online_data_dir = r'/home/taqiaden/online_data/'
     online_data_dir2 = r'/home/taqiaden/online_data2/'
+    local_online_pools2=True
 
 elif where_am_i=='yumi': #edge unit
     online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
