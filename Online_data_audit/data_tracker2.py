@@ -20,14 +20,24 @@ online_data2=online_data2()
 
 gripper_container_size=10
 suction_container_size=10
-
 online_data = online_data()
 
-def sampling_p(sampling_rate,target_rate=0.25,exponent=10,k=0.75):
+def sampling_p(sampling_rate,target_rate=0.25,exponent=10,min_p=0.001):
+    # print('rate',sampling_rate)
     if sampling_rate>target_rate:
-        return ((target_rate - sampling_rate - 1)**exponent) *k
+        p= ((target_rate - sampling_rate - 1)**-exponent) *target_rate
     else:
-        return 1. - (sampling_rate/target_rate)*(1-k)
+        p= 1. - (sampling_rate) *(1 - target_rate)/(target_rate)
+    p=max(p,min_p)
+    # print('p',p)
+    return p
+
+def sampling_p2(x,balance_indicator,probability_exponent=2.0):
+    pivot_point = np.sqrt(np.abs(balance_indicator)) * np.sign(balance_indicator)
+    xa = (1 - x) * pivot_point
+    selection_probability = ((1 - pivot_point) / 2 + xa + 0.5 * (1 - abs(pivot_point)))
+    selection_probability = selection_probability ** probability_exponent
+    return selection_probability
 
 class DataTracker2():
     def __init__(self,name='',list_size=3):
@@ -64,10 +74,66 @@ class DataTracker2():
 
         self.dict[action_obj.file_id]=new_record
 
+    def gripper_grasp_sampling(self,size,balance_indicator):
+        shuffled_keys = list(self.dict.keys())
+        random.shuffle(shuffled_keys)
+        positive_selection_p=sampling_p2(x=1,balance_indicator=balance_indicator,probability_exponent=10)
+        negative_selection_p=sampling_p2(x=0,balance_indicator=balance_indicator,probability_exponent=10)
+
+        # print(f'p={positive_selection_p}, n={negative_selection_p}')
+
+        ids = []
+        for key in shuffled_keys:
+            record = self.dict[key]
+            if len(ids) == size: break
+
+            if record[0] == 1 and record[1] == 0:
+                '''gripper grasp'''
+                ran=np.random.random()
+                if record[2] == 1 and ran < positive_selection_p:
+                    '''positive'''
+                    ids.append(key)
+                    continue
+                elif record[2] == 0 and ran < negative_selection_p:
+                    '''negative'''
+                    ids.append(key)
+                    continue
+
+        return ids
+
+    def suction_grasp_sampling(self,size,balance_indicator):
+        shuffled_keys = list(self.dict.keys())
+        random.shuffle(shuffled_keys)
+        positive_selection_p=sampling_p2(x=1,balance_indicator=balance_indicator,probability_exponent=10)
+        negative_selection_p=sampling_p2(x=0,balance_indicator=balance_indicator,probability_exponent=10)
+        ids = []
+        for key in shuffled_keys:
+            record = self.dict[key]
+            if len(ids) == size: break
+
+            if record[4]==1 and record[5]==0:
+                '''suction grasp'''
+                if record[6] == 1 and np.random.random() < positive_selection_p:
+                    '''positive'''
+                    ids.append(key)
+                    continue
+                elif record[6] == 0 and np.random.random() < negative_selection_p:
+
+                    '''negative'''
+                    ids.append(key)
+                    continue
+
+        return ids
+
     def selective_grasp_sampling(self, size,sampling_rates=None):
         shuffled_keys=list(self.dict.keys())
         random.shuffle(shuffled_keys)
         sampling_probabilities=[sampling_p(sampling_rates[i]) for i in range(4)]
+        '''normalize probability'''
+        sum_=sum(sampling_probabilities)
+        sampling_probabilities = [sampling_probabilities[i]/sum_ for i in range(4)]
+        print(sampling_probabilities)
+
         ids=[]
         for key in shuffled_keys:
             record=self.dict[key]

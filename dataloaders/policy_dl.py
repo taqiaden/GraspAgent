@@ -12,6 +12,7 @@ class GraspQualityDataset(data.Dataset):
         label = self.data_pool.label.load_as_numpy(target_index)
         rgb = self.data_pool.rgb.load_as_image(target_index)
         mask=self.data_pool.mask.load_as_numpy(target_index)
+        depth=self.data_pool.depth.load_as_numpy(target_index)
 
         label_obj = LabelObj2(label=label)
 
@@ -29,7 +30,7 @@ class GraspQualityDataset(data.Dataset):
         normal= label_obj.suction.normal
 
 
-        return rgb,mask[np.newaxis,:,:],pose_7,gripper_pixel_index,\
+        return rgb,depth[np.newaxis,:,:],mask[np.newaxis,:,:],pose_7,gripper_pixel_index,\
                suction_pixel_index,gripper_score,\
                suction_score,normal,used_gripper,used_suction
 

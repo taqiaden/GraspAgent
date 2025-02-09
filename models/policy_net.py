@@ -1,18 +1,16 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-
 from lib.models_utils import reshape_for_layer_norm
 from models.decoders import   att_res_mlp_LN
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
-from registration import camera
+from registration import camera, standardize_depth
 
 use_bn=False
 use_in=True
 
 policy_module_key='policy_net'
-
 
 class QualityRegressor(nn.Module):
     def __init__(self, in_c2):
@@ -45,7 +43,10 @@ class PolicyNet(nn.Module):
         '''Total of 11 input channels'''
         # 3 RGB
         # 1 target object/s mask
-        self.rgb_back_bone = res_unet(in_c=4, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.rgb_back_bone = res_unet(in_c=5, Batch_norm=use_bn, Instance_norm=use_in).to('cuda')
+        self.rgb_In=nn.InstanceNorm2d(3).to('cuda')
+        self.depth_In=nn.InstanceNorm2d(1).to('cuda')
+        self.mask_In=nn.InstanceNorm2d(1).to('cuda')
 
         self.critic=VanillaDecoder().to('cuda')
         self.actor=VanillaDecoder().to('cuda')
@@ -57,9 +58,15 @@ class PolicyNet(nn.Module):
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-    def forward(self, rgb,gripper_pose,suction_direction,target_mask):
-        '''backbone'''
-        input_channels=torch.cat([rgb,target_mask],dim=1)
+    def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask):
+        '''modalities preprocessing'''
+        depth = standardize_depth(depth)
+        rgb=self.rgb_In(rgb)
+        depth=self.depth_In(depth)
+
+        '''concatenate and decode'''
+        target_mask=self.mask_In(target_mask)
+        input_channels=torch.cat([rgb,depth,target_mask],dim=1)
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 

@@ -9,7 +9,7 @@ from dataloaders.policy_dl import GraspQualityDataset
 from lib.dataset_utils import online_data2
 from lib.report_utils import progress_indicator
 from models.policy_net import policy_module_key, PolicyNet
-from records.training_satatistics import TrainingTracker
+from records.training_satatistics import TrainingTracker, MovingRate
 from training.ppo_memory import PPOMemory
 import random
 from lib.report_utils import wait_indicator as wi
@@ -48,6 +48,8 @@ class TrainPolicyNet:
         self.buffer_time_stamp=None
         self.data_tracker_time_stamp=None
 
+        self.gripper_sampling_rate=MovingRate('gripper_sampling_rate')
+
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
         self.model_wrapper.ini_adam_optimizer(learning_rate=self.learning_rate)
@@ -74,9 +76,14 @@ class TrainPolicyNet:
         return new_buffer,new_data_tracker
 
     def experience_sampling(self,replay_size):
-        replay_ids=self.data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(self.buffer.g_p_sampling_rate.val,self.buffer.g_n_sampling_rate.val,
-                                                                                    self.buffer.s_p_sampling_rate.val,self.buffer.s_n_sampling_rate.val))
-        return replay_ids
+        suction_size=int(self.gripper_sampling_rate.val*replay_size)
+        gripper_size=replay_size-suction_size
+
+        gripper_ids=self.data_tracker.gripper_grasp_sampling(gripper_size,self.gripper_quality_net_statistics.label_balance_indicator)
+
+        suction_ids=self.data_tracker.suction_grasp_sampling(suction_size,self.suction_quality_net_statistics.label_balance_indicator)
+
+        return gripper_ids+suction_ids
 
     def mixed_buffer_sampling(self,buffer:PPOMemory,data_tracker:DataTracker2,batch_size,n_batches,online_ratio):
         total_size=int(batch_size*n_batches)
@@ -88,8 +95,8 @@ class TrainPolicyNet:
         online_ids=buffer.non_episodic_buffer_file_ids[indexes]
 
         '''sample from old experience'''
-        replay_ids=data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(buffer.g_p_sampling_rate.val,buffer.g_n_sampling_rate.val,
-                                                                                    buffer.s_p_sampling_rate.val,buffer.s_n_sampling_rate.val))
+        replay_ids=data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(self.g_p_sampling_rate.val,self.g_n_sampling_rate.val,
+                                                                                    self.s_p_sampling_rate.val,self.s_n_sampling_rate.val))
         return online_ids+replay_ids
 
 
@@ -99,20 +106,21 @@ class TrainPolicyNet:
                                                        shuffle=True)
         return  data_loader
 
-    def step_quality_training(self,size=10,batch_size=1):
-        file_ids=self.experience_sampling(size)
+    def step_quality_training(self,max_size=100,batch_size=1):
+        file_ids=self.experience_sampling(max_size)
         data_loader=self.init_quality_data_loader(file_ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
-        assert size==len(file_ids)
+        # assert size==len(file_ids)
 
         for i, batch in enumerate(data_loader, 0):
 
-            rgb, mask, pose_7, gripper_pixel_index, \
+            rgb, depth,mask, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
                 suction_score, normal, used_gripper, used_suction = batch
 
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             mask = mask.cuda().float()
+            depth=depth.cuda().float()
             pose_7 = pose_7.cuda().float()
             gripper_score = gripper_score.cuda().float()
             suction_score = suction_score.cuda().float()
@@ -139,9 +147,9 @@ class TrainPolicyNet:
 
             griper_grasp_score, suction_grasp_score, \
                 shift_affordance_classifier, q_value, action_probs = \
-                self.model_wrapper.model(rgb, pose_7_stack, normal_stack, mask)
+                self.model_wrapper.model(rgb, depth,pose_7_stack, normal_stack, mask)
 
-            reversed_decay_ = lambda scores: torch.clamp(torch.ones_like(scores) - scores, 0).mean()
+            # reversed_decay_ = lambda scores:  torch.clamp(torch.ones_like(scores) - scores, 0).mean()
 
             '''accumulate loss'''
             loss = torch.tensor(0., device=rgb.device)*griper_grasp_score.mean()
@@ -154,9 +162,11 @@ class TrainPolicyNet:
                     prediction = griper_grasp_score[j, 0, g_pix_A, g_pix_B]
                     l=bce_loss(prediction, label)
 
+                    self.gripper_sampling_rate.update(1)
+
                     self.gripper_quality_net_statistics.loss=l.item()
                     self.gripper_quality_net_statistics.update_confession_matrix(label,prediction)
-                    loss += l * reversed_decay_(griper_grasp_score) *0.3
+                    loss += l
 
                 if used_suction[j]:
                     label = suction_score[j]
@@ -166,10 +176,12 @@ class TrainPolicyNet:
                     prediction = suction_grasp_score[j, 0, s_pix_A, s_pix_B]
                     l=bce_loss(prediction, label)
 
+                    self.gripper_sampling_rate.update(0)
+
                     self.suction_quality_net_statistics.loss=l.item()
                     self.suction_quality_net_statistics.update_confession_matrix(label,prediction)
 
-                    loss += l+reversed_decay_(suction_grasp_score) *0.3
+                    loss += l
 
             loss.backward()
             self.model_wrapper.optimizer.step()
@@ -182,9 +194,14 @@ class TrainPolicyNet:
             self.gripper_quality_net_statistics.print()
             self.suction_quality_net_statistics.print()
 
+            self.gripper_sampling_rate.view()
+
+
     def save_statistics(self):
         self.gripper_quality_net_statistics.save()
         self.suction_quality_net_statistics.save()
+
+        self.gripper_sampling_rate.save()
 
     def export_check_points(self):
         self.model_wrapper.export_model()
@@ -204,17 +221,18 @@ if __name__ == "__main__":
 
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
-        # train_action_net.step_quality_training()
-        # train_action_net.export_check_points()
-        # train_action_net.save_statistics()
-        # train_action_net.view_result()
-        if new_data_tracker:
-            train_action_net.step_quality_training(size=30)
-            train_action_net.export_check_points()
-            train_action_net.save_statistics()
-            train_action_net.view_result()
-        else:
-            wait.step(0.5)
+
+        train_action_net.step_quality_training(max_size=30)
+        train_action_net.export_check_points()
+        train_action_net.save_statistics()
+        train_action_net.view_result()
+        # if new_data_tracker:
+        #     train_action_net.step_quality_training(max_size=10)
+        #     train_action_net.export_check_points()
+        #     train_action_net.save_statistics()
+        #     train_action_net.view_result()
+        # else:
+        #     wait.step(0.5)
         # if train_action_net.training_trigger:
         #     train_action_net.initialize_model()
         #     train_action_net.synchronize_buffer()

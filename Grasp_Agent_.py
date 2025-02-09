@@ -596,7 +596,7 @@ class GraspAgent():
         # view_npy_open3d(self.voxel_pc)
         arm_knee_extreme=(action_obj.target_point + normal * arm_knee_margin)[1]
         # print('target_point=',action_obj.target_point,' arm_knee_extreme=',arm_knee_extreme,' normal=',normal)
-        minimum_safety_margin=0.1
+        minimum_safety_margin=0.15
         knee_threeshold=0.15
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])

@@ -1,7 +1,6 @@
 import numpy as np
 from collections import deque
 from action import Action
-from records.training_satatistics import MovingRate
 from lib.dataset_utils import online_data2
 
 max_policy_buffer_size=50
@@ -37,11 +36,6 @@ class PPOMemory():
         self.shift_result=deque([])
         self.non_episodic_buffer_file_ids=deque([])
 
-        '''track sampling rates'''
-        self.g_p_sampling_rate=MovingRate('gripper_positive_sampling_rate')
-        self.g_n_sampling_rate=MovingRate('gripper_negative_sampling_rate')
-        self.s_p_sampling_rate=MovingRate('suction_positive_sampling_rate')
-        self.s_n_sampling_rate=MovingRate('suction_negative_sampling_rate')
 
     def append_to_policy_buffer(self, action_obj:Action):
         self.actions_obj_list.append(action_obj)

@@ -68,9 +68,9 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.001):
+    def __init__(self,name='000',decay_rate=0.001,min_decay=0.001):
         self.name=name
-
+        self.min_decay=min_decay
         self.decay_rate = decay_rate
         self.counter = 0
         self.moving_rate=0.0
@@ -101,7 +101,7 @@ class MovingRate():
 
     def set_decay_rate(self):
         x=0.1*(1-0.0045)**self.counter
-        self.decay_rate=max(x,0.001)
+        self.decay_rate=max(x,self.min_decay)
 
     def save(self):
         save_key('moving_rate_', self.moving_rate, section=self.name)
