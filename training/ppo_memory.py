@@ -36,7 +36,6 @@ class PPOMemory():
         self.shift_result=deque([])
         self.non_episodic_buffer_file_ids=deque([])
 
-
     def append_to_policy_buffer(self, action_obj:Action):
         self.actions_obj_list.append(action_obj)
         self.values.append(action_obj.value)

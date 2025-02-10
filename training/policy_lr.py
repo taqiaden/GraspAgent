@@ -4,15 +4,22 @@ import numpy as np
 import torch
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
-from check_points.check_point_conventions import ModelWrapper
+from check_points.check_point_conventions import ModelWrapper, GANWrapper
 from dataloaders.policy_dl import GraspQualityDataset
 from lib.dataset_utils import online_data2
+from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
+from lib.image_utils import view_image
 from lib.report_utils import progress_indicator
+from lib.rl.masked_categorical import MaskedCategorical
+from lib.sklearn_clustering import dbscan_clustering
+from models.action_net import action_module_key2, ActionNet
 from models.policy_net import policy_module_key, PolicyNet
 from records.training_satatistics import TrainingTracker, MovingRate
+from registration import camera
 from training.ppo_memory import PPOMemory
 import random
 from lib.report_utils import wait_indicator as wi
+from visualiztion import view_npy_open3d
 
 buffer_file='buffer.pkl'
 action_data_tracker_path=r'online_data_dict.pkl'
@@ -30,6 +37,7 @@ def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
 class TrainPolicyNet:
     def __init__(self,learning_rate=5e-5):
 
+        self.action_net = None
         self.learning_rate=learning_rate
         self.model_wrapper=ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
 
@@ -106,6 +114,104 @@ class TrainPolicyNet:
                                                        shuffle=True)
         return  data_loader
 
+    def initialize_action_net(self):
+        action_net = GANWrapper(action_module_key2, ActionNet)
+        action_net.ini_generator(train=False)
+        self.action_net=action_net.generator
+
+    def policy_initialization(self,max_size=10,batch_size=1):
+        file_ids = self.experience_sampling(max_size)
+        data_loader = self.init_quality_data_loader(file_ids, batch_size)
+        pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
+        # assert size==len(file_ids)
+
+        for i, batch in enumerate(data_loader, 0):
+
+            rgb, depth, target_mask, pose_7, gripper_pixel_index, \
+                suction_pixel_index, gripper_score, \
+                suction_score, normal, used_gripper, used_suction = batch
+
+            rgb = rgb.cuda().float().permute(0, 3, 1, 2)
+            target_mask = target_mask.cuda().float()
+            depth = depth.cuda().float()
+            pose_7 = pose_7.cuda().float()
+            gripper_score = gripper_score.cuda().float()
+            suction_score = suction_score.cuda().float()
+            normal = normal.cuda().float()
+
+            b = rgb.shape[0]
+            w = rgb.shape[2]
+            h = rgb.shape[3]
+
+            '''action space'''
+            if self.action_net is None: self.initialize_action_net()
+            with torch.no_grad():
+                gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
+                    , background_class, depth_features = self.action_net(depth.clone(), clip=True)
+
+            pcs=[]
+            masks=[]
+            for j in range(b):
+                pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
+                pc = transform_to_camera_frame(pc, reverse=True)
+
+                pcs.append(pc)
+                masks.append(mask)
+                target_mask[j,0][~mask]*=0
+
+                '''pick random cluster to be the target'''
+                # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
+                target_mask_predictions = target_mask.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                objects_mask = target_mask_predictions > 0.5
+                object_points = pc[objects_mask.cpu().numpy()]
+                clusters_label=dbscan_clustering(object_points,view=False)
+                sets_=set(clusters_label)
+                max_cluster = max(sets_)
+                picked_cluster_label=np.random.randint(0,max_cluster)
+                cluster_mask=clusters_label==picked_cluster_label
+                cluster_mask=torch.from_numpy(cluster_mask).cuda()
+
+
+                '''target_mask[j, 0][mask][objects_mask][~cluster_mask]*=0'''
+                temp_1 = target_mask[j, 0][mask]
+                temp_2 = temp_1[objects_mask]
+                temp_2[~cluster_mask] *= 0
+                temp_1[objects_mask] = temp_2
+                target_mask[j, 0][mask] = temp_1
+
+                # view_image(target_mask[j,0].cpu().numpy().astype(np.float64))
+
+            '''zero grad'''
+            self.model_wrapper.model.zero_grad()
+
+            griper_grasp_score, suction_grasp_score, \
+                shift_affordance_classifier, q_value, action_probs = \
+                self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_mask)
+
+            for j in range(b):
+                mask=masks[j]
+                pc=pcs[j]
+                target_mask_predictions = target_mask.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                objects_mask = target_mask_predictions > 0.5
+                gripper_grasp_value=q_value[j,0][mask]
+                gripper_grasp_mask=objects_mask
+                object_points=pc[objects_mask.cpu().numpy()]
+                # view_npy_open3d(pc=object_points)
+
+                '''gripper grasp sampling'''
+                sampling_p=torch.rand_like(gripper_grasp_value)
+                dist = MaskedCategorical(probs=sampling_p, mask=gripper_grasp_mask)
+                index=dist.sample()
+                pred_value=gripper_grasp_value[index]
+                target_point=pc[index]
+                min_dist_=np.min(np.linalg.norm(object_points-target_point[np.newaxis,:],axis=-1))
+                print(object_points-target_point[np.newaxis,:])
+                print(min_dist_)
+
+
+            pi.step(i)
+        pi.end()
+
     def step_quality_training(self,max_size=100,batch_size=1):
         file_ids=self.experience_sampling(max_size)
         data_loader=self.init_quality_data_loader(file_ids,batch_size)
@@ -147,7 +253,7 @@ class TrainPolicyNet:
 
             griper_grasp_score, suction_grasp_score, \
                 shift_affordance_classifier, q_value, action_probs = \
-                self.model_wrapper.model(rgb, depth,pose_7_stack, normal_stack, mask)
+                self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, mask)
 
             # reversed_decay_ = lambda scores:  torch.clamp(torch.ones_like(scores) - scores, 0).mean()
 
@@ -222,6 +328,7 @@ if __name__ == "__main__":
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
+        train_action_net.policy_initialization(max_size=10)
         train_action_net.step_quality_training(max_size=30)
         train_action_net.export_check_points()
         train_action_net.save_statistics()

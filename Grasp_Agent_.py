@@ -374,6 +374,7 @@ class GraspAgent():
         else:
             print('No specific object is detected')
             self.target_object_mask = (background_class <= 0.5)
+        self.target_object_mask[0,0][~mask]*=0
         self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
 
         '''policy net output'''
