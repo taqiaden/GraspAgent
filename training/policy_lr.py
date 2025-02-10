@@ -127,12 +127,12 @@ class TrainPolicyNet:
 
         for i, batch in enumerate(data_loader, 0):
 
-            rgb, depth, target_mask, pose_7, gripper_pixel_index, \
+            rgb, depth, target_masks, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
                 suction_score, normal, used_gripper, used_suction = batch
 
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
-            target_mask = target_mask.cuda().float()
+            target_masks = target_masks.cuda().float()
             depth = depth.cuda().float()
             pose_7 = pose_7.cuda().float()
             gripper_score = gripper_score.cuda().float()
@@ -157,11 +157,11 @@ class TrainPolicyNet:
 
                 pcs.append(pc)
                 masks.append(mask)
-                target_mask[j,0][~mask]*=0
+                target_masks[j,0][~mask]*=0
 
                 '''pick random cluster to be the target'''
                 # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
-                target_mask_predictions = target_mask.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                target_mask_predictions = target_masks.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 objects_mask = target_mask_predictions > 0.5
                 object_points = pc[objects_mask.cpu().numpy()]
                 clusters_label=dbscan_clustering(object_points,view=False)
@@ -171,13 +171,12 @@ class TrainPolicyNet:
                 cluster_mask=clusters_label==picked_cluster_label
                 cluster_mask=torch.from_numpy(cluster_mask).cuda()
 
-
                 '''target_mask[j, 0][mask][objects_mask][~cluster_mask]*=0'''
-                temp_1 = target_mask[j, 0][mask]
+                temp_1 = target_masks[j, 0][mask]
                 temp_2 = temp_1[objects_mask]
                 temp_2[~cluster_mask] *= 0
                 temp_1[objects_mask] = temp_2
-                target_mask[j, 0][mask] = temp_1
+                target_masks[j, 0][mask] = temp_1
 
                 # view_image(target_mask[j,0].cpu().numpy().astype(np.float64))
 
@@ -186,27 +185,41 @@ class TrainPolicyNet:
 
             griper_grasp_score, suction_grasp_score, \
                 shift_affordance_classifier, q_value, action_probs = \
-                self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_mask)
+                self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
 
             for j in range(b):
                 mask=masks[j]
                 pc=pcs[j]
-                target_mask_predictions = target_mask.permute(0, 2, 3, 1)[j, :, :, 0][mask]
-                objects_mask = target_mask_predictions > 0.5
+                target_mask_predictions = target_masks.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                target_mask_ = target_mask_predictions > 0.5
+                background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                objects_mask = background_class_predictions <= 0.5
                 gripper_grasp_value=q_value[j,0][mask]
-                gripper_grasp_mask=objects_mask
-                object_points=pc[objects_mask.cpu().numpy()]
+                target_object_points=pc[target_mask_.cpu().numpy()]
                 # view_npy_open3d(pc=object_points)
+
+                def sample_gripper_grasp(sampling_p,objects_mask,size=2):
+                    dist = MaskedCategorical(probs=sampling_p, mask=objects_mask)
+                    pred=[]
+                    label=[]
+                    for k in range(size):
+                        index = dist.sample()
+                        dist.probs[index]=0
+                        pred_value = gripper_grasp_value[index]
+                        target_point = pc[index]
+                        min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
+                        pred.append(pred_value)
+                        label.append(min_dist_)
+
+                    return pred, label
 
                 '''gripper grasp sampling'''
                 sampling_p=torch.rand_like(gripper_grasp_value)
-                dist = MaskedCategorical(probs=sampling_p, mask=gripper_grasp_mask)
-                index=dist.sample()
-                pred_value=gripper_grasp_value[index]
-                target_point=pc[index]
-                min_dist_=np.min(np.linalg.norm(object_points-target_point[np.newaxis,:],axis=-1))
-                print(object_points-target_point[np.newaxis,:])
-                print(min_dist_)
+                pred,label=sample_gripper_grasp(sampling_p,objects_mask,size=2)
+                arg_max=np.argmax(np.array(label))
+                arg_min=int(1-arg_max)
+                margin=abs(pred[0]-pred[1])
+                loss=torch.clamp(pred[arg_max]-pred[arg_min]-margin,0)
 
 
             pi.step(i)

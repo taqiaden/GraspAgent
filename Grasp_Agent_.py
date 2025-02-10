@@ -374,13 +374,13 @@ class GraspAgent():
         else:
             print('No specific object is detected')
             self.target_object_mask = (background_class <= 0.5)
-        self.target_object_mask[0,0][~mask]*=0
+        self.target_object_mask[0,0][~mask]*=False
         self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
 
         '''policy net output'''
         griper_grasp_score, suction_grasp_score,\
         shift_affordance_classifier, q_value, clear_policy = \
-            self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask)
+            self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask.float())
 
         '''reshape'''
         griper_object_collision_classifier=griper_collision_classifier[0,0][mask]
