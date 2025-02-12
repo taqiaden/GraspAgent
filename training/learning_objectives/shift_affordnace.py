@@ -36,9 +36,11 @@ def get_shift_parameteres(shift_target_point):
     shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
     return direction,start_point,end_point,shifted_start_point
 
-def get_shift_mask(pc,direction,shifted_start_point,end_point,spatial_mask):
+def get_shift_mask(pc,shifted_start_point,end_point,spatial_mask):
     '''signed distance'''
-    d = direction / np.linalg.norm(direction)
+    direction=end_point-shifted_start_point
+    d=direction/np.linalg.norm(direction)
+
     s = np.dot(shifted_start_point - pc, d)
     t = np.dot(pc - end_point, d)
 
@@ -97,12 +99,32 @@ def check_collision_for_shift(normals,target_index,pc):
 
 def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,normals,target_index,visualize=False):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
-    shift_mask = get_shift_mask(pc, direction, shifted_start_point, end_point, spatial_mask)
+    # shift_mask = get_shift_mask(pc, shifted_start_point, end_point, spatial_mask)
+    shift_result=True
+    start_randomization_scope=0.003
+    end_randomization_scope=0.03
+
+    for i in range(5):
+        start=shifted_start_point.copy()
+        start[0]=start[0]+np.random.randn()*start_randomization_scope
+        start[1]=start[1]+np.random.randn()*start_randomization_scope
+
+        end=end_point.copy()
+        end[0]=end[0]+np.random.randn()*end_randomization_scope
+        end[1]=end[1]+np.random.randn()*end_randomization_scope
+
+        # print('S----',shifted_start_point,start)
+        # print('E----',end_point,end)
+
+        shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
+        if shift_mask_result.sum()==0:
+            shift_result=False
+            break
 
     '''collision check'''
-    collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
+    # collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
 
-    if shift_mask.sum() > 0 and collision==False:
+    if shift_result :
         label= torch.tensor(1, device=prediction_.device).float()
     else:
         label= torch.tensor(0, device=prediction_.device).float()

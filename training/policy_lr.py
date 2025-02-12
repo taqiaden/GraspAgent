@@ -2,6 +2,8 @@ import time
 
 import numpy as np
 import torch
+from torch.distributions import Categorical
+import torch.nn.functional as F
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
@@ -9,6 +11,7 @@ from dataloaders.policy_dl import GraspQualityDataset
 from lib.dataset_utils import online_data2
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
+from lib.math_utils import seeds
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
 from lib.sklearn_clustering import dbscan_clustering
@@ -147,46 +150,62 @@ class TrainPolicyNet:
             if self.action_net is None: self.initialize_action_net()
             with torch.no_grad():
                 gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
-                    , background_class, depth_features = self.action_net(depth.clone(), clip=True)
+                    , background_class, action_depth_features = self.action_net(depth.clone(), clip=True)
 
-            pcs=[]
-            masks=[]
-            for j in range(b):
-                pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
-                pc = transform_to_camera_frame(pc, reverse=True)
+                pcs=[]
+                masks=[]
+                for j in range(b):
+                    pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
+                    pc = transform_to_camera_frame(pc, reverse=True)
 
-                pcs.append(pc)
-                masks.append(mask)
-                target_masks[j,0][~mask]*=0
+                    pcs.append(pc)
+                    masks.append(mask)
+                    target_masks[j,0][~mask]*=0
 
-                '''pick random cluster to be the target'''
-                # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
-                target_mask_predictions = target_masks.permute(0, 2, 3, 1)[j, :, :, 0][mask]
-                objects_mask = target_mask_predictions > 0.5
-                object_points = pc[objects_mask.cpu().numpy()]
-                clusters_label=dbscan_clustering(object_points,view=False)
-                sets_=set(clusters_label)
-                max_cluster = max(sets_)
-                picked_cluster_label=np.random.randint(0,max_cluster)
-                cluster_mask=clusters_label==picked_cluster_label
-                cluster_mask=torch.from_numpy(cluster_mask).cuda()
+                    '''pick random cluster to be the target'''
+                    # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
+                    target_mask_predictions = target_masks.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                    target_mask_ = target_mask_predictions > 0.5
+                    object_points = pc[target_mask_.cpu().numpy()]
+                    clusters_label=dbscan_clustering(object_points,view=False)
+                    sets_=set(clusters_label)
+                    sets_=[i for i in sets_ if i>=0]
+                    counts_=[(clusters_label==x).sum() for x in sets_ ]
+                    picked_cluster_label=sets_[np.argmax(np.array(counts_))]
 
-                '''target_mask[j, 0][mask][objects_mask][~cluster_mask]*=0'''
-                temp_1 = target_masks[j, 0][mask]
-                temp_2 = temp_1[objects_mask]
-                temp_2[~cluster_mask] *= 0
-                temp_1[objects_mask] = temp_2
-                target_masks[j, 0][mask] = temp_1
+                    # max_cluster = max(sets_)
+                    # picked_cluster_label=np.random.randint(0,max_cluster)
+                    cluster_mask=clusters_label==picked_cluster_label
+                    cluster_mask=torch.from_numpy(cluster_mask).cuda()
 
-                # view_image(target_mask[j,0].cpu().numpy().astype(np.float64))
+                    '''target_mask[j, 0][mask][target_mask_][~cluster_mask]*=0'''
+                    temp_1 = target_masks[j, 0][mask]
+                    temp_2 = temp_1[target_mask_]
+                    temp_2[~cluster_mask] *= 0
+                    temp_1[target_mask_] = temp_2
+                    target_masks[j, 0][mask] = temp_1
 
+                    # view_image(target_mask[j,0].cpu().numpy().astype(np.float64))
+
+            # continue
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
 
             griper_grasp_score, suction_grasp_score, \
-                shift_affordance_classifier, q_value, action_probs = \
+                shift_affordance_classifier, q_value, action_probs,policy_depth_features = \
                 self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
 
+            assert torch.isnan(q_value).any()==False,f'{q_value}'
+            assert torch.isnan(action_probs).any()==False,f'{action_probs}'
+
+            view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
+            target_value=q_value[0, 0]
+            view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            target_value=q_value[0, 2]
+            view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            continue
+
+            loss=torch.tensor([0.],device=q_value.device)
             for j in range(b):
                 mask=masks[j]
                 pc=pcs[j]
@@ -194,33 +213,57 @@ class TrainPolicyNet:
                 target_mask_ = target_mask_predictions > 0.5
                 background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 objects_mask = background_class_predictions <= 0.5
+                shift_appealing_j=shift_appealing.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 gripper_grasp_value=q_value[j,0][mask]
+                suction_grasp_value=q_value[j,1][mask]
+                gripper_shift_value=q_value[j,2][mask]
+                suction_shift_value=q_value[j,3][mask]
+
                 target_object_points=pc[target_mask_.cpu().numpy()]
                 # view_npy_open3d(pc=object_points)
 
-                def sample_gripper_grasp(sampling_p,objects_mask,size=2):
-                    dist = MaskedCategorical(probs=sampling_p, mask=objects_mask)
-                    pred=[]
-                    label=[]
-                    for k in range(size):
-                        index = dist.sample()
-                        dist.probs[index]=0
-                        pred_value = gripper_grasp_value[index]
-                        target_point = pc[index]
-                        min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
-                        pred.append(pred_value)
-                        label.append(min_dist_)
-
-                    return pred, label
+                def sample_(sampling_p):
+                    # dist = MaskedCategorical(probs=sampling_p, mask=objects_mask)
+                    dist = Categorical(probs=sampling_p)
+                    index = dist.sample()
+                    dist.probs[index]=0
+                    target_point = pc[index]
+                    min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
+                    max_ref=0.7
+                    if min_dist_ < max_ref:
+                        label=(1-(min_dist_/max_ref) )**2
+                    else:
+                        label=0.
+                    return index, label
 
                 '''gripper grasp sampling'''
                 sampling_p=torch.rand_like(gripper_grasp_value)
-                pred,label=sample_gripper_grasp(sampling_p,objects_mask,size=2)
-                arg_max=np.argmax(np.array(label))
-                arg_min=int(1-arg_max)
-                margin=abs(pred[0]-pred[1])
-                loss=torch.clamp(pred[arg_max]-pred[arg_min]-margin,0)
+                for k in range(100):
+                    shared_index,label=sample_(sampling_p)
+                    is_object=objects_mask[shared_index]
+                    is_bin=~is_object
+                    # shift_weight=shift_appealing_j[shared_index].item()
 
+                    '''higher value for objects closer to the target'''
+                    loss+=(gripper_grasp_value[shared_index]-label*is_object*0.5)**2
+                    loss+=(suction_grasp_value[shared_index]-label*is_object*0.5)**2
+                    loss+=(gripper_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
+                    loss+=(suction_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
+
+                    # print('Gripper grasp initialization result: ',((pred[0]>=pred[1])==(label[0]>=label[1])).item())
+            '''adapt policy net to value net'''
+            policy_label=q_value.detach().clone()
+            policy_label = policy_label.reshape(policy_label.shape[0], -1)
+            policy_label=(policy_label-policy_label.min())/(policy_label.max()-policy_label.min())
+            policy_label = F.softmax(policy_label, dim=-1)
+            policy_pred=action_probs.reshape(policy_label.shape[0], -1)
+
+            loss+=((policy_pred-policy_label)**2).mean()
+
+            loss+=((policy_depth_features-action_depth_features)**2).mean()
+
+            loss.backward()
+            self.model_wrapper.optimizer.step()
 
             pi.step(i)
         pi.end()
@@ -331,6 +374,7 @@ class TrainPolicyNet:
         self.suction_quality_net_statistics.clear()
 
 if __name__ == "__main__":
+    seeds(0)
     lr = 1e-4
     train_action_net = TrainPolicyNet(  learning_rate=lr)
     train_action_net.initialize_model()
@@ -342,7 +386,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         train_action_net.policy_initialization(max_size=10)
-        train_action_net.step_quality_training(max_size=30)
+        # train_action_net.step_quality_training(max_size=30)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()

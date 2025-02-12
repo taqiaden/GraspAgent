@@ -364,7 +364,10 @@ class GraspAgent():
         '''shift reachability'''
         gripper_shift_scope=self.get_gripper_shift_reachability( voxel_pc_tensor,self.normals)
         suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
-        '''shift with the arm of best reachablity'''
+
+        '''grasp/shift with the arm of best reachability'''
+        gripper_grasp_scope[suction_grasp_scope>gripper_grasp_scope]*=0.
+        suction_grasp_scope[gripper_grasp_scope>suction_grasp_scope]*=0.
         gripper_shift_scope[suction_shift_scope>gripper_shift_scope]*=0.
         suction_shift_scope[gripper_shift_scope>suction_shift_scope]*=0.
 
