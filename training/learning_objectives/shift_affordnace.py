@@ -6,9 +6,8 @@ from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_effective_length=0.035
+shift_effective_length=0.05
 shift_execution_length=0.15
-
 
 shift_elevation_threshold = 0.00
 shift_contact_margin = 0.003

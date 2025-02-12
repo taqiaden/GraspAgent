@@ -55,7 +55,6 @@ class PolicyNet(nn.Module):
 
         self.gripper_grasp = QualityRegressor( in_c2=7)
         self.suction_grasp = QualityRegressor( in_c2=3)
-        self.shift_affordance=QualityRegressor( in_c2=3+2)
 
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
@@ -97,10 +96,6 @@ class PolicyNet(nn.Module):
         suction_direction_detached=reshape_for_layer_norm(suction_direction_detached, camera=camera, reverse=False)
         suction_grasp_score = self.suction_grasp(rgb_features, suction_direction_detached)
 
-        '''shift affordance'''
-        shift_query_features=torch.cat([suction_direction_detached,self.spatial_encoding], dim=-1)
-        shift_affordance_classifier = self.shift_affordance(rgb_features,shift_query_features )
-
         '''q value'''
         q_values=self.critic(rgb_features)
 
@@ -110,7 +105,6 @@ class PolicyNet(nn.Module):
         '''reshape'''
         griper_grasp_score = reshape_for_layer_norm(griper_grasp_score, camera=camera, reverse=True)
         suction_grasp_score = reshape_for_layer_norm(suction_grasp_score, camera=camera, reverse=True)
-        shift_affordance_classifier = reshape_for_layer_norm(shift_affordance_classifier, camera=camera, reverse=True)
         q_values = reshape_for_layer_norm(q_values, camera=camera, reverse=True)
         action_logits = reshape_for_layer_norm(action_logits, camera=camera, reverse=True)
 
@@ -121,5 +115,5 @@ class PolicyNet(nn.Module):
         action_probs=F.softmax(policy_reshaped,dim=-1)
         action_probs=action_probs.reshape(action_logits.shape)
 
-        return griper_grasp_score,suction_grasp_score,shift_affordance_classifier,q_values,action_probs,depth_features
+        return griper_grasp_score,suction_grasp_score,q_values,action_probs,depth_features
 

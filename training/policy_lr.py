@@ -1,3 +1,4 @@
+import copy
 import time
 
 import numpy as np
@@ -8,6 +9,7 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
 from dataloaders.policy_dl import GraspQualityDataset
+from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
@@ -60,6 +62,13 @@ class TrainPolicyNet:
         self.data_tracker_time_stamp=None
 
         self.gripper_sampling_rate=MovingRate('gripper_sampling_rate')
+
+        ''''statistics tracker'''
+        self.ini_policy_moving_loss=MovingRate(policy_module_key+'_ini_policy_moving_loss')
+        self.representation_transfer_moving_loss=MovingRate(policy_module_key+'_representation_transfer_moving_loss')
+        self.ini_value_moving_loss=MovingRate(policy_module_key+'_ini_value_moving_loss')
+        self.distillation_moving_loss=MovingRate(policy_module_key+'_distillation_moving_loss')
+
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
@@ -127,7 +136,7 @@ class TrainPolicyNet:
         data_loader = self.init_quality_data_loader(file_ids, batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         # assert size==len(file_ids)
-
+        cloned_model=copy.deepcopy(self.model_wrapper.model)
         for i, batch in enumerate(data_loader, 0):
 
             rgb, depth, target_masks, pose_7, gripper_pixel_index, \
@@ -137,19 +146,15 @@ class TrainPolicyNet:
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             target_masks = target_masks.cuda().float()
             depth = depth.cuda().float()
-            pose_7 = pose_7.cuda().float()
-            gripper_score = gripper_score.cuda().float()
-            suction_score = suction_score.cuda().float()
-            normal = normal.cuda().float()
+
 
             b = rgb.shape[0]
-            w = rgb.shape[2]
-            h = rgb.shape[3]
+
 
             '''action space'''
             if self.action_net is None: self.initialize_action_net()
             with torch.no_grad():
-                gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
+                gripper_pose, suction_direction, _, _, _ \
                     , background_class, action_depth_features = self.action_net(depth.clone(), clip=True)
 
                 pcs=[]
@@ -186,26 +191,34 @@ class TrainPolicyNet:
                     target_masks[j, 0][mask] = temp_1
 
                     # view_image(target_mask[j,0].cpu().numpy().astype(np.float64))
-
             # continue
+            '''freeze other task output'''
+            with torch.no_grad():
+                ref_griper_grasp_score, ref_suction_grasp_score, \
+                     _, _,_ = \
+                    cloned_model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
+
+
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
 
             griper_grasp_score, suction_grasp_score, \
-                shift_affordance_classifier, q_value, action_probs,policy_depth_features = \
+                 q_value, action_probs,policy_depth_features = \
                 self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
+
 
             assert torch.isnan(q_value).any()==False,f'{q_value}'
             assert torch.isnan(action_probs).any()==False,f'{action_probs}'
 
-            view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
-            target_value=q_value[0, 0]
-            view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            target_value=q_value[0, 2]
-            view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            continue
+            # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
+            # target_value=q_value[0, 0]
+            # view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            # target_value=q_value[0, 2]
+            # view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            # continue
 
             loss=torch.tensor([0.],device=q_value.device)
+            value_loss=torch.tensor([0.],device=q_value.device)
             for j in range(b):
                 mask=masks[j]
                 pc=pcs[j]
@@ -213,13 +226,13 @@ class TrainPolicyNet:
                 target_mask_ = target_mask_predictions > 0.5
                 background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 objects_mask = background_class_predictions <= 0.5
-                shift_appealing_j=shift_appealing.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                # shift_appealing_j=shift_appealing.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 gripper_grasp_value=q_value[j,0][mask]
                 suction_grasp_value=q_value[j,1][mask]
                 gripper_shift_value=q_value[j,2][mask]
                 suction_shift_value=q_value[j,3][mask]
 
-                target_object_points=pc[target_mask_.cpu().numpy()]
+                target_object_points=pc[target_mask_.detach().cpu().numpy()]
                 # view_npy_open3d(pc=object_points)
 
                 def sample_(sampling_p):
@@ -237,7 +250,7 @@ class TrainPolicyNet:
                     return index, label
 
                 '''gripper grasp sampling'''
-                sampling_p=torch.rand_like(gripper_grasp_value)
+                sampling_p=torch.rand_like(gripper_grasp_value,device='cpu')
                 for k in range(100):
                     shared_index,label=sample_(sampling_p)
                     is_object=objects_mask[shared_index]
@@ -245,10 +258,10 @@ class TrainPolicyNet:
                     # shift_weight=shift_appealing_j[shared_index].item()
 
                     '''higher value for objects closer to the target'''
-                    loss+=(gripper_grasp_value[shared_index]-label*is_object*0.5)**2
-                    loss+=(suction_grasp_value[shared_index]-label*is_object*0.5)**2
-                    loss+=(gripper_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
-                    loss+=(suction_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
+                    value_loss+=(gripper_grasp_value[shared_index]-label*is_object*0.5)**2
+                    value_loss+=(suction_grasp_value[shared_index]-label*is_object*0.5)**2
+                    value_loss+=(gripper_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
+                    value_loss+=(suction_shift_value[shared_index]-label*(1+is_bin)*0.5)**2
 
                     # print('Gripper grasp initialization result: ',((pred[0]>=pred[1])==(label[0]>=label[1])).item())
             '''adapt policy net to value net'''
@@ -258,12 +271,25 @@ class TrainPolicyNet:
             policy_label = F.softmax(policy_label, dim=-1)
             policy_pred=action_probs.reshape(policy_label.shape[0], -1)
 
-            loss+=((policy_pred-policy_label)**2).mean()
+            policy_loss=((policy_pred-policy_label)**2).mean()
+            representation_transfer_loss=((policy_depth_features-action_depth_features)**2).mean()
+            distillation_loss=((griper_grasp_score-ref_griper_grasp_score)**2).mean()
+            distillation_loss+=((suction_grasp_score-ref_suction_grasp_score)**2).mean()
 
-            loss+=((policy_depth_features-action_depth_features)**2).mean()
+            loss+=value_loss
+            loss+=policy_loss
+            loss+=representation_transfer_loss*0.1
+            loss+=distillation_loss*1000
+
+            self.ini_policy_moving_loss.update(policy_loss.item())
+            self.ini_value_moving_loss.update(value_loss.item())
+            self.representation_transfer_moving_loss.update(representation_transfer_loss.item())
+            self.distillation_moving_loss.update(distillation_loss.item())
 
             loss.backward()
             self.model_wrapper.optimizer.step()
+            self.model_wrapper.optimizer.zero_grad()
+            self.model_wrapper.model.zero_grad()
 
             pi.step(i)
         pi.end()
@@ -273,7 +299,7 @@ class TrainPolicyNet:
         data_loader=self.init_quality_data_loader(file_ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         # assert size==len(file_ids)
-
+        cloned_model=copy.deepcopy(self.model_wrapper.model)
         for i, batch in enumerate(data_loader, 0):
 
             rgb, depth,mask, pose_7, gripper_pixel_index, \
@@ -308,10 +334,11 @@ class TrainPolicyNet:
                 normal_stack[j, :, s_pix_A, s_pix_B] = normal[j]
 
             griper_grasp_score, suction_grasp_score, \
-                shift_affordance_classifier, q_value, action_probs = \
+                 q_value, action_probs,_ = \
                 self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, mask)
 
-            # reversed_decay_ = lambda scores:  torch.clamp(torch.ones_like(scores) - scores, 0).mean()
+            with torch.no_grad():
+                _, _, ref_q_value, ref_action_probs ,_= cloned_model(rgb, depth.clone(), pose_7_stack, normal_stack, mask)
 
             '''accumulate loss'''
             loss = torch.tensor(0., device=rgb.device)*griper_grasp_score.mean()
@@ -345,7 +372,14 @@ class TrainPolicyNet:
 
                     loss += l
 
+            distillation_loss=((q_value-ref_q_value)**2).mean()+((action_probs-ref_action_probs)**2).mean()
+            loss+=distillation_loss*1000
+
+            self.distillation_moving_loss.update(distillation_loss.item())
+
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.model_wrapper.model.parameters(),2.0)
             self.model_wrapper.optimizer.step()
 
             pi.step(i)
@@ -358,12 +392,22 @@ class TrainPolicyNet:
 
             self.gripper_sampling_rate.view()
 
+            self.ini_policy_moving_loss.view()
+            self.ini_value_moving_loss.view()
+            self.representation_transfer_moving_loss.view()
+            self.distillation_moving_loss.view()
+
 
     def save_statistics(self):
         self.gripper_quality_net_statistics.save()
         self.suction_quality_net_statistics.save()
 
         self.gripper_sampling_rate.save()
+
+        self.ini_policy_moving_loss.save()
+        self.ini_value_moving_loss.save()
+        self.representation_transfer_moving_loss.save()
+        self.distillation_moving_loss.save()
 
     def export_check_points(self):
         self.model_wrapper.export_model()
@@ -385,8 +429,10 @@ if __name__ == "__main__":
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
+        cuda_memory_report()
+
         train_action_net.policy_initialization(max_size=10)
-        # train_action_net.step_quality_training(max_size=30)
+        train_action_net.step_quality_training(max_size=30)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
