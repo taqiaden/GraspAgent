@@ -103,7 +103,7 @@ def loop():
             '''get parameters'''
             pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
             pc = transform_to_camera_frame(pc, reverse=True)
-            normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
+            # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()
             # spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
             suction_head_predictions=suction_quality_classifier[j, 0][mask]

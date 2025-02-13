@@ -11,7 +11,6 @@ learning_rate=1e-4
 
 online_data2=online_data2()
 
-
 class PPOMemory():
     def __init__(self):
         '''episodic buffer containers'''''
@@ -26,15 +25,8 @@ class PPOMemory():
         self.last_ending_index=None # the end index of the last completed episode
         self.is_end_of_episode=deque([])
         self.episodes_counter=0 # track the number of completed episodes in the buffer
-        self.episodic_buffer_file_ids=deque([])
+        self.file_ids=deque([])
 
-        '''quality buffer containers'''''
-        # This buffer will be used to train the quality head, specifically, we maintain track of grasp and shift success.
-        self.is_grasp=deque([])
-        self.use_gripper=deque([])
-        self.grasp_result=deque([])
-        self.shift_result=deque([])
-        self.non_episodic_buffer_file_ids=deque([])
 
     def append_to_policy_buffer(self, action_obj:Action):
         self.actions_obj_list.append(action_obj)
@@ -43,14 +35,7 @@ class PPOMemory():
         self.is_synchronous.append(action_obj.is_synchronous)
         self.action_indexes.append(action_obj.action_index)
         self.point_indexes.append(action_obj.point_index)
-        self.episodic_buffer_file_ids.append(action_obj.file_id)
-
-    def append_to_quality_buffer(self,action_obj:Action):
-        self.is_grasp.append(action_obj.is_grasp)
-        self.use_gripper.append(action_obj.use_gripper_arm)
-        self.grasp_result.append(action_obj.grasp_result)
-        self.shift_result.append(action_obj.shift_result)
-        self.non_episodic_buffer_file_ids.append(action_obj.file_id)
+        self.file_ids.append(action_obj.file_id)
 
     def push(self, action_obj:Action):
         if action_obj.policy_index==0:
@@ -60,8 +45,7 @@ class PPOMemory():
             self.effort_penalty(action_obj)
             self.is_end_of_episode.append(0)
         elif action_obj.policy_index==1:
-            '''2) action is sampled from the determinstic policy'''
-            self.append_to_quality_buffer(action_obj)
+            '''2) action is sampled from the deterministic policy'''
 
             '''task end successfully'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
@@ -73,7 +57,6 @@ class PPOMemory():
                 self.update_advantages()
         elif action_obj.policy_index==2:
             '''3) action is sampled from the random policy'''
-            self.append_to_quality_buffer(action_obj)
 
             '''task end with failure'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
@@ -138,7 +121,7 @@ class PPOMemory():
         return advantage
 
     def pop_policy_buffer(self):
-        if len(self.episodic_buffer_file_ids)>max_policy_buffer_size:
+        if len(self.file_ids)>max_policy_buffer_size:
             for i in range(3):
                 '''update episode counter'''
                 if self.is_end_of_episode[0]==1:
@@ -153,22 +136,12 @@ class PPOMemory():
                 self.advantages.popleft()
                 self.is_end_of_episode.popleft()
                 self.is_synchronous.popleft()
-                self.episodic_buffer_file_ids.popleft()
+                self.file_ids.popleft()
                 '''move the index of the last episode ending'''
                 self.last_ending_index-=1
 
-    def pop_quality_buffer(self):
-        if len(self.non_episodic_buffer_file_ids) > max_quality_buffer_size:
-            for i in range(3):
-                self.is_grasp.popleft()
-                self.use_gripper.popleft()
-                self.grasp_result.popleft()
-                self.shift_result.popleft()
-                self.non_episodic_buffer_file_ids.popleft()
-
     def pop(self):
         self.pop_policy_buffer()
-        self.pop_quality_buffer()
 
     def __len__(self):
         return len(self.actions_obj_list)

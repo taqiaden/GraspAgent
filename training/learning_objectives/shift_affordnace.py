@@ -6,7 +6,7 @@ from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_effective_length=0.05
+shift_effective_length=0.07
 shift_execution_length=0.15
 
 shift_elevation_threshold = 0.00
@@ -100,7 +100,7 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     # shift_mask = get_shift_mask(pc, shifted_start_point, end_point, spatial_mask)
     shift_result=True
-    start_randomization_scope=0.003
+    start_randomization_scope=0.001
     end_randomization_scope=0.03
 
     for i in range(5):

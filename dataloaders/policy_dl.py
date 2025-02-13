@@ -32,7 +32,7 @@ class GraspQualityDataset(data.Dataset):
 
         return rgb,depth[np.newaxis,:,:],mask[np.newaxis,:,:],pose_7,gripper_pixel_index,\
                suction_pixel_index,gripper_score,\
-               suction_score,normal,used_gripper,used_suction
+               suction_score,normal,used_gripper,used_suction,target_index
 
     def __len__(self):
         return len(self.files_indexes)

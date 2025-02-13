@@ -1,6 +1,5 @@
 import subprocess
 import smbclient.path
-
 from lib.dataset_utils import online_data2
 import numpy as np
 import torch
@@ -143,6 +142,7 @@ class GraspAgent():
         self.valid_actions_on_target_mask=None
         self.seg_mask=None
         self.seize_policy=None
+        self.tmp_occupation_mask=None
 
         '''track task sequence'''
         self.run_sequence=0
@@ -170,6 +170,7 @@ class GraspAgent():
         self.mask_numpy=None
         self.seg_mask=None
         self.seize_policy=None
+        self.tmp_occupation_mask=None
 
     def report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
@@ -298,6 +299,7 @@ class GraspAgent():
     def next_action(self,sample_from_target_actions=False):
         selected_policy = self.seize_policy if sample_from_target_actions else self.clear_policy
         mask_=self.valid_actions_on_target_mask if sample_from_target_actions else self.valid_actions_mask
+        mask_=mask_ & self.tmp_occupation_mask
         dist=MaskedCategorical(probs=selected_policy,mask=mask_)
         flattened_action_index= dist.sample()
         if sample_from_target_actions:
@@ -332,6 +334,8 @@ class GraspAgent():
                                  suction_grasp_mask,gripper_shift_mask,suction_shift_mask,self.target_object_mask],dim=1)
 
         return quality_masks
+
+
     def inputs(self,depth,rgb,args):
         self.depth=depth
         self.rgb=rgb
@@ -342,7 +346,7 @@ class GraspAgent():
         view_image(self.mask_numpy.astype(np.float64))
 
     def model_inference(self):
-        pr.title('model inference')
+        pr.title('Inference')
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
         rgb_torch = torch.from_numpy(self.rgb).permute(2,0,1)[None, ...].to('cuda').float()
 
@@ -366,8 +370,6 @@ class GraspAgent():
         suction_shift_scope=self.get_suction_shift_reachability(voxel_pc_tensor,self.normals)
 
         '''grasp/shift with the arm of best reachability'''
-        gripper_grasp_scope[suction_grasp_scope>gripper_grasp_scope]*=0.
-        suction_grasp_scope[gripper_grasp_scope>suction_grasp_scope]*=0.
         gripper_shift_scope[suction_shift_scope>gripper_shift_scope]*=0.
         suction_shift_scope[gripper_shift_scope>suction_shift_scope]*=0.
 
@@ -383,7 +385,7 @@ class GraspAgent():
         '''policy net output'''
         griper_grasp_score, suction_grasp_score,\
          q_value, clear_policy, policy_depth_features = \
-            self.policy_net(rgb_torch,gripper_pose, suction_direction,self.target_object_mask.float())
+            self.policy_net(rgb_torch,depth_torch,gripper_pose, suction_direction,self.target_object_mask.float())
 
         '''reshape'''
         griper_object_collision_classifier=griper_collision_classifier[0,0][mask]
@@ -418,8 +420,8 @@ class GraspAgent():
         gripper_shift_reachablity_mask=gripper_shift_scope>0.5
         suction_shift_reachablity_mask=suction_shift_scope>0.5
 
-        view_mask(self.voxel_pc,background_class<0.5)
-        view_mask(self.voxel_pc,shift_appealing>0.5)
+        # view_mask(self.voxel_pc,background_class<0.5)
+        # view_mask(self.voxel_pc,shift_appealing>0.5)
         # view_mask(self.voxel_pc,griper_grasp_score * object_mask )
         # view_mask(self.voxel_pc,suction_grasp_score * object_mask )
 
@@ -483,13 +485,26 @@ class GraspAgent():
         self.valid_actions_mask = self.valid_actions_mask.reshape(-1)
         self.valid_actions_on_target_mask = self.valid_actions_on_target_mask.reshape(-1)
 
+    def report_current_scene_metrics(self):
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1,4)
+        self.valid_actions_on_target_mask=self.valid_actions_on_target_mask.reshape(-1,4)
+        print(Fore.CYAN)
+        '''on target'''
+        print(f'Available grasps on the target object/s is {(self.valid_actions_on_target_mask[:,0]).sum()} for gripper and {self.valid_actions_on_target_mask[:,1].sum()} for suction')
 
+        '''clear actions'''
+        print( f'Total action space includes {self.n_grasps} grasps and {self.n_shifts} shifts')
+        print(f'Total available grasps are  {self.valid_actions_mask[:,0].sum()} using gripper and {self.valid_actions_mask[:,1].sum()} using suction')
+        print(f'Total available shifts are  {self.valid_actions_mask[:,2].sum()} using gripper and {self.valid_actions_mask[:,3].sum()} using suction')
+
+        print(Fore.RESET)
+        self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
+        self.valid_actions_on_target_mask=self.valid_actions_on_target_mask.reshape(-1)
 
     def view_predicted_normals(self):
         view_npy_open3d(pc=self.voxel_pc,normals=self.normals.cpu().numpy())
 
     def dense_view(self):
-        print(Fore.CYAN, f'Action space includes {self.n_grasps} grasps and {self.n_shifts} shifts',Fore.RESET)
         self.view_valid_actions_mask()
         # multi_mask_view(self.voxel_pc,[self.gripper_grasp_mask,self.suction_grasp_mask,self.gripper_shift_mask,self.suction_shift_mask])
         # view_mask(self.voxel_pc, self.gripper_grasp_mask, pivot=0.5)
@@ -582,13 +597,15 @@ class GraspAgent():
                 self.suction_processing(action_obj)
 
     def mask_arm_occupancy(self,action_obj):
-        self.valid_actions_mask=self.valid_actions_mask.reshape(-1,4)
+        tmp_occupation_mask=torch.ones_like(self.valid_actions_mask)
+
+        tmp_occupation_mask=tmp_occupation_mask.reshape(-1,4)
 
         '''mask occupied arm'''
         if action_obj.use_gripper_arm:
-            self.valid_actions_mask[:, [0, 2]]=False
+            tmp_occupation_mask[:, [0, 2]]=False
         else:
-            self.valid_actions_mask[:, [1, 3]]=False
+            tmp_occupation_mask[:, [1, 3]]=False
 
         '''mask occupied space'''
         normal=action_obj.normal
@@ -631,9 +648,9 @@ class GraspAgent():
         self.first_action_mask=occupancy_mask
         # print(occupancy_mask.shape)
         # print(self.valid_actions_mask.shape)
-        self.valid_actions_mask[occupancy_mask]=False
-        self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
-        self.valid_actions_on_target_mask=self.valid_actions_on_target_mask & self.valid_actions_mask
+        tmp_occupation_mask[occupancy_mask]=False
+        tmp_occupation_mask=tmp_occupation_mask.reshape(-1)
+        return tmp_occupation_mask
 
     def view_valid_actions_mask(self):
         four_pc_stack = np.stack([self.voxel_pc, self.voxel_pc, self.voxel_pc, self.voxel_pc])
@@ -660,6 +677,8 @@ class GraspAgent():
         second_action_obj=Action()
         self.first_action_mask=None
 
+        self.tmp_occupation_mask=torch.ones_like(self.valid_actions_mask)
+
         '''first action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
         available_actions_on_target=torch.count_nonzero(self.valid_actions_on_target_mask).item()
@@ -673,28 +692,24 @@ class GraspAgent():
                 first_action_obj=action_obj
                 if i<available_actions_on_target:first_action_obj.policy_index=1
                 if action_obj.is_grasp:
-                    self.mask_arm_occupancy(action_obj)
+                    self.tmp_occupation_mask=self.mask_arm_occupancy(action_obj)
                 break
 
         if not first_action_obj.is_executable: exit('No executable action found ...')
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
 
-        if first_action_obj.policy_index==1:
-            self.valid_actions_mask=self.valid_actions_on_target_mask
-        else:
-            self.valid_actions_mask = self.valid_actions_mask.reshape(-1, 4)
-            self.valid_actions_mask[:, 2:]=False  # simultaneous operation of both arms are for grasp actions only
-            self.valid_actions_mask=self.valid_actions_mask.reshape(-1)
+        # if first_action_obj.policy_index==1:
+        #     self.tmp_occupation_mask=self.tmp_occupation_mask & self.valid_actions_on_target_mask
 
         if first_action_obj.is_shift or single_arm_operation_mode:
             return first_action_obj, second_action_obj
 
         '''second action'''
-        total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
+        # total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
         available_actions_on_target = torch.count_nonzero(self.valid_actions_on_target_mask).item()
-        for i in range(total_available_actions):
-            flattened_action_index, probs, value = self.next_action(sample_from_target_actions=i<available_actions_on_target)
+        for i in range(available_actions_on_target):
+            flattened_action_index, probs, value = self.next_action(sample_from_target_actions=True)
             unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0], 4))
             action_obj = Action(point_index=unflatten_index[0],action_index=unflatten_index[1], probs=probs, value=value)
             self.process_action(action_obj)
@@ -783,68 +798,81 @@ class GraspAgent():
 
         return first_action_obj,second_action_obj
 
+    def report_result(self,first_action_obj,second_action_obj,img_grasp_pre, img_suction_pre,img_main_pre):
+        if first_action_obj.policy_index==1:self.run_sequence=0
+
+        # img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
+        img_suction_after, img_grasp_after,img_main_after = get_side_bins_RGB_images()
+
+        '''save feedback to data pool'''
+        if first_action_obj.robot_feedback == 'Succeed':
+            first_action_obj.executed=True
+            second_action_obj.executed=True
+            if first_action_obj.is_shift:
+                first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
+
+            if first_action_obj.use_gripper_arm:
+                gripper_action=first_action_obj
+                suction_action=second_action_obj
+            else:
+                gripper_action = second_action_obj
+                suction_action = first_action_obj
+
+            '''check changes in side bins'''
+            if gripper_action.is_grasp:
+                gripper_action.grasp_result=check_image_similarity2(img_grasp_pre, img_grasp_after)
+                if gripper_action.grasp_result is None:
+                    print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
+                elif gripper_action.grasp_result:
+                    print(Fore.GREEN, 'A new object is detected at the gripper side of the bin',Fore.RESET)
+                else:
+                    print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
+
+            if suction_action.is_grasp:
+                suction_action.grasp_result=check_image_similarity2(img_suction_pre, img_suction_after)
+                if suction_action.grasp_result is None:
+                    print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
+                elif suction_action.grasp_result:
+                    print(Fore.GREEN, 'A new object is detected at the suction side of the bin',Fore.RESET)
+                else:
+                    print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
+
+            '''save action instance'''
+            assert gripper_action.result is not None or suction_action.result is not None
+            save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
+            self.run_sequence+=1
+
+            '''update buffer and tracker'''
+            if gripper_action.is_executable:
+                self.buffer.push(gripper_action)
+                self.data_tracker.push(gripper_action)
+                self.buffer_modify_alert=True
+                self.data_tracker_modify_alert=True
+            if suction_action.is_executable:
+                self.buffer.push(suction_action)
+                self.data_tracker.push(suction_action)
+                self.buffer_modify_alert=True
+                self.data_tracker_modify_alert=True
+        else:
+            first_action_obj.executed=False
+            second_action_obj.executed=False
+
     def process_feedback(self,first_action_obj:Action,second_action_obj:Action, img_grasp_pre, img_suction_pre,img_main_pre):
         pr.title('process feedback')
+        new_state_is_avaliable=False
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset':
             trigger_new_perception()
-        if  report_result:
-            if first_action_obj.policy_index==1:self.run_sequence=0
+            new_state_is_avaliable=True
 
-            # img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
-            img_suction_after, img_grasp_after,img_main_after = get_side_bins_RGB_images()
+        if report_result:
+            self.report_result(first_action_obj,second_action_obj,img_grasp_pre, img_suction_pre,img_main_pre)
 
-            '''save feedback to data pool'''
-            if first_action_obj.robot_feedback == 'Succeed':
-                first_action_obj.executed=True
-                second_action_obj.executed=True
-                if first_action_obj.is_shift:
-                    first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
+        return new_state_is_avaliable
 
-                if first_action_obj.use_gripper_arm:
-                    gripper_action=first_action_obj
-                    suction_action=second_action_obj
-                else:
-                    gripper_action = second_action_obj
-                    suction_action = first_action_obj
 
-                '''check changes in side bins'''
-                if gripper_action.is_grasp:
-                    gripper_action.grasp_result=check_image_similarity2(img_grasp_pre, img_grasp_after)
-                    if gripper_action.grasp_result is None:
-                        print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
-                    elif gripper_action.grasp_result:
-                        print(Fore.GREEN, 'A new object is detected at the gripper side of the bin',Fore.RESET)
-                    else:
-                        print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
 
-                if suction_action.is_grasp:
-                    suction_action.grasp_result=check_image_similarity2(img_suction_pre, img_suction_after)
-                    if suction_action.grasp_result is None:
-                        print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
-                    elif suction_action.grasp_result:
-                        print(Fore.GREEN, 'A new object is detected at the suction side of the bin',Fore.RESET)
-                    else:
-                        print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
 
-                '''save action instance'''
-                assert gripper_action.result is not None or suction_action.result is not None
-                save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
-                self.run_sequence+=1
 
-                '''update buffer and tracker'''
-                if gripper_action.is_executable:
-                    self.buffer.push(gripper_action)
-                    self.data_tracker.push(gripper_action)
-                    self.buffer_modify_alert=True
-                    self.data_tracker_modify_alert=True
-                if suction_action.is_executable:
-                    self.buffer.push(suction_action)
-                    self.data_tracker.push(suction_action)
-                    self.buffer_modify_alert=True
-                    self.data_tracker_modify_alert=True
-            else:
-                first_action_obj.executed=False
-                second_action_obj.executed=False
 
 '''conventions'''
 # normal is a vector emerge out of the surface

@@ -46,9 +46,7 @@ class PolicyNet(nn.Module):
         # 3 RGB
         # 1 target object/s mask
         self.rgb_back_bone = res_unet(in_c=5, Batch_norm=use_bn, Instance_norm=use_in,relu_negative_slope=relu_slope).to('cuda')
-        self.rgb_In=nn.InstanceNorm2d(3).to('cuda')
-        self.depth_In=nn.InstanceNorm2d(1).to('cuda')
-        self.mask_In=nn.InstanceNorm2d(1).to('cuda')
+        self.pre_IN=nn.InstanceNorm2d(5).to('cuda')
 
         self.critic=VanillaDecoder().to('cuda')
         self.actor=VanillaDecoder().to('cuda')
@@ -69,12 +67,10 @@ class PolicyNet(nn.Module):
     def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask):
         '''modalities preprocessing'''
         depth = standardize_depth(depth)
-        rgb=self.rgb_In(rgb)
-        depth=self.depth_In(depth)
 
         '''concatenate and decode'''
-        target_mask=self.mask_In(target_mask)
         input_channels=torch.cat([rgb,depth,target_mask],dim=1)
+        input_channels=self.pre_IN(input_channels)
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 

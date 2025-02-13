@@ -1,5 +1,4 @@
 import copy
-
 import numpy as np
 import torch
 from colorama import Fore
@@ -131,7 +130,6 @@ class TrainActionNet:
 
     def initialize(self,n_samples=None):
         self.n_samples=n_samples
-
         self.prepare_data_loader()
 
         '''Moving rates'''

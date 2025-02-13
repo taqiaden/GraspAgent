@@ -1,6 +1,6 @@
 import copy
+import os
 import time
-
 import numpy as np
 import torch
 from torch.distributions import Categorical
@@ -9,6 +9,8 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
 from dataloaders.policy_dl import GraspQualityDataset
+from lib.IO_utils import load_pickle, save_pickle
+from lib.Multible_planes_detection.plane_detecttion import cache_dir
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
@@ -28,6 +30,8 @@ from visualiztion import view_npy_open3d
 
 buffer_file='buffer.pkl'
 action_data_tracker_path=r'online_data_dict.pkl'
+cache_name='clustering'
+
 
 online_data2=online_data2()
 
@@ -132,8 +136,8 @@ class TrainPolicyNet:
         self.action_net=action_net.generator
 
     def policy_initialization(self,max_size=10,batch_size=1):
-        file_ids = self.experience_sampling(max_size)
-        data_loader = self.init_quality_data_loader(file_ids, batch_size)
+        ids = self.experience_sampling(max_size)
+        data_loader = self.init_quality_data_loader(ids, batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         # assert size==len(file_ids)
         cloned_model=copy.deepcopy(self.model_wrapper.model)
@@ -141,15 +145,14 @@ class TrainPolicyNet:
 
             rgb, depth, target_masks, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
-                suction_score, normal, used_gripper, used_suction = batch
+                suction_score, normal, used_gripper, used_suction,file_ids = batch
 
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             target_masks = target_masks.cuda().float()
             depth = depth.cuda().float()
 
-
             b = rgb.shape[0]
-
+            m = 100
 
             '''action space'''
             if self.action_net is None: self.initialize_action_net()
@@ -172,7 +175,14 @@ class TrainPolicyNet:
                     target_mask_predictions = target_masks.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                     target_mask_ = target_mask_predictions > 0.5
                     object_points = pc[target_mask_.cpu().numpy()]
-                    clusters_label=dbscan_clustering(object_points,view=False)
+
+                    cluster_file_path = cache_dir+cache_name+'/' + str(file_ids[j].item()) + '.pkl'
+                    if os.path.exists(cluster_file_path):
+                        clusters_label=load_pickle(cluster_file_path)
+                    else:
+                        clusters_label=dbscan_clustering(object_points,view=False)
+                        save_pickle(cluster_file_path, clusters_label)
+
                     sets_=set(clusters_label)
                     sets_=[i for i in sets_ if i>=0]
                     counts_=[(clusters_label==x).sum() for x in sets_ ]
@@ -197,7 +207,6 @@ class TrainPolicyNet:
                 ref_griper_grasp_score, ref_suction_grasp_score, \
                      _, _,_ = \
                     cloned_model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
-
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
@@ -226,7 +235,6 @@ class TrainPolicyNet:
                 target_mask_ = target_mask_predictions > 0.5
                 background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 objects_mask = background_class_predictions <= 0.5
-                # shift_appealing_j=shift_appealing.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 gripper_grasp_value=q_value[j,0][mask]
                 suction_grasp_value=q_value[j,1][mask]
                 gripper_shift_value=q_value[j,2][mask]
@@ -251,7 +259,7 @@ class TrainPolicyNet:
 
                 '''gripper grasp sampling'''
                 sampling_p=torch.rand_like(gripper_grasp_value,device='cpu')
-                for k in range(100):
+                for k in range(m):
                     shared_index,label=sample_(sampling_p)
                     is_object=objects_mask[shared_index]
                     is_bin=~is_object
@@ -276,9 +284,9 @@ class TrainPolicyNet:
             distillation_loss=((griper_grasp_score-ref_griper_grasp_score)**2).mean()
             distillation_loss+=((suction_grasp_score-ref_suction_grasp_score)**2).mean()
 
-            loss+=value_loss
+            loss+=value_loss/m
             loss+=policy_loss
-            loss+=representation_transfer_loss*0.1
+            loss+=representation_transfer_loss*0.01
             loss+=distillation_loss*1000
 
             self.ini_policy_moving_loss.update(policy_loss.item())
@@ -295,8 +303,8 @@ class TrainPolicyNet:
         pi.end()
 
     def step_quality_training(self,max_size=100,batch_size=1):
-        file_ids=self.experience_sampling(max_size)
-        data_loader=self.init_quality_data_loader(file_ids,batch_size)
+        ids=self.experience_sampling(max_size)
+        data_loader=self.init_quality_data_loader(ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         # assert size==len(file_ids)
         cloned_model=copy.deepcopy(self.model_wrapper.model)
@@ -304,7 +312,7 @@ class TrainPolicyNet:
 
             rgb, depth,mask, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
-                suction_score, normal, used_gripper, used_suction = batch
+                suction_score, normal, used_gripper, used_suction,file_ids = batch
 
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             mask = mask.cuda().float()
@@ -426,26 +434,33 @@ if __name__ == "__main__":
 
     wait = wi('Begin synchronized trianing')
 
+    counter=0
+
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
-        cuda_memory_report()
 
+        '''test code'''
         train_action_net.policy_initialization(max_size=10)
         train_action_net.step_quality_training(max_size=30)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
-        # if new_data_tracker:
-        #     train_action_net.step_quality_training(max_size=10)
-        #     train_action_net.export_check_points()
-        #     train_action_net.save_statistics()
-        #     train_action_net.view_result()
-        # else:
-        #     wait.step(0.5)
-        # if train_action_net.training_trigger:
-        #     train_action_net.initialize_model()
-        #     train_action_net.synchronize_buffer()
-        #     train_action_net.step_quality_training()
-        # else:
-        #     time.sleep(0.5)
+        continue
+
+
+        '''online learning'''
+        if new_data_tracker:
+            cuda_memory_report()
+
+            if counter%2==0:
+                train_action_net.policy_initialization(max_size=10)
+            else:
+                train_action_net.step_quality_training(max_size=30)
+            train_action_net.export_check_points()
+            train_action_net.save_statistics()
+            train_action_net.view_result()
+        else:
+            wait.step(0.5)
+
+        counter+=1

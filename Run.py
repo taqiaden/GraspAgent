@@ -22,7 +22,7 @@ grasp_agent = GraspAgent(args)
 grasp_agent.initialize_check_points()
 grasp_agent.report()
 
-# trigger_new_perception()
+trigger_new_perception()
 
 while True:
     # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
@@ -40,18 +40,21 @@ while True:
         # view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
         grasp_agent.model_inference()
+        grasp_agent.report_current_scene_metrics()
         # grasp_agent.view_mask_as_2dimage()
-        # grasp_agent.dense_view()
         # grasp_agent.view_predicted_normals()
-        '''make decision'''
-        first_action_obj,second_action_obj=grasp_agent.pick_action()
-        # grasp_agent.actions_view(first_action_obj,second_action_obj)
-        if first_action_obj is not None and not simulation_mode:
-            '''execute action/s'''
-            first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
-            '''wait'''
-            first_action_obj,second_action_obj =grasp_agent.wait_robot_feedback(first_action_obj,second_action_obj)
-            '''report result'''
-            grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
-        '''clear dense data'''
+        while True:
+            grasp_agent.dense_view()
+            '''make decision'''
+            first_action_obj,second_action_obj=grasp_agent.pick_action()
+            # grasp_agent.actions_view(first_action_obj,second_action_obj)
+            if first_action_obj is not None and not simulation_mode:
+                '''execute action/s'''
+                first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
+                '''wait'''
+                first_action_obj,second_action_obj =grasp_agent.wait_robot_feedback(first_action_obj,second_action_obj)
+                '''report result'''
+                new_state_is_avaliable=grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
+                if new_state_is_avaliable: break
+            '''clear dense data'''
         grasp_agent.clear()
