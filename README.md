@@ -18,8 +18,6 @@ Part of the code is developed by Daheng Li, a senior member at RLIS Lab, CAISA, 
 
 ## Contact
 
-For inquires, please contact Taqiaden via the email address: taqiaden@gmail.com (whatsapp +967 774 631 499)
-
 
 ## Prerqusties
 
