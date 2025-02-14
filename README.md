@@ -22,6 +22,5 @@ Part of the code is developed by Daheng Li, a senior member at RLIS Lab, CAISA, 
 ## Prerqusties
 
 ```http
-  Python 3.6.13 
 ```
 
