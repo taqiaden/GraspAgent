@@ -38,6 +38,8 @@ class PPOMemory():
 
     def push(self, action_obj:Action):
         print('policy index = ',action_obj.policy_index)
+        if action_obj.is_grasp:
+            self.non_episodic_file_ids.append(action_obj.file_id)
         if action_obj.policy_index==0:
             '''1) action is sampled from the stochastic policy'''
             self.append_to_policy_buffer(action_obj)
@@ -64,6 +66,7 @@ class PPOMemory():
                 self.negative_reward()
                 self.is_end_of_episode[-1]=1
                 self.update_advantages()
+
 
     def effort_penalty(self,action_obj:Action):
         assert len(self.rewards)==len(self.episodic_file_ids)-1

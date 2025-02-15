@@ -4,9 +4,8 @@ import torch
 from Configurations.run_config import simulation_mode, activate_segmentation_queries
 from Grasp_Agent_ import GraspAgent
 from lib.dataset_utils import configure_smbclient
-from lib.image_utils import depth_to_gray_scale, view_image
-from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth, get_scene_RGB, \
-    get_side_bins_RGB_images
+from lib.image_utils import depth_to_gray_scale, view_image, check_image_similarity
+from process_perception import trigger_new_perception, get_side_bins_images, get_scene_depth, get_scene_RGB
 from registration import view_colored_point_cloud
 
 configure_smbclient()
@@ -26,7 +25,7 @@ trigger_new_perception()
 
 while True:
     # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
-    img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_RGB_images()
+    img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
 
     with torch.no_grad():
         '''get modalities'''
@@ -43,8 +42,9 @@ while True:
         # grasp_agent.report_current_scene_metrics()
         # grasp_agent.view_mask_as_2dimage()
         # grasp_agent.view_predicted_normals()
+
         while True:
-            grasp_agent.dense_view()
+            # grasp_agent.dense_view()
             '''make decision'''
             first_action_obj,second_action_obj=grasp_agent.pick_action()
             # grasp_agent.actions_view(first_action_obj,second_action_obj)
@@ -56,5 +56,7 @@ while True:
                 '''report result'''
                 new_state_is_avaliable=grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
                 if new_state_is_avaliable: break
+            else:
+                break
             '''clear dense data'''
         grasp_agent.clear()

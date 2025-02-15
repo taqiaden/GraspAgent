@@ -26,7 +26,7 @@ from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
-from lib.image_utils import check_image_similarity, view_image, check_image_similarity2
+from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
@@ -34,7 +34,7 @@ from models.action_net import ActionNet, action_module_key, action_module_key2
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.policy_net import PolicyNet, policy_module_key
 from pose_object import vectors_to_ratio_metrics
-from process_perception import get_side_bins_images, trigger_new_perception, get_side_bins_RGB_images
+from process_perception import get_side_bins_images, trigger_new_perception
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
 from training.policy_lr import  buffer_file, action_data_tracker_path
@@ -501,7 +501,7 @@ class GraspAgent():
         self.valid_actions_on_target_mask=self.valid_actions_on_target_mask.reshape(-1)
 
     def view_predicted_normals(self):
-        view_npy_open3d(pc=self.voxel_pc,normals=self.normals.cpu().numpy())
+        view_npy_open3d(pc=self.voxel_pc,normals=self.normals)
 
     def dense_view(self):
         self.view_valid_actions_mask()
@@ -524,6 +524,7 @@ class GraspAgent():
         pcd = numpy_to_o3d(pc=self.voxel_pc, color=masked_colors)
         scene_list.append(pcd)
         o3d.visualization.draw_geometries(scene_list)
+
     def increase_gripper_penetration_distance(self,T_d,width,distance,step_factor=0.5):
         step = dist_allowance *step_factor
         n = max(int((distance_scope - distance) / step), 10)
@@ -536,6 +537,7 @@ class GraspAgent():
             else:
                 break
         return T_d
+
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
         relative_pose_5 = self.gripper_poses_5[action_obj.point_index]
@@ -552,7 +554,6 @@ class GraspAgent():
             collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
             if collision_intensity==0 and enhance_gripper_firmness:
                 T_d=self.increase_gripper_penetration_distance(T_d,width,distance,step_factor=0.25)
-
 
         # T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
         #                                                               exploration_attempts=5,
@@ -818,7 +819,7 @@ class GraspAgent():
         if first_action_obj.policy_index==1:self.run_sequence=0
 
         # img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
-        img_suction_after, img_grasp_after,img_main_after = get_side_bins_RGB_images()
+        img_suction_after, img_grasp_after,img_main_after = get_side_bins_images()
 
         '''save feedback to data pool'''
         if first_action_obj.robot_feedback == 'Succeed':
@@ -836,7 +837,7 @@ class GraspAgent():
 
             '''check changes in side bins'''
             if gripper_action.is_grasp:
-                gripper_action.grasp_result=check_image_similarity2(img_grasp_pre, img_grasp_after)
+                gripper_action.grasp_result=check_image_similarity(img_grasp_pre, img_grasp_after)
                 if gripper_action.grasp_result is None:
                     print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
                 elif gripper_action.grasp_result:
@@ -845,7 +846,7 @@ class GraspAgent():
                     print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
 
             if suction_action.is_grasp:
-                suction_action.grasp_result=check_image_similarity2(img_suction_pre, img_suction_after)
+                suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
                 if suction_action.grasp_result is None:
                     print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
                 elif suction_action.grasp_result:

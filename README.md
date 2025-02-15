@@ -37,7 +37,8 @@ torch=2.5.1
 open3d=0.18.0
 cuda=12.6
 
-Object detection and semantic segementation is implemented using the open source repository Grounded SAM 2.0
+The object detetction and segmentation queries are forwarded to a seperate unit and a mask of the traget object/s is retrived.
+We used the open source repository Grounded SAM 2.0 for this operation:
 https://github.com/IDEA-Research/Grounded-SAM-2
 
 
