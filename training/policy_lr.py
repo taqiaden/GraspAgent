@@ -15,6 +15,7 @@ from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
+from lib.loss.D_loss import binary_smooth_l1
 from lib.math_utils import seeds
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
@@ -23,6 +24,7 @@ from models.action_net import action_module_key2, ActionNet
 from models.policy_net import policy_module_key, PolicyNet
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
+from training.learning_objectives.suction_seal import l1_smooth_loss
 from training.ppo_memory import PPOMemory
 import random
 from lib.report_utils import wait_indicator as wi
@@ -35,7 +37,7 @@ cache_name='clustering'
 
 online_data2=online_data2()
 
-bce_loss= torch.nn.BCELoss()
+# bce_loss= torch.nn.BCELoss()
 
 def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
     ratio = new_policy_probs / old_policy_probs
@@ -68,10 +70,9 @@ class TrainPolicyNet:
         self.gripper_sampling_rate=MovingRate('gripper_sampling_rate')
 
         ''''statistics tracker'''
-        self.ini_policy_moving_loss=MovingRate(policy_module_key+'_ini_policy_moving_loss')
-        self.representation_transfer_moving_loss=MovingRate(policy_module_key+'_representation_transfer_moving_loss')
-        self.ini_value_moving_loss=MovingRate(policy_module_key+'_ini_value_moving_loss')
-        self.distillation_moving_loss=MovingRate(policy_module_key+'_distillation_moving_loss')
+        self.ini_policy_moving_loss=MovingRate(policy_module_key+'_ini_policy_moving_loss',min_decay=0.01)
+        self.representation_transfer_moving_loss=MovingRate(policy_module_key+'_representation_transfer_moving_loss',min_decay=0.01)
+        self.ini_value_moving_loss=MovingRate(policy_module_key+'_ini_value_moving_loss',min_decay=0.01)
 
 
     def initialize_model(self):
@@ -102,27 +103,31 @@ class TrainPolicyNet:
     def experience_sampling(self,replay_size):
         suction_size=int(self.gripper_sampling_rate.val*replay_size)
         gripper_size=replay_size-suction_size
-
         gripper_ids=self.data_tracker.gripper_grasp_sampling(gripper_size,self.gripper_quality_net_statistics.label_balance_indicator)
-
         suction_ids=self.data_tracker.suction_grasp_sampling(suction_size,self.suction_quality_net_statistics.label_balance_indicator)
 
         return gripper_ids+suction_ids
 
-    def mixed_buffer_sampling(self,buffer:PPOMemory,data_tracker:DataTracker2,batch_size,n_batches,online_ratio):
+    def mixed_buffer_sampling(self,batch_size,n_batches,online_ratio=0.5):
         total_size=int(batch_size*n_batches)
         online_size=int(total_size*online_ratio)
+        available_buffer_size=len(self.buffer.non_episodic_file_ids)
+        online_size=min(available_buffer_size,online_size)
         replay_size=total_size-online_size
-
-        '''sample from online pool'''
-        indexes=random.sample(np.arange(len(buffer.non_episodic_buffer_file_ids),dtype=np.int64),online_size)
-        online_ids=buffer.non_episodic_buffer_file_ids[indexes]
+        print(f'Sample {online_size} from online buffer and {replay_size} from experience.')
 
         '''sample from old experience'''
-        replay_ids=data_tracker.selective_grasp_sampling(size=replay_size,sampling_rates=(self.g_p_sampling_rate.val,self.g_n_sampling_rate.val,
-                                                                                    self.s_p_sampling_rate.val,self.s_n_sampling_rate.val))
-        return online_ids+replay_ids
+        replay_ids=self.experience_sampling(replay_size)
 
+        '''sample from online pool'''
+        if available_buffer_size==0:
+            print('No file is found in the recent buffer')
+            return replay_ids
+        else:
+            indexes=np.random.choice(np.arange(available_buffer_size,dtype=np.int64),online_size).tolist()
+            online_ids=[self.buffer.non_episodic_file_ids[i] for i in indexes]
+
+        return online_ids+replay_ids
 
     def init_quality_data_loader(self,file_ids,batch_size):
         dataset = GraspQualityDataset(data_pool=online_data2, file_ids=file_ids)
@@ -179,6 +184,9 @@ class TrainPolicyNet:
                     cluster_file_path = cache_dir+cache_name+'/' + str(file_ids[j].item()) + '.pkl'
                     if os.path.exists(cluster_file_path):
                         clusters_label=load_pickle(cluster_file_path)
+                        if clusters_label.shape[0]!=object_points.shape[0]:
+                            clusters_label = dbscan_clustering(object_points, view=False)
+                            save_pickle(cluster_file_path, clusters_label)
                     else:
                         clusters_label=dbscan_clustering(object_points,view=False)
                         save_pickle(cluster_file_path, clusters_label)
@@ -292,7 +300,6 @@ class TrainPolicyNet:
             self.ini_policy_moving_loss.update(policy_loss.item())
             self.ini_value_moving_loss.update(value_loss.item())
             self.representation_transfer_moving_loss.update(representation_transfer_loss.item())
-            self.distillation_moving_loss.update(distillation_loss.item())
 
             loss.backward()
             self.model_wrapper.optimizer.step()
@@ -303,7 +310,7 @@ class TrainPolicyNet:
         pi.end()
 
     def step_quality_training(self,max_size=100,batch_size=1):
-        ids=self.experience_sampling(max_size)
+        ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
         data_loader=self.init_quality_data_loader(ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
         # assert size==len(file_ids)
@@ -357,7 +364,7 @@ class TrainPolicyNet:
                     g_pix_A = gripper_pixel_index[j, 0]
                     g_pix_B = gripper_pixel_index[j, 1]
                     prediction = griper_grasp_score[j, 0, g_pix_A, g_pix_B]
-                    l=bce_loss(prediction, label)
+                    l=binary_smooth_l1(prediction, label)
 
                     self.gripper_sampling_rate.update(1)
 
@@ -371,7 +378,7 @@ class TrainPolicyNet:
                     s_pix_A = suction_pixel_index[j, 0]
                     s_pix_B = suction_pixel_index[j, 1]
                     prediction = suction_grasp_score[j, 0, s_pix_A, s_pix_B]
-                    l=bce_loss(prediction, label)
+                    l=binary_smooth_l1(prediction, label)
 
                     self.gripper_sampling_rate.update(0)
 
@@ -380,10 +387,9 @@ class TrainPolicyNet:
 
                     loss += l
 
-            distillation_loss=((q_value-ref_q_value)**2).mean()+((action_probs-ref_action_probs)**2).mean()
-            loss+=distillation_loss*1000
+            # distillation_loss=((q_value-ref_q_value)**2).mean()+((action_probs-ref_action_probs)**2).mean()
+            # loss+=distillation_loss*1000
 
-            self.distillation_moving_loss.update(distillation_loss.item())
 
             loss.backward()
 
@@ -403,7 +409,6 @@ class TrainPolicyNet:
             self.ini_policy_moving_loss.view()
             self.ini_value_moving_loss.view()
             self.representation_transfer_moving_loss.view()
-            self.distillation_moving_loss.view()
 
 
     def save_statistics(self):
@@ -415,7 +420,6 @@ class TrainPolicyNet:
         self.ini_policy_moving_loss.save()
         self.ini_value_moving_loss.save()
         self.representation_transfer_moving_loss.save()
-        self.distillation_moving_loss.save()
 
     def export_check_points(self):
         self.model_wrapper.export_model()
@@ -426,7 +430,7 @@ class TrainPolicyNet:
         self.suction_quality_net_statistics.clear()
 
 if __name__ == "__main__":
-    seeds(0)
+    # seeds(0)
     lr = 1e-4
     train_action_net = TrainPolicyNet(  learning_rate=lr)
     train_action_net.initialize_model()
@@ -434,33 +438,29 @@ if __name__ == "__main__":
 
     wait = wi('Begin synchronized trianing')
 
-    counter=0
+    # counter=0
 
     while True:
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
-
         '''test code'''
-        train_action_net.policy_initialization(max_size=10)
-        train_action_net.step_quality_training(max_size=30)
+        train_action_net.step_quality_training(max_size=10)
+        # train_action_net.policy_initialization(max_size=10)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
         continue
 
-
         '''online learning'''
         if new_data_tracker:
             cuda_memory_report()
 
-            if counter%2==0:
-                train_action_net.policy_initialization(max_size=10)
-            else:
-                train_action_net.step_quality_training(max_size=30)
+            train_action_net.policy_initialization(max_size=10)
+            train_action_net.step_quality_training(max_size=10)
             train_action_net.export_check_points()
             train_action_net.save_statistics()
             train_action_net.view_result()
         else:
             wait.step(0.5)
 
-        counter+=1
+        # counter+=1

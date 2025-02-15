@@ -58,10 +58,10 @@ if __name__ == "__main__":
     # x=np.array([0,1,0,1,0])
     # idx_nonzero, = np.nonzero(x)
     # target_index = np.random.choice(idx_nonzero)
-    print(open3d.__version__)
-    exit()
+    # print(open3d.__version__)
+    # exit()
     while True:
-        print(0.1+torch.randn((1,))/5)
+        print(0.1+torch.randn((1,))*torch.rand((1,))**3)
 
     # x=torch.rand((4,7))
     # t1=x.clone()

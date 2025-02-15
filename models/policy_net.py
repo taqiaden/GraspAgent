@@ -18,10 +18,10 @@ class QualityRegressor(nn.Module):
     def __init__(self, in_c2):
         super().__init__()
         self.att_block = att_res_mlp_LN(in_c1=64, in_c2=in_c2, out_c=1,relu_negative_slope=relu_slope).to('cuda')
-        self.sig=nn.Sigmoid()
+        # self.sig=nn.Sigmoid()
     def forward(self, features,pose_2d ):
         output_2d = self.att_block(features,pose_2d)
-        output_2d=self.sig(output_2d)
+        # output_2d=self.sig(output_2d)
         return output_2d
 
 class VanillaDecoder(nn.Module):
@@ -50,7 +50,6 @@ class PolicyNet(nn.Module):
 
         self.critic=VanillaDecoder().to('cuda')
         self.actor=VanillaDecoder().to('cuda')
-
         self.gripper_grasp = QualityRegressor( in_c2=7)
         self.suction_grasp = QualityRegressor( in_c2=3)
 
