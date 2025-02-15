@@ -3,6 +3,7 @@
 # import open3d as o3d
 # from records.training_satatistics import TrainingTracker
 import numpy as np
+import open3d
 import torch
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
@@ -57,6 +58,8 @@ if __name__ == "__main__":
     # x=np.array([0,1,0,1,0])
     # idx_nonzero, = np.nonzero(x)
     # target_index = np.random.choice(idx_nonzero)
+    print(open3d.__version__)
+    exit()
     while True:
         print(0.1+torch.randn((1,))/5)
 
