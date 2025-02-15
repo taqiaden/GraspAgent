@@ -94,14 +94,15 @@ class GripperPartSampler(nn.Module):
             beta=F.normalize(beta, dim=-1)
             dist_width=torch.clip(dist_width,0.,1.)
 
-            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')/3
-            approach_ref[:,-1]=0.67+approach_ref[:,-1]
+            approach_ref = torch.randn(size=(representation_2d.shape[0], 3), device='cuda')/2
+            approach_ref[:,-1]=0.5+approach_ref[:,-1]
             # approach_ref=F.normalize(approach_ref, dim=-1)
 
             beta_noise=torch.randn((representation_2d.shape[0],2),device='cuda')
             # beta_noise=F.normalize(beta_noise, dim=-1)
-            width_noise=1.0-torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**2
-            dist_noise=torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**3
+            # width_noise=1.0-torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**2
+            width_noise=1.-torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**2
+            dist_noise=0.1+torch.randn(size=(representation_2d.shape[0], 1), device='cuda')/5
 
             # dist_width_ref=torch.zeros((representation_2d.shape[0],2),device='cuda')
             # dist_width_ref[:,-1]+=0.99
@@ -123,7 +124,6 @@ class GripperPartSampler(nn.Module):
             pose = torch.cat([approach, beta, dist_width], dim=-1)
 
         return pose
-
 
 class SuctionPartSampler(nn.Module):
     def __init__(self):

@@ -72,6 +72,7 @@ def loop():
         depth = depth.cuda().float()  # [b,1,480.712]
         pose_7 = pose_7.cuda().float()
         b = depth.shape[0]
+        s=1
 
         '''generate grasps'''
         # gan.critic.back_bone.load_state_dict(gan.generator.back_bone.state_dict())

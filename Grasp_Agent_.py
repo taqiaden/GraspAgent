@@ -377,7 +377,6 @@ class GraspAgent():
         if activate_segmentation_queries and self.seg_mask.shape==background_class.shape:
             self.target_object_mask = (background_class <= 0.5) & self.seg_mask
         else:
-            print('No specific object is detected')
             self.target_object_mask = (background_class <= 0.5)
         self.target_object_mask[0,0][~mask]*=False
         self.mask_numpy=self.target_object_mask.squeeze().cpu().numpy()
@@ -525,7 +524,18 @@ class GraspAgent():
         pcd = numpy_to_o3d(pc=self.voxel_pc, color=masked_colors)
         scene_list.append(pcd)
         o3d.visualization.draw_geometries(scene_list)
-
+    def increase_gripper_penetration_distance(self,T_d,width,distance,step_factor=0.5):
+        step = dist_allowance *step_factor
+        n = max(int((distance_scope - distance) / step), 10)
+        for i in range(n):
+            T_d_new = shift_a_distance(T_d, step).copy()
+            collision_intensity2 = grasp_collision_detection(T_d_new, width, self.voxel_pc, visualize=False,
+                                                             with_allowance=False)
+            if collision_intensity2 == 0:
+                T_d = T_d_new
+            else:
+                break
+        return T_d
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
         relative_pose_5 = self.gripper_poses_5[action_obj.point_index]
@@ -535,13 +545,13 @@ class GraspAgent():
 
         collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
         if collision_intensity==0 and enhance_gripper_firmness:
-            step=dist_allowance/2
-            n=max(int((distance_scope-distance)/step),10)
-            for i in range(n):
-                T_d_new = shift_a_distance(T_d, step).copy()
-                collision_intensity2 = grasp_collision_detection(T_d_new, width, self.voxel_pc, visualize=False,with_allowance=False)
-                if collision_intensity2==0:T_d=T_d_new
-                else:break
+            T_d=self.increase_gripper_penetration_distance(T_d,width,distance,step_factor=0.5)
+        else:
+            '''apply zero penetration distance'''
+            T_d = shift_a_distance(T_d, - distance).copy()
+            collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
+            if collision_intensity==0 and enhance_gripper_firmness:
+                T_d=self.increase_gripper_penetration_distance(T_d,width,distance,step_factor=0.25)
 
 
         # T_d, distance, width, collision_intensity = local_exploration(T_d, width, distance, self.voxel_pc,
@@ -682,6 +692,7 @@ class GraspAgent():
         '''first action'''
         total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
         available_actions_on_target=torch.count_nonzero(self.valid_actions_on_target_mask).item()
+        visible_target=torch.any(self.target_object_mask==True)
         for i in range(total_available_actions):
 
             flattened_action_index, probs, value=self.next_action(sample_from_target_actions=i<available_actions_on_target)
@@ -691,6 +702,8 @@ class GraspAgent():
             if action_obj.is_executable:
                 first_action_obj=action_obj
                 if i<available_actions_on_target:first_action_obj.policy_index=1
+                elif visible_target: first_action_obj.policy_index=0
+                else: first_action_obj.policy_index=2
                 if action_obj.is_grasp:
                     self.tmp_occupation_mask=self.mask_arm_occupancy(action_obj)
                 break
@@ -716,6 +729,8 @@ class GraspAgent():
             if action_obj.is_executable:
                 second_action_obj=action_obj
                 if i < available_actions_on_target: second_action_obj.policy_index = 1
+                elif visible_target: first_action_obj.policy_index=0
+                else: first_action_obj.policy_index=2
                 break
 
         if second_action_obj.is_executable:
@@ -741,7 +756,8 @@ class GraspAgent():
             elif counter == 1:
                 if self.buffer_modify_alert:
                     '''dump the buffer as pickl'''
-                    save_pickle(buffer_file,self.buffer)
+                    # save_pickle(buffer_file,self.buffer)
+                    online_data2.save_pickle(buffer_file, self.buffer)
                     self.buffer_modify_alert=False
                     print('save buffer')
             elif counter == 2:
@@ -838,8 +854,8 @@ class GraspAgent():
                     print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
 
             '''save action instance'''
-            assert gripper_action.result is not None or suction_action.result is not None
-            save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
+            # assert gripper_action.result is not None or suction_action.result is not None
+            gripper_action,suction_action=save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
             self.run_sequence+=1
 
             '''update buffer and tracker'''
@@ -849,6 +865,7 @@ class GraspAgent():
                 self.buffer_modify_alert=True
                 self.data_tracker_modify_alert=True
             if suction_action.is_executable:
+                print('---',suction_action.file_id)
                 self.buffer.push(suction_action)
                 self.data_tracker.push(suction_action)
                 self.buffer_modify_alert=True
@@ -858,7 +875,7 @@ class GraspAgent():
             second_action_obj.executed=False
 
     def process_feedback(self,first_action_obj:Action,second_action_obj:Action, img_grasp_pre, img_suction_pre,img_main_pre):
-        pr.title('process feedback')
+        pr.title('Process feedback')
         new_state_is_avaliable=False
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset':
             trigger_new_perception()
@@ -868,11 +885,6 @@ class GraspAgent():
             self.report_result(first_action_obj,second_action_obj,img_grasp_pre, img_suction_pre,img_main_pre)
 
         return new_state_is_avaliable
-
-
-
-
-
 
 '''conventions'''
 # normal is a vector emerge out of the surface

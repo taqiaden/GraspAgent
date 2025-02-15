@@ -14,7 +14,6 @@ online_data2=online_data2()
 class PPOMemory():
     def __init__(self):
         '''episodic buffer containers'''''
-        self.actions_obj_list = deque([])
         self.rewards=deque([])
         self.values=deque([])
         self.advantages=deque([])
@@ -25,19 +24,20 @@ class PPOMemory():
         self.last_ending_index=None # the end index of the last completed episode
         self.is_end_of_episode=deque([])
         self.episodes_counter=0 # track the number of completed episodes in the buffer
-        self.file_ids=deque([])
+        self.episodic_file_ids=deque([])
 
+        self.non_episodic_file_ids=deque([])
 
     def append_to_policy_buffer(self, action_obj:Action):
-        self.actions_obj_list.append(action_obj)
         self.values.append(action_obj.value)
         self.probs.append(action_obj.prob)
         self.is_synchronous.append(action_obj.is_synchronous)
         self.action_indexes.append(action_obj.action_index)
         self.point_indexes.append(action_obj.point_index)
-        self.file_ids.append(action_obj.file_id)
+        self.episodic_file_ids.append(action_obj.file_id)
 
     def push(self, action_obj:Action):
+        print('policy index = ',action_obj.policy_index)
         if action_obj.policy_index==0:
             '''1) action is sampled from the stochastic policy'''
             self.append_to_policy_buffer(action_obj)
@@ -46,7 +46,6 @@ class PPOMemory():
             self.is_end_of_episode.append(0)
         elif action_obj.policy_index==1:
             '''2) action is sampled from the deterministic policy'''
-
             '''task end successfully'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
                 self.episodes_counter+=1
@@ -57,7 +56,6 @@ class PPOMemory():
                 self.update_advantages()
         elif action_obj.policy_index==2:
             '''3) action is sampled from the random policy'''
-
             '''task end with failure'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
                 self.episodes_counter+=1
@@ -68,7 +66,7 @@ class PPOMemory():
                 self.update_advantages()
 
     def effort_penalty(self,action_obj:Action):
-        assert len(self.rewards)==len(self.actions_obj_list)-1
+        assert len(self.rewards)==len(self.episodic_file_ids)-1
         '''penalize each action to reduce the effort needed to reach the target'''
         k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
         self.rewards.append(-0.4/k)
@@ -76,20 +74,18 @@ class PPOMemory():
     def positive_reward(self):
         '''add reward to the last action/s that leads to grasp the target in the current action'''
         if len(self.probs)>1:
+            self.rewards[-1] += 1
             if self.is_synchronous[-1]:
                 # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2:]+=1
-            else:
-                self.rewards[-1:]+=1
+                self.rewards[-2]+=1
 
     def negative_reward(self):
         '''dedict reward to the last action/s that leads to the disappearance of the target in the new state'''
         if len(self.probs)>1:
+            self.rewards[-1] -= 1
             if self.is_synchronous[-1]:
                 # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2:]-=1
-            else:
-                self.rewards[-1:]-=1
+                self.rewards[-2]-=1
 
     def generate_batches(self,batch_size):
         '''arrange batches to the end of the last completed episode'''
@@ -121,13 +117,12 @@ class PPOMemory():
         return advantage
 
     def pop_policy_buffer(self):
-        if len(self.file_ids)>max_policy_buffer_size:
+        if len(self.episodic_file_ids)>max_policy_buffer_size:
             for i in range(3):
                 '''update episode counter'''
                 if self.is_end_of_episode[0]==1:
                     self.episodes_counter -= 1
                 '''pop oldest sample'''
-                self.actions_obj_list.popleft()
                 self.rewards.popleft()
                 self.values.popleft()
                 self.probs.popleft()
@@ -136,7 +131,7 @@ class PPOMemory():
                 self.advantages.popleft()
                 self.is_end_of_episode.popleft()
                 self.is_synchronous.popleft()
-                self.file_ids.popleft()
+                self.episodic_file_ids.popleft()
                 '''move the index of the last episode ending'''
                 self.last_ending_index-=1
 
@@ -144,4 +139,9 @@ class PPOMemory():
         self.pop_policy_buffer()
 
     def __len__(self):
-        return len(self.actions_obj_list)
+        return len(self.episodic_file_ids)
+
+if __name__ == "__main__":
+    buffer=PPOMemory()
+    x=len(buffer.file_ids)
+    print(x)

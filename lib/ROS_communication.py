@@ -70,7 +70,7 @@ def deploy_suction_shift_command( action):
     end_mat = adjust_final_matrix(end_mat, x_correction=-0.184)
     shift_end_mat = np.copy(action.transformation)
     shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
-    shift_end_mat=shift_a_distance(shift_end_mat,- 0.007)
+    shift_end_mat=shift_a_distance(shift_end_mat,- 0.009)
     shift_end_mat = adjust_final_matrix(shift_end_mat, x_correction=-0.184)
 
     save_suction_data(pre_mat, suction_pre_shift_data_path)

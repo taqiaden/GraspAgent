@@ -57,11 +57,11 @@ def depth_to_gray_scale(depth,view=False,convert_to_three_channels=True,colorize
     if view:view_image(processed_gray_image)
 
     return  processed_gray_image
-def check_image_similarity(old_image, new_image):
+def check_image_similarity(old_image, new_image,limit=70,safety_threshold=50):
     res = np.sum((old_image.astype("float") - new_image.astype("float")) ** 2)
     res /= (old_image.shape[0] * old_image.shape[1])
-    limit=100
-    safety_threshold=50
+
+
     print(f'Image res = {res}')
     if res > limit+safety_threshold:
         return 1

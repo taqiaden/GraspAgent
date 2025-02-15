@@ -65,6 +65,8 @@ def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequen
 
     print(Fore.LIGHTBLACK_EX,f'Save labeled data to : {online_data2.address}/{index}*',Fore.RESET)
 
+    return gripper_action,suction_action
+
     # tabulated data:
     # [0:3]: gripper_target_point
     # [3:6]: suction_target_point

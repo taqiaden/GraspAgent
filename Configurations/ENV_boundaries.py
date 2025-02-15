@@ -15,7 +15,7 @@ depth_lower_bound=1100.
 depth_mean=1180.
 depth_std=85.
 
-dist_allowance=0.005
+dist_allowance=0.003
 
 def median_(pair):
     return pair[0]+(pair[1]-pair[0])/2

@@ -40,7 +40,7 @@ while True:
         # view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
         grasp_agent.model_inference()
-        grasp_agent.report_current_scene_metrics()
+        # grasp_agent.report_current_scene_metrics()
         # grasp_agent.view_mask_as_2dimage()
         # grasp_agent.view_predicted_normals()
         while True:

@@ -58,7 +58,7 @@ if __name__ == "__main__":
     # idx_nonzero, = np.nonzero(x)
     # target_index = np.random.choice(idx_nonzero)
     while True:
-        print(torch.randint(low=-1,high=2,size=(1,))/2)
+        print(0.1+torch.randn((1,))/5)
 
     # x=torch.rand((4,7))
     # t1=x.clone()
