@@ -133,7 +133,7 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker:
-    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False):
+    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False,min_decay=0.001):
         self.name=name
         self.iterations_per_epoch=iterations_per_epoch
 
@@ -150,7 +150,7 @@ class TrainingTracker:
         self.convergence=self.load_convergence()
         self.momentum=self.load_momentum()
         self.decay_rate=0.001
-
+        self.min_decay=min_decay
         self.counter=self.load_counter()
         self.last_loss=None
 
@@ -159,7 +159,7 @@ class TrainingTracker:
 
     def set_decay_rate(self):
         x=0.1*(1-0.0045)**self.counter
-        self.decay_rate=max(x,0.001)
+        self.decay_rate=max(x,self.min_decay)
     @property
     def accuracy(self):
         return self.confession_matrix.accuracy

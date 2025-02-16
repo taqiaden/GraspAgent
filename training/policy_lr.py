@@ -56,9 +56,9 @@ class TrainPolicyNet:
 
         '''initialize statistics records'''
         self.gripper_quality_net_statistics = TrainingTracker(name=policy_module_key + '_gripper_quality',
-                                                              track_label_balance=True)
+                                                              track_label_balance=True,min_decay=0.01)
         self.suction_quality_net_statistics = TrainingTracker(name=policy_module_key + '_suction_quality',
-                                                              track_label_balance=True)
+                                                              track_label_balance=True,min_decay=0.01)
 
         self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
@@ -67,7 +67,7 @@ class TrainPolicyNet:
         self.buffer_time_stamp=None
         self.data_tracker_time_stamp=None
 
-        self.gripper_sampling_rate=MovingRate('gripper_sampling_rate')
+        self.gripper_sampling_rate=MovingRate('gripper_sampling_rate',min_decay=0.01)
 
         ''''statistics tracker'''
         self.ini_policy_moving_loss=MovingRate(policy_module_key+'_ini_policy_moving_loss',min_decay=0.01)
@@ -163,7 +163,10 @@ class TrainPolicyNet:
         sets_ = [i for i in sets_ if i >= 0]
         # counts_ = [(clusters_label == x).sum() for x in sets_]
         # picked_cluster_label = sets_[np.argmax(np.array(counts_))]
-
+        if len(sets_)==0:
+            # view_npy_open3d(object_points)
+            # view_image(pixel_mask[0].cpu().numpy().astype(np.float64))
+            return pixel_mask
         picked_cluster_label=np.random.randint(0,len(sets_))
         cluster_mask = clusters_label == picked_cluster_label
         cluster_mask = torch.from_numpy(cluster_mask).cuda()
@@ -179,7 +182,7 @@ class TrainPolicyNet:
 
     def policy_init_loss(self,q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=100):
         loss = torch.tensor([0.], device=q_value.device)
-        value_loss = torch.tensor([0.], device=q_value.device)
+        value_loss = torch.tensor(0., device=q_value.device)
         for j in range(q_value.shape[0]):
             mask = masks[j]
             pc = pcs[j]
@@ -190,6 +193,7 @@ class TrainPolicyNet:
             suction_grasp_value = q_value[j, 1][mask]
             gripper_shift_value = q_value[j, 2][mask]
             suction_shift_value = q_value[j, 3][mask]
+
 
             target_object_points = pc[target_mask_.detach().cpu().numpy()]
 
@@ -233,10 +237,12 @@ class TrainPolicyNet:
 
         policy_loss = ((policy_pred - policy_label) ** 2).mean()
 
+        value_loss=value_loss / sample_size
+
         self.ini_policy_moving_loss.update(policy_loss.item())
         self.ini_value_moving_loss.update(value_loss.item())
 
-        loss += value_loss / sample_size
+        loss += value_loss
         loss += policy_loss
 
         return loss
@@ -265,66 +271,11 @@ class TrainPolicyNet:
         return target_masks,objects_mask
 
 
-    def policy_initialization(self,max_size=10,batch_size=1):
-        ids = self.experience_sampling(max_size)
-        data_loader = self.init_quality_data_loader(ids, batch_size)
-        pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
-        for i, batch in enumerate(data_loader, 0):
-
-            rgb, depth, target_masks, pose_7, gripper_pixel_index, \
-                suction_pixel_index, gripper_score, \
-                suction_score, normal, used_gripper, used_suction,file_ids = batch
-
-            rgb = rgb.cuda().float().permute(0, 3, 1, 2)
-            target_masks = target_masks.cuda().float()
-            depth = depth.cuda().float()
-
-            b = rgb.shape[0]
-            w = rgb.shape[2]
-            h = rgb.shape[3]
-
-            pcs = []
-            masks = []
-            for j in range(depth.shape[0]):
-                pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
-                pc = transform_to_camera_frame(pc, reverse=True)
-
-                pcs.append(pc)
-                masks.append(mask)
-
-            target_masks,objects_mask=self.generate_random_target_mask(depth,file_ids,target_masks,pcs,masks)
-
-            # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 0]
-            # view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 2]
-            # view_image(target_value.detach().cpu().numpy().astype(np.float64))
-
-            gripper_pose = torch.zeros((b, 7, w, h), device=rgb.device)
-            suction_direction = torch.zeros((b, 3, w, h), device=rgb.device)
-
-            '''zero grad'''
-            self.model_wrapper.model.zero_grad()
-
-            griper_grasp_score, suction_grasp_score, \
-                 q_value, action_probs,policy_depth_features = \
-                self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
-
-            loss=self.policy_init_loss(q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=100)
-
-            loss.backward()
-            self.model_wrapper.optimizer.step()
-            self.model_wrapper.optimizer.zero_grad()
-            self.model_wrapper.model.zero_grad()
-
-            pi.step(i)
-        pi.end()
-
     def get_point_clouds(self,depth):
 
         pcs = []
         masks = []
-        for j in range(depth.sahpe[0]):
+        for j in range(depth.shape[0]):
             pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
             pc = transform_to_camera_frame(pc, reverse=True)
 
@@ -416,20 +367,22 @@ class TrainPolicyNet:
                 self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
 
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 0]
+            # target_value=action_probs[0, 0]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 2]
+            # target_value=action_probs[0, 2]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
 
             '''accumulate loss'''
-            loss = torch.tensor(0., device=rgb.device)*griper_grasp_quality_score.mean()
-            loss+=self.quality_loss(griper_grasp_quality_score,suction_grasp_quality_score,
+            quality_loss=self.quality_loss(griper_grasp_quality_score,suction_grasp_quality_score,
                                     gripper_score,suction_score,used_gripper,used_suction,
                                     gripper_pixel_index,suction_pixel_index)
 
 
             '''policy initialization loss'''
-            loss += self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=100)
+            policy_loss = self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=100)
+
+
+            loss = quality_loss+policy_loss
 
             loss.backward()
 
@@ -481,8 +434,8 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        # train_action_net.step_quality_training(max_size=100)
-        train_action_net.policy_initialization(max_size=10)
+        train_action_net.step_quality_training(max_size=10)
+        # train_action_net.policy_initialization(max_size=10)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
