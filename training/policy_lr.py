@@ -241,6 +241,30 @@ class TrainPolicyNet:
 
         return loss
 
+    def generate_random_target_mask(self,depth,file_ids,target_masks,pcs,masks):
+        '''action space'''
+        if self.action_net is None: self.initialize_action_net()
+
+        with torch.no_grad():
+            _, _, _, _, _ \
+                , background_class, _ = self.action_net(depth.clone(), clip=True)
+
+            for j in range(depth.shape[0]):
+                pc=pcs[j]
+                mask=masks[j]
+
+                '''pick random cluster to be the target'''
+                # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
+                background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
+                objects_mask = background_class_predictions <= 0.5
+
+                target_masks[j] = self.random_target_mask(pc, mask, background_class[j], file_id=file_ids[j])
+
+                # view_image(target_masks[j,0].cpu().numpy().astype(np.float64))
+
+        return target_masks,objects_mask
+
+
     def policy_initialization(self,max_size=10,batch_size=1):
         ids = self.experience_sampling(max_size)
         data_loader = self.init_quality_data_loader(ids, batch_size)
@@ -256,37 +280,28 @@ class TrainPolicyNet:
             depth = depth.cuda().float()
 
             b = rgb.shape[0]
+            w = rgb.shape[2]
+            h = rgb.shape[3]
 
-            '''action space'''
-            if self.action_net is None: self.initialize_action_net()
-            with torch.no_grad():
-                gripper_pose, suction_direction, _, _, _ \
-                    , background_class, action_depth_features = self.action_net(depth.clone(), clip=True)
+            pcs = []
+            masks = []
+            for j in range(depth.shape[0]):
+                pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
+                pc = transform_to_camera_frame(pc, reverse=True)
 
-                pcs=[]
-                masks=[]
-                for j in range(b):
-                    pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
-                    pc = transform_to_camera_frame(pc, reverse=True)
+                pcs.append(pc)
+                masks.append(mask)
 
-                    pcs.append(pc)
-                    masks.append(mask)
-
-                    '''pick random cluster to be the target'''
-                    # During inference this is replaced by object specific grasp segmentation using Grounded dino sam 2.0
-                    background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
-                    objects_mask = background_class_predictions <= 0.5
-
-
-                    target_masks[j]=self.random_target_mask( pc,mask,background_class[j],file_id=file_ids[j])
-
-                    # view_image(target_masks[j,0].cpu().numpy().astype(np.float64))
+            target_masks,objects_mask=self.generate_random_target_mask(depth,file_ids,target_masks,pcs,masks)
 
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
             # target_value=q_value[0, 0]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
             # target_value=q_value[0, 2]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
+
+            gripper_pose = torch.zeros((b, 7, w, h), device=rgb.device)
+            suction_direction = torch.zeros((b, 3, w, h), device=rgb.device)
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
@@ -295,12 +310,7 @@ class TrainPolicyNet:
                  q_value, action_probs,policy_depth_features = \
                 self.model_wrapper.model(rgb, depth.clone(), gripper_pose, suction_direction, target_masks)
 
-
-
             loss=self.policy_init_loss(q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=100)
-
-
-
 
             loss.backward()
             self.model_wrapper.optimizer.step()
@@ -309,6 +319,54 @@ class TrainPolicyNet:
 
             pi.step(i)
         pi.end()
+
+    def get_point_clouds(self,depth):
+
+        pcs = []
+        masks = []
+        for j in range(depth.sahpe[0]):
+            pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
+            pc = transform_to_camera_frame(pc, reverse=True)
+
+            pcs.append(pc)
+            masks.append(mask)
+
+        return pcs,masks
+
+    def quality_loss(self,griper_grasp_quality_score,suction_grasp_quality_score,gripper_score,suction_score,used_gripper,used_suction,gripper_pixel_index,suction_pixel_index):
+        loss = torch.tensor(0., device=griper_grasp_quality_score.device) * griper_grasp_quality_score.mean()
+        for j in range(griper_grasp_quality_score.shape[0]):
+            if used_gripper[j]:
+                label = gripper_score[j]
+                if label == -1: continue
+                g_pix_A = gripper_pixel_index[j, 0]
+                g_pix_B = gripper_pixel_index[j, 1]
+                prediction = griper_grasp_quality_score[j, 0, g_pix_A, g_pix_B]
+                l = binary_smooth_l1(prediction, label)
+
+                self.gripper_sampling_rate.update(1)
+
+                self.gripper_quality_net_statistics.loss = l.item()
+                self.gripper_quality_net_statistics.update_confession_matrix(label, prediction)
+                loss += l
+
+            if used_suction[j]:
+                label = suction_score[j]
+                if label == -1: continue
+                s_pix_A = suction_pixel_index[j, 0]
+                s_pix_B = suction_pixel_index[j, 1]
+                prediction = suction_grasp_quality_score[j, 0, s_pix_A, s_pix_B]
+                l = binary_smooth_l1(prediction, label)
+
+                self.gripper_sampling_rate.update(0)
+
+                self.suction_quality_net_statistics.loss = l.item()
+                self.suction_quality_net_statistics.update_confession_matrix(label, prediction)
+
+                loss += l
+
+        return loss
+
 
     def step_quality_training(self,max_size=100,batch_size=1):
         ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
@@ -332,6 +390,12 @@ class TrainPolicyNet:
             w = rgb.shape[2]
             h = rgb.shape[3]
 
+            pcs,masks=self.get_point_clouds(depth)
+
+            '''random target for policy initialization'''
+            target_masks, objects_mask = self.generate_random_target_mask(depth, file_ids, target_masks, pcs, masks)
+
+
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
 
@@ -347,10 +411,9 @@ class TrainPolicyNet:
                 pose_7_stack[j, :, g_pix_A, g_pix_B] = pose_7[j]
                 normal_stack[j, :, s_pix_A, s_pix_B] = normal[j]
 
-            griper_grasp_score, suction_grasp_score, \
+            griper_grasp_quality_score, suction_grasp_quality_score, \
                  q_value, action_probs,_ = \
                 self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
-
 
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
             # target_value=q_value[0, 0]
@@ -359,39 +422,14 @@ class TrainPolicyNet:
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
 
             '''accumulate loss'''
-            loss = torch.tensor(0., device=rgb.device)*griper_grasp_score.mean()
-            for j in range(b):
-                if used_gripper[j]:
-                    label = gripper_score[j]
-                    if label==-1:continue
-                    g_pix_A = gripper_pixel_index[j, 0]
-                    g_pix_B = gripper_pixel_index[j, 1]
-                    prediction = griper_grasp_score[j, 0, g_pix_A, g_pix_B]
-                    l=binary_smooth_l1(prediction, label)
+            loss = torch.tensor(0., device=rgb.device)*griper_grasp_quality_score.mean()
+            loss+=self.quality_loss(griper_grasp_quality_score,suction_grasp_quality_score,
+                                    gripper_score,suction_score,used_gripper,used_suction,
+                                    gripper_pixel_index,suction_pixel_index)
 
-                    self.gripper_sampling_rate.update(1)
 
-                    self.gripper_quality_net_statistics.loss=l.item()
-                    self.gripper_quality_net_statistics.update_confession_matrix(label,prediction)
-                    loss += l
-
-                if used_suction[j]:
-                    label = suction_score[j]
-                    if label==-1:continue
-                    s_pix_A = suction_pixel_index[j, 0]
-                    s_pix_B = suction_pixel_index[j, 1]
-                    prediction = suction_grasp_score[j, 0, s_pix_A, s_pix_B]
-                    l=binary_smooth_l1(prediction, label)
-
-                    self.gripper_sampling_rate.update(0)
-
-                    self.suction_quality_net_statistics.loss=l.item()
-                    self.suction_quality_net_statistics.update_confession_matrix(label,prediction)
-
-                    loss += l
-
-            # distillation_loss=((q_value-ref_q_value)**2).mean()+((action_probs-ref_action_probs)**2).mean()
-            # loss+=distillation_loss*1000
+            '''policy initialization loss'''
+            loss += self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=100)
 
             loss.backward()
 
