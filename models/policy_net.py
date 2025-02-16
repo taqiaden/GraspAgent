@@ -12,7 +12,7 @@ use_in=True
 
 policy_module_key='policy_net'
 
-relu_slope=0.2
+relu_slope=0.01
 
 class QualityRegressor(nn.Module):
     def __init__(self, in_c2):
