@@ -48,7 +48,7 @@ open3d=0.18.0
 cuda=12.6
 ```
 
-- The object detection and segmentation queries are forwarded to a separate repository where a mask of the target object/s is retried.
+- The object detection and segmentation queries are forwarded to a separate repository where a mask of the target object/s is retrieved.
 - We used the open source repository Grounded SAM 2.0 for the segmentation and dedication task:
     - [Grounded SAM 2.0](https://github.com/IDEA-Research/Grounded-SAM-2)
 
