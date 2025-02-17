@@ -4,7 +4,7 @@ from action import Action
 from lib.dataset_utils import online_data2
 
 max_policy_buffer_size=50
-max_quality_buffer_size=50
+max_quality_buffer_size=30
 gamma=0.99
 lamda=0.95
 learning_rate=1e-4

@@ -338,7 +338,7 @@ class TrainPolicyNet:
 
         return loss
 
-    def step_quality_training(self,max_size=100,batch_size=1):
+    def step_online_training(self,max_size=100,batch_size=1):
         ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
         data_loader=self.init_quality_data_loader(ids,batch_size)
         pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
@@ -431,8 +431,11 @@ class TrainPolicyNet:
         self.ini_value_moving_loss.save()
 
     def export_check_points(self):
-        self.model_wrapper.export_model()
-        self.model_wrapper.export_optimizer()
+        try:
+            self.model_wrapper.export_model()
+            self.model_wrapper.export_optimizer()
+        except Exception as e:
+            print(str(e))
 
     def clear(self):
         self.gripper_quality_net_statistics.clear()
@@ -453,8 +456,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.step_quality_training(max_size=100)
-        # train_action_net.policy_initialization(max_size=10)
+        train_action_net.step_online_training(max_size=10)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
@@ -464,8 +466,7 @@ if __name__ == "__main__":
         if new_data_tracker:
             cuda_memory_report()
 
-            train_action_net.policy_initialization(max_size=10)
-            train_action_net.step_quality_training(max_size=10)
+            train_action_net.step_online_training(max_size=10)
             train_action_net.export_check_points()
             train_action_net.save_statistics()
             train_action_net.view_result()

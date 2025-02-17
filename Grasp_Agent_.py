@@ -120,13 +120,13 @@ class GraspAgent():
         # print(self.buffer.values)
         # print('----')
 
-        self.gripper_usage_rate=MovingRate('gripper_usage_rate',min_decay=0.01)
-        self.suction_usage_rate=MovingRate('suction_usage_rate',min_decay=0.01)
-        self.double_grasp_rate=MovingRate('double_grasp_rate',min_decay=0.01)
-        self.gripper_grasp_success_rate=MovingRate('gripper_grasp_success_rate',min_decay=0.01)
-        self.suction_grasp_success_rate=MovingRate('suction_grasp_success_rate',min_decay=0.01)
-        self.shift_rate=MovingRate('shift_rate',min_decay=0.01)
-        self.planning_success_rate=MovingRate('planning_success_rate',min_decay=0.01)
+        self.gripper_usage_rate=MovingRate('gripper_usage',min_decay=0.01)
+        self.suction_usage_rate=MovingRate('suction_usage',min_decay=0.01)
+        self.double_grasp_rate=MovingRate('double_grasp',min_decay=0.01)
+        self.gripper_grasp_success_rate=MovingRate('gripper_grasp_success',min_decay=0.01)
+        self.suction_grasp_success_rate=MovingRate('suction_grasp_success',min_decay=0.01)
+        self.shift_rate=MovingRate('shift',min_decay=0.01)
+        self.planning_success_rate=MovingRate('planning_success',min_decay=0.01)
 
 
         self.segmentation_result_time_stamp=None
@@ -190,6 +190,7 @@ class GraspAgent():
         self.tmp_occupation_mask=None
 
     def print_report(self):
+        print(Fore.BLUE)
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
         print(f'Episodic buffer size = {len(self.buffer)} ')
         print(f'Non episodic buffer size = {len(self.buffer.non_episodic_file_ids)} ')
@@ -204,6 +205,7 @@ class GraspAgent():
         self.suction_grasp_success_rate.view()
         self.shift_rate.view()
         self.planning_success_rate.view()
+        print(Fore.RESET)
 
     @property
     def gripper_approach(self):
@@ -327,8 +329,10 @@ class GraspAgent():
         selected_policy = self.seize_policy if sample_from_target_actions else self.clear_policy
         mask_=self.valid_actions_on_target_mask if sample_from_target_actions else self.valid_actions_mask
         mask_=mask_ & self.tmp_occupation_mask
+        # print('test',selected_policy[mask_].shape,sample_from_target_actions)
         dist=MaskedCategorical(probs=selected_policy,mask=mask_)
         flattened_action_index= dist.sample()
+
         if sample_from_target_actions:
             probs=None
             value=None
@@ -432,10 +436,10 @@ class GraspAgent():
         # suction_grasp_score.fill_(1.)
 
         '''correct backgoround mask'''
-        # lower_bound_mask=(self.voxel_pc[:,-1]<0.045) | (self.voxel_pc[:,0]<0.25) | (self.voxel_pc[:,0]>0.6)
-        # background_class[lower_bound_mask]=1.0
-        # min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
-        # background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
+        lower_bound_mask=(self.voxel_pc[:,-1]<0.045) | (self.voxel_pc[:,0]<0.25) | (self.voxel_pc[:,0]>0.6)
+        background_class[lower_bound_mask]=1.0
+        min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
+        background_class[self.voxel_pc[:,-1]<min_elevation+0.005]=1.0
 
         '''actions masks'''
         object_mask=background_class<0.5
@@ -751,7 +755,7 @@ class GraspAgent():
 
         '''second action'''
         # total_available_actions=torch.count_nonzero(self.valid_actions_mask).item()
-        available_actions_on_target = torch.count_nonzero(self.valid_actions_on_target_mask).item()
+        available_actions_on_target = torch.count_nonzero(self.valid_actions_on_target_mask & self.tmp_occupation_mask).item()
         for i in range(available_actions_on_target):
             flattened_action_index, probs, value = self.next_action(sample_from_target_actions=True)
             unflatten_index = get_unflatten_index(flattened_action_index, ori_size=(self.voxel_pc.shape[0], 4))
