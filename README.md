@@ -39,7 +39,7 @@ If you find this project helpful for your research, please consider citing the f
 
 ```
 
-## Prerqusties
+## Prerequisites
 
 ```
 python=3.10.16
