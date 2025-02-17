@@ -26,7 +26,13 @@ class PPOMemory():
         self.episodes_counter=0 # track the number of completed episodes in the buffer
         self.episodic_file_ids=deque([])
 
+        '''non episodic buffer containers'''''
         self.non_episodic_file_ids=deque([])
+
+    def trim_uncompleted_episodes(self):
+        trim_size = len(self.episodic_file_ids) - self.last_ending_index - 1
+        if trim_size>0:
+            self.pop_policy_buffer(drop_size=trim_size)
 
     def append_to_policy_buffer(self, action_obj:Action):
         self.values.append(action_obj.value)
@@ -119,32 +125,40 @@ class PPOMemory():
             self.advantages.append(running_advantage)
         return advantage
 
-    def pop_policy_buffer(self):
-        if len(self.episodic_file_ids)>max_policy_buffer_size:
-            for i in range(3):
-                '''update episode counter'''
-                if self.is_end_of_episode[0]==1:
-                    self.episodes_counter -= 1
-                '''pop oldest sample'''
-                self.rewards.popleft()
-                self.values.popleft()
-                self.probs.popleft()
-                self.action_indexes.popleft()
-                self.point_indexes.popleft()
-                self.advantages.popleft()
-                self.is_end_of_episode.popleft()
-                self.is_synchronous.popleft()
-                self.episodic_file_ids.popleft()
-                '''move the index of the last episode ending'''
-                self.last_ending_index-=1
+    def pop_policy_buffer(self,drop_size=1):
+        for i in range(drop_size):
+            '''update episode counter'''
+            if self.is_end_of_episode[0]==1:
+                self.episodes_counter -= 1
+            '''pop oldest sample'''
+            self.rewards.popleft()
+            self.values.popleft()
+            self.probs.popleft()
+            self.action_indexes.popleft()
+            self.point_indexes.popleft()
+            self.advantages.popleft()
+            self.is_end_of_episode.popleft()
+            self.is_synchronous.popleft()
+            self.episodic_file_ids.popleft()
+            '''move the index of the last episode ending'''
+            self.last_ending_index-=1
+
+    def pop_non_episodic_policy_buffer(self,drop_size=1):
+        for i in range(drop_size):
+            self.non_episodic_file_ids.popleft()
+
 
     def pop(self):
-        self.pop_policy_buffer()
+        if len(self.episodic_file_ids) > max_policy_buffer_size:
+            self.pop_policy_buffer(drop_size=1)
+
+        if len(self.non_episodic_file_ids) > max_quality_buffer_size:
+            self.pop_non_episodic_policy_buffer(drop_size=1)
 
     def __len__(self):
         return len(self.episodic_file_ids)
 
 if __name__ == "__main__":
     buffer=PPOMemory()
-    x=len(buffer.file_ids)
+    x=len(buffer.non_episodic_file_ids)
     print(x)

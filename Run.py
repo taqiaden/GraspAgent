@@ -18,7 +18,8 @@ parser.add_argument("--text-prompt", default="apple. ")
 args = parser.parse_args()
 
 grasp_agent = GraspAgent()
-grasp_agent.report()
+grasp_agent.print_report()
+grasp_agent.buffer.trim_uncompleted_episodes()
 
 grasp_agent.initialize_check_points()
 

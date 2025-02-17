@@ -35,6 +35,7 @@ from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suctio
 from models.policy_net import PolicyNet, policy_module_key
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
+from records.training_satatistics import MovingRate
 from registration import camera
 from training.learning_objectives.shift_affordnace import shift_execution_length
 from training.policy_lr import  buffer_file, action_data_tracker_path
@@ -119,6 +120,15 @@ class GraspAgent():
         # print(self.buffer.values)
         # print('----')
 
+        self.gripper_usage_rate=MovingRate('gripper_usage_rate',min_decay=0.01)
+        self.suction_usage_rate=MovingRate('suction_usage_rate',min_decay=0.01)
+        self.double_grasp_rate=MovingRate('double_grasp_rate',min_decay=0.01)
+        self.gripper_grasp_success_rate=MovingRate('gripper_grasp_success_rate',min_decay=0.01)
+        self.suction_grasp_success_rate=MovingRate('suction_grasp_success_rate',min_decay=0.01)
+        self.shift_rate=MovingRate('shift_rate',min_decay=0.01)
+        self.planning_success_rate=MovingRate('planning_success_rate',min_decay=0.01)
+
+
         self.segmentation_result_time_stamp=None
         self.buffer_modify_alert=False
         self.data_tracker_modify_alert=False
@@ -179,13 +189,21 @@ class GraspAgent():
         self.seize_policy=None
         self.tmp_occupation_mask=None
 
-    def report(self):
+    def print_report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
         print(f'Episodic buffer size = {len(self.buffer)} ')
         print(f'Non episodic buffer size = {len(self.buffer.non_episodic_file_ids)} ')
 
         latest_id=get_int(grasp_data_counter_key)
         print(f'Latest saved id is {latest_id}')
+
+        self.gripper_usage_rate.view()
+        self.suction_usage_rate.view()
+        self.double_grasp_rate.view()
+        self.gripper_grasp_success_rate.view()
+        self.suction_grasp_success_rate.view()
+        self.shift_rate.view()
+        self.planning_success_rate.view()
 
     @property
     def gripper_approach(self):
@@ -786,6 +804,15 @@ class GraspAgent():
                     policy_net.ini_model(train=False)
                     self.model_time_stamp=new_time_stamp
                     print('Update policy')
+            elif counter==4:
+                self.gripper_usage_rate.save()
+                self.suction_usage_rate.save()
+                self.double_grasp_rate.save()
+                self.gripper_grasp_success_rate.save()
+                self.suction_grasp_success_rate.save()
+                self.shift_rate.save()
+                self.planning_success_rate.save()
+
             else:
                 wait.step(0.5)
             robot_feedback_ = read_robot_feedback()
@@ -835,10 +862,15 @@ class GraspAgent():
 
         '''save feedback to data pool'''
         if first_action_obj.robot_feedback == 'Succeed':
+            self.planning_success_rate.update(1)
+
             first_action_obj.executed=True
             second_action_obj.executed=True
             if first_action_obj.is_shift:
                 first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
+                self.shift_rate.update(1)
+            else:
+                self.shift_rate.update(0)
 
             if first_action_obj.use_gripper_arm:
                 gripper_action=first_action_obj
@@ -854,8 +886,11 @@ class GraspAgent():
                     print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the gripper',Fore.RESET)
                 elif gripper_action.grasp_result:
                     print(Fore.GREEN, 'A new object is detected at the gripper side of the bin',Fore.RESET)
+                    self.gripper_grasp_success_rate.update(1)
                 else:
                     print(Fore.YELLOW, 'No object is detected at to the gripper side of the bin',Fore.RESET)
+                    self.gripper_grasp_success_rate.update(0)
+
 
             if suction_action.is_grasp:
                 suction_action.grasp_result=check_image_similarity(img_suction_pre, img_suction_after)
@@ -863,8 +898,11 @@ class GraspAgent():
                     print(Fore.LIGHTCYAN_EX, 'Unable to detect the grasp result for the suction',Fore.RESET)
                 elif suction_action.grasp_result:
                     print(Fore.GREEN, 'A new object is detected at the suction side of the bin',Fore.RESET)
+                    self.suction_grasp_success_rate.update(1)
                 else:
                     print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
+                    self.suction_grasp_success_rate.update(0)
+
 
             '''save action instance'''
             # assert gripper_action.result is not None or suction_action.result is not None
@@ -873,17 +911,33 @@ class GraspAgent():
 
             '''update buffer and tracker'''
             if gripper_action.is_executable:
+                self.gripper_usage_rate.update(1)
+                if suction_action.is_executable:
+                    self.double_grasp_rate.update(1)
+                else:
+                    self.double_grasp_rate.update(0)
+
                 self.buffer.push(gripper_action)
                 self.data_tracker.push(gripper_action)
                 self.buffer_modify_alert=True
                 self.data_tracker_modify_alert=True
+            else:
+                self.gripper_usage_rate.update(0)
+
             if suction_action.is_executable:
+                self.suction_usage_rate.update(1)
+
                 print('---',suction_action.file_id)
                 self.buffer.push(suction_action)
                 self.data_tracker.push(suction_action)
                 self.buffer_modify_alert=True
                 self.data_tracker_modify_alert=True
+            else:
+                self.suction_usage_rate.update(0)
+
         else:
+            self.planning_success_rate.update(0)
+
             first_action_obj.executed=False
             second_action_obj.executed=False
 

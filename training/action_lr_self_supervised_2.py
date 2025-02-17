@@ -372,7 +372,7 @@ class TrainActionNet:
 
             if i%5==0:print(f'c_loss={truncate(l_c)}, g_loss={truncate(gripper_sampling_loss.item())},  ratios c:{self.moving_collision_rate.val}, s:{self.moving_out_of_scope.val}')
 
-            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*5.0+suction_sampling_loss+background_loss*3.0
+            loss=suction_loss*0.1+gripper_loss*0.5+shift_loss*0.3+gripper_sampling_loss*5.0+suction_sampling_loss+background_loss*10.0
             loss.backward()
             self.gan.generator_optimizer.step()
             self.gan.generator_optimizer.zero_grad()

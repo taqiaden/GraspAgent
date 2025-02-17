@@ -53,8 +53,8 @@ class PolicyNet(nn.Module):
         self.gripper_grasp = QualityRegressor( in_c2=7)
         self.suction_grasp = QualityRegressor( in_c2=3)
 
-        self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
-        self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
+        # self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
+        # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         self.depth_encoder = nn.Sequential(
             nn.Linear(64, 64, bias=False),
@@ -77,9 +77,9 @@ class PolicyNet(nn.Module):
         depth_features=self.depth_encoder(rgb_features)
 
         '''Spatial data'''
-        if self.spatial_encoding.shape[0] != rgb.shape[0]:
-            self.spatial_encoding = depth_xy_spatial_data(batch_size=rgb.shape[0])
-            self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
+        # if self.spatial_encoding.shape[0] != rgb.shape[0]:
+        #     self.spatial_encoding = depth_xy_spatial_data(batch_size=rgb.shape[0])
+        #     self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         '''gripper grasp head'''
         gripper_pose_detached=gripper_pose.detach().clone()
