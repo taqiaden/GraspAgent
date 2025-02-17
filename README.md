@@ -36,11 +36,9 @@ python=3.10.16
 torch=2.5.1
 open3d=0.18.0
 cuda=12.6
+```
 
 - The object detetction and segmentation queries are forwarded to a seperate repository where a mask of the traget object/s is retrived.
 - We used the open source repository Grounded SAM 2.0 for this task:
-    - https://github.com/IDEA-Research/Grounded-SAM-2
-
-
-```
+    - [Grounded SAM 2.0](https://github.com/IDEA-Research/Grounded-SAM-2)
 
