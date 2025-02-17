@@ -3,7 +3,7 @@
 
 This repository is under construction.
 
-Stay tuned for the final issue of GraspAgnet 2.0.
+Stay tuned for the final issue of GraspAgent 2.0.
 
 
 ## Conventions
@@ -26,8 +26,18 @@ Stay tuned for the final issue of GraspAgnet 2.0.
 ## Acknowledgements
 The collision detection unit and the ROS communication module are mainly handled by by Li Daheng, a senior member at RLIS Lab, CAISA, Bejing, China.
 
-## Contact
+## Citations
+If you find this project helpful for your research, please consider citing the following BibTeX entry.
+```BibTex
+@article{alshameri2024graspagent,
+  title={GraspAgent 1.0: Adversarial Continual Dexterous Grasp Learning},
+  author={Alshameri, Taqiaden and Wang, Peng and Li, Daheng and Wei, Wei and Duan, Haonan and Huang, Yayu and Alfarzaeai, Murad Saleh},
+  journal={IEEE Robotics and Automation Letters},
+  year={2024},
+  publisher={IEEE}
+}
 
+```
 
 ## Prerqusties
 
@@ -38,7 +48,7 @@ open3d=0.18.0
 cuda=12.6
 ```
 
-- The object detetction and segmentation queries are forwarded to a seperate repository where a mask of the traget object/s is retrived.
+- The object detection and segmentation queries are forwarded to a separate repository where a mask of the target object/s is retried.
 - We used the open source repository Grounded SAM 2.0 for the segmentation and dedication task:
     - [Grounded SAM 2.0](https://github.com/IDEA-Research/Grounded-SAM-2)
 
