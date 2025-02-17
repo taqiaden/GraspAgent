@@ -100,9 +100,9 @@ def multi_mask_view(pc, scores_list, pivot=0.5):
     view_npy_open3d(cat_pc,color=colors)
 
 class GraspAgent():
-    def __init__(self,args):
+    def __init__(self):
         '''models'''
-        self.args=args
+        self.args=None
         self.action_net = None
         self.policy_net = None
         self.suction_arm_reachability_net = None
@@ -111,6 +111,13 @@ class GraspAgent():
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         # self.online_learning=PPOLearning()
+        # print(self.buffer.probs)
+        # print(self.buffer.is_end_of_episode)
+        # print(self.buffer.last_ending_index)
+        # print(self.buffer.advantages)
+        # print(self.buffer.rewards)
+        # print(self.buffer.values)
+        # print('----')
 
         self.segmentation_result_time_stamp=None
         self.buffer_modify_alert=False
@@ -175,6 +182,8 @@ class GraspAgent():
     def report(self):
         print(f'Samples dictionary containes {len(self.data_tracker)} key values pairs')
         print(f'Episodic buffer size = {len(self.buffer)} ')
+        print(f'Non episodic buffer size = {len(self.buffer.non_episodic_file_ids)} ')
+
         latest_id=get_int(grasp_data_counter_key)
         print(f'Latest saved id is {latest_id}')
 
@@ -385,6 +394,9 @@ class GraspAgent():
         griper_grasp_score, suction_grasp_score,\
          q_value, clear_policy, policy_depth_features = \
             self.policy_net(rgb_torch,depth_torch,gripper_pose, suction_direction,self.target_object_mask.float())
+
+        griper_grasp_score=torch.clip(griper_grasp_score,0.,1.)
+        suction_grasp_score=torch.clip(suction_grasp_score,0.,1.)
 
         '''reshape'''
         griper_object_collision_classifier=griper_collision_classifier[0,0][mask]

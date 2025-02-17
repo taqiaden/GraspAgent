@@ -331,7 +331,7 @@ class TrainActionNet:
 
             '''background detection head'''
             try:
-                bin_mask = bin_planes_detection(pc, sides_threshold = 0.005,floor_threshold=0.002, view=False, file_index=file_ids[0],cache_name='bin_planes2')
+                bin_mask = bin_planes_detection(pc, sides_threshold = 0.005,floor_threshold=0.0015, view=False, file_index=file_ids[0],cache_name='bin_planes2')
             except Exception as error_message:
                 print(file_ids[0])
                 print(error_message)

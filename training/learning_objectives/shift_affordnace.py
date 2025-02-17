@@ -11,6 +11,7 @@ shift_execution_length=0.15
 
 shift_elevation_threshold = 0.00
 shift_contact_margin = 0.003
+collision_radius=0.005
 interference_allowance=0.003
 bce_loss=nn.BCELoss()
 l1_loss=nn.L1Loss()
@@ -92,7 +93,7 @@ def check_collision_for_shift(normals,target_index,pc):
     transformed_pc = transform_point_to_normal_in_plane(target_normal, shifted_pc)
     transformed_target_point = transformed_pc[target_index]
     xy_dist = np.linalg.norm(transformed_target_point[np.newaxis, 0:2] - transformed_pc[:, 0:2], axis=-1)
-    signed_distance_mask = (xy_dist < shift_contact_margin) & (
+    signed_distance_mask = (xy_dist < collision_radius) & (
                 transformed_pc[:, 2] > transformed_target_point[2] + interference_allowance)
     return signed_distance_mask.sum() > 0, signed_distance_mask,target_normal
 
@@ -103,25 +104,29 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     start_randomization_scope=0.001
     end_randomization_scope=0.03
 
-    for i in range(5):
-        start=shifted_start_point.copy()
-        start[0]=start[0]+np.random.randn()*start_randomization_scope
-        start[1]=start[1]+np.random.randn()*start_randomization_scope
-
-        end=end_point.copy()
-        end[0]=end[0]+np.random.randn()*end_randomization_scope
-        end[1]=end[1]+np.random.randn()*end_randomization_scope
-
-        # print('S----',shifted_start_point,start)
-        # print('E----',end_point,end)
-
-        shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
-        if shift_mask_result.sum()==0:
-            shift_result=False
-            break
-
     '''collision check'''
-    # collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
+    collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
+
+    if collision: shift_result=False
+    else:
+        for i in range(5):
+            start=shifted_start_point.copy()
+            start[0]=start[0]+np.random.randn()*start_randomization_scope
+            start[1]=start[1]+np.random.randn()*start_randomization_scope
+
+            end=end_point.copy()
+            end[0]=end[0]+np.random.randn()*end_randomization_scope
+            end[1]=end[1]+np.random.randn()*end_randomization_scope
+
+            # print('S----',shifted_start_point,start)
+            # print('E----',end_point,end)
+
+            shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
+            if shift_mask_result.sum()==0:
+                shift_result=False
+                break
+
+
 
     if shift_result :
         label= torch.tensor(1, device=prediction_.device).float()

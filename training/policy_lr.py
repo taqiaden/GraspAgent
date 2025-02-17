@@ -161,13 +161,14 @@ class TrainPolicyNet:
 
         sets_ = set(clusters_label)
         sets_ = [i for i in sets_ if i >= 0]
-        # counts_ = [(clusters_label == x).sum() for x in sets_]
-        # picked_cluster_label = sets_[np.argmax(np.array(counts_))]
+
         if len(sets_)==0:
             # view_npy_open3d(object_points)
             # view_image(pixel_mask[0].cpu().numpy().astype(np.float64))
             return pixel_mask
-        picked_cluster_label=np.random.randint(0,len(sets_))
+        counts_ = [(clusters_label == x).sum() for x in sets_]
+        picked_cluster_label = sets_[np.argmax(np.array(counts_))]
+        # picked_cluster_label=np.random.randint(0,len(sets_))
         cluster_mask = clusters_label == picked_cluster_label
         cluster_mask = torch.from_numpy(cluster_mask).cuda()
 
@@ -180,8 +181,7 @@ class TrainPolicyNet:
 
         return pixel_mask
 
-    def policy_init_loss(self,q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=100):
-        loss = torch.tensor([0.], device=q_value.device)
+    def policy_init_loss(self,q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=2):
         value_loss = torch.tensor(0., device=q_value.device)
         for j in range(q_value.shape[0]):
             mask = masks[j]
@@ -197,7 +197,7 @@ class TrainPolicyNet:
 
             target_object_points = pc[target_mask_.detach().cpu().numpy()]
 
-            # view_npy_open3d(pc=object_points)
+            # view_npy_open3d(pc=target_object_points)
 
             def sample_(sampling_p):
                 # dist = MaskedCategorical(probs=sampling_p, mask=objects_mask)
@@ -206,28 +206,49 @@ class TrainPolicyNet:
                 dist.probs[index] = 0
                 target_point = pc[index]
                 min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
-                max_ref = 0.7
+                max_ref = 0.5
                 if min_dist_ < max_ref:
-                    label = (1 - (min_dist_ / max_ref)) ** 2
+                    label = (1 - (min_dist_ / max_ref)) **2
                 else:
                     label = 0.
                 return index, label
 
             '''gripper grasp sampling'''
             sampling_p = torch.rand_like(gripper_grasp_value, device='cpu')
+            indexes_list=[]
+            dist_list=[]
             for k in range(sample_size):
                 shared_index, label = sample_(sampling_p)
-                is_object = objects_mask[shared_index]
-                is_bin = ~is_object
+                indexes_list.append(shared_index)
+                dist_list.append(label)
+
+                # is_object = objects_mask[shared_index]
+                # is_bin = ~is_object
                 # shift_weight=shift_appealing_j[shared_index].item()
-
+                # print(gripper_grasp_value[shared_index],label,is_object)
                 '''higher value for objects closer to the target'''
-                value_loss += (gripper_grasp_value[shared_index] - label * is_object * 0.5) ** 2
-                value_loss += (suction_grasp_value[shared_index] - label * is_object * 0.5) ** 2
-                value_loss += (gripper_shift_value[shared_index] - label * (1 + is_bin) * 0.5) ** 2
-                value_loss += (suction_shift_value[shared_index] - label * (1 + is_bin) * 0.5) ** 2
+                value_loss += (gripper_grasp_value[shared_index] - label  * 0.5) ** 2
+                value_loss += (suction_grasp_value[shared_index] - label  * 0.5) ** 2
+                value_loss += (gripper_shift_value[shared_index] - label ) ** 2
+                value_loss += (suction_shift_value[shared_index] - label ) ** 2
 
-                # print('Gripper grasp initialization result: ',((pred[0]>=pred[1])==(label[0]>=label[1])).item())
+            # mean_=sum(dist_list)/len(dist_list)
+
+            # for k in range(sample_size):
+            #     first_index=indexes_list[k]
+            #     for l in range(sample_size):
+            #         second_index = indexes_list[l]
+            #         # weight=1+abs(dist_list[k]-dist_list[l])**2
+            #         sign=1. if dist_list[k]>dist_list[l] else -1.
+            #         sign=0. if dist_list[k]==dist_list[l] else sign
+            #         print((dist_list[k]>=dist_list[l])==(gripper_grasp_value[first_index]>=gripper_grasp_value[second_index]))
+            #         value_loss+=torch.clamp((gripper_grasp_value[first_index]-gripper_grasp_value[second_index])*sign,0.)
+            #         value_loss+=torch.clamp((suction_grasp_value[first_index]-suction_grasp_value[second_index])*sign,0.)
+            #         value_loss+=torch.clamp((gripper_shift_value[first_index]-gripper_shift_value[second_index])*sign,0.)
+            #         value_loss+=torch.clamp((suction_shift_value[first_index]-suction_shift_value[second_index])*sign,0.)
+
+
+                    # print('Gripper grasp initialization result: ',((pred[0]>=pred[1])==(label[0]>=label[1])).item())
         '''adapt policy net to value net'''
         policy_label = q_value.detach().clone()
         policy_label = policy_label.reshape(policy_label.shape[0], -1)
@@ -242,8 +263,7 @@ class TrainPolicyNet:
         self.ini_policy_moving_loss.update(policy_loss.item())
         self.ini_value_moving_loss.update(value_loss.item())
 
-        loss += value_loss
-        loss += policy_loss
+        loss = value_loss + policy_loss
 
         return loss
 
@@ -318,7 +338,6 @@ class TrainPolicyNet:
 
         return loss
 
-
     def step_quality_training(self,max_size=100,batch_size=1):
         ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
         data_loader=self.init_quality_data_loader(ids,batch_size)
@@ -346,7 +365,6 @@ class TrainPolicyNet:
             '''random target for policy initialization'''
             target_masks, objects_mask = self.generate_random_target_mask(depth, file_ids, target_masks, pcs, masks)
 
-
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
 
@@ -367,9 +385,9 @@ class TrainPolicyNet:
                 self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
 
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
-            # target_value=action_probs[0, 0]
+            # target_value=q_value[0, 0]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            # target_value=action_probs[0, 2]
+            # target_value=q_value[0, 2]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
 
             '''accumulate loss'''
@@ -377,12 +395,13 @@ class TrainPolicyNet:
                                     gripper_score,suction_score,used_gripper,used_suction,
                                     gripper_pixel_index,suction_pixel_index)
 
-
             '''policy initialization loss'''
-            policy_loss = self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=100)
+            policy_loss = self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=10)
 
 
-            loss = quality_loss+policy_loss
+            loss = policy_loss  + quality_loss
+            # print(policy_loss.item())
+            # print(quality_loss.item(),policy_loss.item())
 
             loss.backward()
 
@@ -434,7 +453,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.step_quality_training(max_size=10)
+        train_action_net.step_quality_training(max_size=100)
         # train_action_net.policy_initialization(max_size=10)
         train_action_net.export_check_points()
         train_action_net.save_statistics()

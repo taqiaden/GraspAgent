@@ -126,6 +126,8 @@ def loop():
             suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
             estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask )
 
+            # break
+
             '''gripper grasp sampler'''
             gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
 
