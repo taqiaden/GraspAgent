@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
-from dataloaders.policy_dl import GraspQualityDataset
+from dataloaders.policy_dl import SeizePolicyDataset, ClearPolicyDataset
 from lib.IO_utils import load_pickle, save_pickle
 from lib.Multible_planes_detection.plane_detecttion import cache_dir
 from lib.cuda_utils import cuda_memory_report
@@ -128,18 +128,24 @@ class TrainPolicyNet:
 
         return online_ids+replay_ids
 
-    def init_quality_data_loader(self,file_ids,batch_size):
-        dataset = GraspQualityDataset(data_pool=online_data2, file_ids=file_ids)
+    def get_seize_policy_dataloader(self,file_ids,batch_size):
+        dataset = SeizePolicyDataset(data_pool=online_data2, file_ids=file_ids)
         data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=workers,
                                                        shuffle=True)
         return  data_loader
+
+    def get_clear_policy_dataloader(self,file_ids,batch_size,buffer):
+        dataset = ClearPolicyDataset(data_pool=online_data2, policy_buffer=buffer,file_ids=file_ids)
+        data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=workers,
+                                                  shuffle=True)
+        return data_loader
 
     def initialize_action_net(self):
         action_net = GANWrapper(action_module_key2, ActionNet)
         action_net.ini_generator(train=False)
         self.action_net=action_net.generator
 
-    def random_target_mask(self,pc,mask,background_class,file_id):
+    def get_random_target_mask(self,pc,mask,background_class,file_id):
         pixel_mask=background_class<=0.5
         pixel_mask.permute(1, 2, 0)[ :, :, 0][~mask]*=False
 
@@ -338,15 +344,18 @@ class TrainPolicyNet:
 
         return loss
 
-    def step_online_training(self,max_size=100,batch_size=1):
-        ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
-        data_loader=self.init_quality_data_loader(ids,batch_size)
-        pi = progress_indicator('Begin new training round: ', max_limit=len(data_loader))
-        for i, batch in enumerate(data_loader, 0):
+    def first_phase_training(self,max_size=100,batch_size=1):
+
+        '''dataloaders'''
+        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
+        seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
+
+        pi = progress_indicator('Begin new training round: ', max_limit=len(seize_policy_data_loader))
+        for i, seize_policy_batch in enumerate(seize_policy_data_loader, 0):
 
             rgb, depth,target_masks, pose_7, gripper_pixel_index, \
                 suction_pixel_index, gripper_score, \
-                suction_score, normal, used_gripper, used_suction,file_ids = batch
+                suction_score, normal, used_gripper, used_suction,file_ids = seize_policy_batch
 
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             target_masks = target_masks.cuda().float()
@@ -410,6 +419,76 @@ class TrainPolicyNet:
             pi.step(i)
         pi.end()
 
+    def get_seize_policy_loss(self,seize_policy_batch):
+        rgb, depth, target_masks, pose_7, gripper_pixel_index, \
+            suction_pixel_index, gripper_score, \
+            suction_score, normal, used_gripper, used_suction, file_ids = seize_policy_batch
+
+        rgb = rgb.cuda().float().permute(0, 3, 1, 2)
+        target_masks = target_masks.cuda().float()
+        depth = depth.cuda().float()
+        pose_7 = pose_7.cuda().float()
+        gripper_score = gripper_score.cuda().float()
+        suction_score = suction_score.cuda().float()
+        normal = normal.cuda().float()
+
+        b = rgb.shape[0]
+        w = rgb.shape[2]
+        h = rgb.shape[3]
+
+        '''zero grad'''
+        self.model_wrapper.model.zero_grad()
+
+        '''process pose'''
+        pose_7_stack = torch.zeros((b, 7, w, h), device=rgb.device)
+        normal_stack = torch.zeros((b, 3, w, h), device=rgb.device)
+
+        for j in range(b):
+            g_pix_A = gripper_pixel_index[j, 0]
+            g_pix_B = gripper_pixel_index[j, 1]
+            s_pix_A = suction_pixel_index[j, 0]
+            s_pix_B = suction_pixel_index[j, 1]
+            pose_7_stack[j, :, g_pix_A, g_pix_B] = pose_7[j]
+            normal_stack[j, :, s_pix_A, s_pix_B] = normal[j]
+
+        griper_grasp_quality_score, suction_grasp_quality_score, \
+            q_value, action_probs, _ = \
+            self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
+
+        '''accumulate loss'''
+        quality_loss = self.quality_loss(griper_grasp_quality_score, suction_grasp_quality_score,
+                                         gripper_score, suction_score, used_gripper, used_suction,
+                                         gripper_pixel_index, suction_pixel_index)
+
+        return quality_loss
+
+    def get_clear_policy_loss(self,clear_policy_batch):
+        return 0
+
+    def second_phase_training(self,max_size=100,batch_size=1):
+
+        '''dataloaders'''
+        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
+        seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
+
+        clear_policy_ids=self.buffer.generate_batches(batch_size)
+        clear_policy_data_loader=self.get_clear_policy_dataloader(clear_policy_ids,batch_size,self.buffer)
+
+        pi = progress_indicator('Begin new training round: ', max_limit=len(seize_policy_data_loader))
+        for i, seize_policy_batch, clear_policy_batch in zip(seize_policy_data_loader, clear_policy_data_loader):
+
+            seize_policy_loss=self.get_seize_policy_loss(seize_policy_batch)
+            clear_policy_loss=self.get_clear_policy_loss(clear_policy_batch)
+
+            loss =  seize_policy_loss + clear_policy_loss
+
+            loss.backward()
+
+            self.model_wrapper.optimizer.step()
+
+            pi.step(i)
+        pi.end()
+
     def view_result(self):
         with torch.no_grad():
             self.gripper_quality_net_statistics.print()
@@ -456,7 +535,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.step_online_training(max_size=100)
+        train_action_net.first_phase_training(max_size=100)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()
@@ -466,7 +545,7 @@ if __name__ == "__main__":
         if new_data_tracker:
             cuda_memory_report()
 
-            train_action_net.step_online_training(max_size=10)
+            train_action_net.first_phase_training(max_size=10)
             train_action_net.export_check_points()
             train_action_net.save_statistics()
             train_action_net.view_result()

@@ -147,7 +147,6 @@ class PPOMemory():
         for i in range(drop_size):
             self.non_episodic_file_ids.popleft()
 
-
     def pop(self):
         if len(self.episodic_file_ids) > max_policy_buffer_size:
             self.pop_policy_buffer(drop_size=1)

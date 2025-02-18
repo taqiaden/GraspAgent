@@ -1,9 +1,11 @@
+
+
 ## Import required libraries
 
-import os 
+import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F 
+import torch.nn.functional as F
 import numpy as np
 import gym
 import warnings
@@ -181,7 +183,6 @@ class Agent():
         dist = self.actor(state)
         ## sample the output action from a categorical distribution of predicted actions
         action = dist.sample()
-
         probs = torch.squeeze(dist.log_prob(action)).item()
         action = torch.squeeze(action).item()
 
@@ -208,7 +209,6 @@ class Agent():
                 running_advantage = discount * running_advantage
                 # running_advantage += discount*(reward_arr[k] + self.gamma*value_arr[k+1]*(1-int(dones_arr[k])) - value_arr[k])
                 discount *= self.gamma * self.lamda
-                if int(dones_arr[k]) == 1:break
 
             advantage[t] = running_advantage
         advantage = torch.tensor(advantage).to(self.actor.device)
@@ -297,11 +297,14 @@ score_history = []
 learn_iters = 0
 avg_score = 0
 n_steps = 0
+running_reward=10
 for i in range(n_games):
     current_state, info = env.reset()
     terminated, truncated = False, False
     done = False
     score = 0
+
+
     while not done:
         action, prob, val = agent.choose_action(current_state)
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -314,13 +317,13 @@ for i in range(n_games):
             learn_iters += 1
         current_state = next_state
     score_history.append(score)
+    running_reward = 0.05 * score + (1 - 0.05) * running_reward
     avg_score = np.mean(score_history[-100:])
     if avg_score > best_score:
         best_score = avg_score
         agent.save_models()
-    if avg_score>160:exit()
     print('episode', i, 'score %.1f' % score, 'avg score %.1f' % avg_score,
-          'time_steps', n_steps, 'learning_steps', learn_iters)
+          'time_steps', n_steps, 'learning_steps', learn_iters,' running reward',running_reward)
 
 x = [i + 1 for i in range(len(score_history))]
 plot_learning_curve(x, score_history, figure_file)
@@ -362,6 +365,7 @@ class ActorPredNwk(nn.Module):
     def load_checkpoint(self):
         self.load_state_dict(torch.load(self.checkpoint_file))
 
+
 policy_nwk = ActorPredNwk(input_dim=state_dim, out_dim=action_dim)
 policy_nwk.load_checkpoint()
 
@@ -383,3 +387,5 @@ while not (terminated or truncated):
     plt.show()
     if i >= 20:
         break
+
+

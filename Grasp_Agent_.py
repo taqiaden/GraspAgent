@@ -111,6 +111,8 @@ class GraspAgent():
 
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
+        # print(self.buffer.generate_batches(batch_size=3))
+        # exit()
         # self.online_learning=PPOLearning()
         # print(self.buffer.probs)
         # print(self.buffer.is_end_of_episode)
@@ -127,7 +129,6 @@ class GraspAgent():
         self.suction_grasp_success_rate=MovingRate('suction_grasp_success',min_decay=0.01)
         self.shift_rate=MovingRate('shift',min_decay=0.01)
         self.planning_success_rate=MovingRate('planning_success',min_decay=0.01)
-
 
         self.segmentation_result_time_stamp=None
         self.buffer_modify_alert=False
