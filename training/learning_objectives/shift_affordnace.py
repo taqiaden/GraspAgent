@@ -105,26 +105,26 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
     end_randomization_scope=0.03
 
     '''collision check'''
-    collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
+    # collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
 
-    if collision: shift_result=False
-    else:
-        for i in range(5):
-            start=shifted_start_point.copy()
-            start[0]=start[0]+np.random.randn()*start_randomization_scope
-            start[1]=start[1]+np.random.randn()*start_randomization_scope
+    # if collision: shift_result=False
+    # else:
+    for i in range(5):
+        start=shifted_start_point.copy()
+        start[0]=start[0]+np.random.randn()*start_randomization_scope
+        start[1]=start[1]+np.random.randn()*start_randomization_scope
 
-            end=end_point.copy()
-            end[0]=end[0]+np.random.randn()*end_randomization_scope
-            end[1]=end[1]+np.random.randn()*end_randomization_scope
+        end=end_point.copy()
+        end[0]=end[0]+np.random.randn()*end_randomization_scope
+        end[1]=end[1]+np.random.randn()*end_randomization_scope
 
-            # print('S----',shifted_start_point,start)
-            # print('E----',end_point,end)
+        # print('S----',shifted_start_point,start)
+        # print('E----',end_point,end)
 
-            shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
-            if shift_mask_result.sum()==0:
-                shift_result=False
-                break
+        shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
+        if shift_mask_result.sum()==0:
+            shift_result=False
+            break
 
 
 

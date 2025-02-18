@@ -11,9 +11,9 @@ from registration import view_colored_point_cloud
 configure_smbclient()
 
 parser = argparse.ArgumentParser()
-# parser.add_argument("--text-prompt", default="plate. banana. apple. box. shampoo.
+# parser.add_argument("--text-prompt", default="plate. stapler. banana. apple. box. shampoo.
 # small ball.")
-parser.add_argument("--text-prompt", default="apple. ")
+parser.add_argument("--text-prompt", default="gloves. ")
 
 args = parser.parse_args()
 grasp_agent = GraspAgent()
@@ -32,14 +32,15 @@ while True:
         rgb=get_scene_RGB()
         grasp_agent.inputs(depth, rgb,args)
         if activate_segmentation_queries:
-            grasp_agent.publish_segmentation_query()
+            # args.text_prompt=input('Enter object/s name/s to be found.')
+            grasp_agent.publish_segmentation_query(args)
             grasp_agent.retrieve_segmentation_mask()
+            # grasp_agent.view_mask_as_2dimage()
         # view_image(rgb)
         # view_colored_point_cloud(rgb,depth)
         '''infer dense action value pairs'''
         grasp_agent.model_inference()
         # grasp_agent.report_current_scene_metrics()
-        # grasp_agent.view_mask_as_2dimage()
         # grasp_agent.view_predicted_normals()
 
         while True:

@@ -456,7 +456,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.step_online_training(max_size=10)
+        train_action_net.step_online_training(max_size=100)
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()

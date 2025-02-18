@@ -217,16 +217,18 @@ class GraspAgent():
     def suction_approach(self):
         return self.normals*-1
 
-    def publish_segmentation_query(self):
+    def publish_segmentation_query(self,args):
+        self.args=args
         TEXT_PROMPT = self.args.text_prompt
         if TEXT_PROMPT.strip()!='':
-            print('Publish segmentation query')
+            print(f'Publish segmentation query for ({TEXT_PROMPT})')
             segmentation_query_file_path=ip_address+r'\taqiaden_hub\segmentation_query//text_prompts.txt'
             segmentation_image_path=ip_address+r'\taqiaden_hub\segmentation_query//seg_image.jpg'
             save_to_server(segmentation_query_file_path,TEXT_PROMPT,binary_mode=False)
 
             '''save image'''
             save_image_to_server(segmentation_image_path,self.rgb)
+            view_image(self.rgb)
     def remove_seg_file(self):
         if smbclient.path.isfile(segmentation_result_file_path) or smbclient.path.islink(segmentation_result_file_path):
             smbclient.unlink(segmentation_result_file_path)
@@ -237,9 +239,11 @@ class GraspAgent():
             wait = wi('Waiting for segmentation result')
             while True:
                 if smbclient.path.exists(segmentation_result_file_path):
-                    mask=load_pickle_from_server(segmentation_result_file_path,allow_pickle=False)
+                    segmentation_mask=load_pickle_from_server(segmentation_result_file_path,allow_pickle=False)
+                    if segmentation_mask.shape==(1,):
+                        print(Fore.RED,'The queried object is not found!',Fore.RESET)
                     self.remove_seg_file()
-                    self.seg_mask=(torch.from_numpy(mask)[None,None,...]>0.5).cuda()
+                    self.seg_mask=(torch.from_numpy(segmentation_mask)[None,None,...]>0.5).cuda()
                     break
                 else:
                     wait.step(0.5)
@@ -577,8 +581,6 @@ class GraspAgent():
         relative_pose_5 = self.gripper_poses_5[action_obj.point_index]
         T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
 
-        # activate_exploration = True if np.random.rand() < exploration_probabilty else False
-
         collision_intensity = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
         if collision_intensity==0 and enhance_gripper_firmness:
             T_d=self.increase_gripper_penetration_distance(T_d,width,distance,step_factor=0.5)
@@ -612,7 +614,12 @@ class GraspAgent():
 
         action_obj.width=gripper_width_during_shift
         action_obj.transformation=T_d
-        action_obj.is_executable=True
+
+        has_collision = grasp_collision_detection(T_d, gripper_width_during_shift, self.voxel_pc, visualize=False,allowance=0.01)
+        # if has_collision:
+        #     grasp_collision_detection(T_d, gripper_width_during_shift, self.voxel_pc, visualize=True,allowance=0.01)
+
+        action_obj.is_executable=not has_collision
 
     def suction_processing(self,action_obj):
         normal = self.normals[action_obj.point_index]
@@ -623,9 +630,15 @@ class GraspAgent():
         b = trimesh.transformations.vector_product(v0, -normal)
         T = trimesh.transformations.rotation_matrix(a, b)
         T[:3, 3] = target_point.T
-        
+
         action_obj.transformation=T
-        action_obj.is_executable=True
+
+
+        has_collision = grasp_collision_detection(T, gripper_width_during_shift, self.voxel_pc, visualize=False,allowance=0.01)
+        # if has_collision:
+        #     grasp_collision_detection(T, gripper_width_during_shift, self.voxel_pc, visualize=True,allowance=0.01)
+
+        action_obj.is_executable=not has_collision
 
     def process_action(self,action_obj):
         if action_obj.is_grasp:
@@ -871,6 +884,7 @@ class GraspAgent():
             first_action_obj.executed=True
             second_action_obj.executed=True
             if first_action_obj.is_shift:
+                if gripper_grasp==False or suction_grasp==False: return # do not update the buffer when any arm grasp function is disabled
                 first_action_obj.shift_result=check_image_similarity(img_main_pre, img_main_after)
                 self.shift_rate.update(1)
             else:
