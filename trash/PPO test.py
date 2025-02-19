@@ -203,7 +203,6 @@ class Agent():
                 if int(dones_arr[k]) == 1:
                     running_advantage += reward_arr[k] - value_arr[k]
                 else:
-
                     running_advantage += reward_arr[k] + (self.gamma * value_arr[k + 1]) - value_arr[k]
 
                 running_advantage = discount * running_advantage

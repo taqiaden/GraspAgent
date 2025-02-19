@@ -34,7 +34,6 @@ buffer_file='buffer.pkl'
 action_data_tracker_path=r'online_data_dict.pkl'
 cache_name='clustering'
 
-
 online_data2=online_data2()
 
 # bce_loss= torch.nn.BCELoss()
@@ -47,6 +46,8 @@ def policy_loss(new_policy_probs,old_policy_probs,advantages,epsilon=0.2):
 
 class TrainPolicyNet:
     def __init__(self,learning_rate=5e-5):
+
+        self.policy_clip_margin=0.2
 
         self.action_net = None
         self.learning_rate=learning_rate
@@ -72,7 +73,6 @@ class TrainPolicyNet:
         ''''statistics tracker'''
         self.ini_policy_moving_loss=MovingRate(policy_module_key+'_ini_policy_moving_loss',min_decay=0.01)
         self.ini_value_moving_loss=MovingRate(policy_module_key+'_ini_value_moving_loss',min_decay=0.01)
-
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
@@ -296,7 +296,6 @@ class TrainPolicyNet:
 
         return target_masks,objects_mask
 
-
     def get_point_clouds(self,depth):
 
         pcs = []
@@ -419,7 +418,7 @@ class TrainPolicyNet:
             pi.step(i)
         pi.end()
 
-    def get_seize_policy_loss(self,seize_policy_batch):
+    def forward_seize_policy_loss(self,seize_policy_batch):
         rgb, depth, target_masks, pose_7, gripper_pixel_index, \
             suction_pixel_index, gripper_score, \
             suction_score, normal, used_gripper, used_suction, file_ids = seize_policy_batch
@@ -462,11 +461,58 @@ class TrainPolicyNet:
 
         return quality_loss
 
-    def get_clear_policy_loss(self,clear_policy_batch):
-        return 0
+    def forward_clear_policy_loss(self,clear_policy_batch):
 
-    def second_phase_training(self,max_size=100,batch_size=1):
+        (rgb, depth, target_masks,values,advantages,
+         action_indexes,point_indexes,probs,rewards,
+         end_of_episodes)=clear_policy_batch
 
+        pcs, masks=self.get_point_clouds(depth)
+
+        b = rgb.shape[0]
+        w = rgb.shape[2]
+        h = rgb.shape[3]
+
+        '''process pose'''
+        pose_7_stack = torch.zeros((b, 7, w, h), device=rgb.device)
+        normal_stack = torch.zeros((b, 3, w, h), device=rgb.device)
+
+        griper_grasp_quality_score, suction_grasp_quality_score, \
+            q_value, action_probs, _ = \
+            self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
+
+        '''accumulate critic actor loss'''
+        actor_loss=torch.tensor(0.,device=q_value.device)
+        critic_loss=torch.tensor(0.,device=q_value.device)
+        for j in range(b):
+            mask=masks[j]
+            action_index=action_indexes[j]
+            point_index=point_indexes[j]
+
+            q_value_j = q_value[j].permute(1, 2, 0)[mask]
+            action_probs_j = action_probs[j].permute(1, 2, 0)[mask]
+
+            old_probs=probs[j]
+            new_probs=action_probs_j[point_index,action_index]
+            new_probs=torch.log(new_probs)
+
+            prob_ratio = new_probs.exp() / old_probs.exp()
+            weighted_probs = advantages[j] * prob_ratio
+            weighted_clipped_probs = torch.clamp(prob_ratio, 1 - self.policy_clip_margin,
+                                                 1 + self.policy_clip_margin) * advantages[j]
+
+            actor_loss += -torch.min(weighted_probs, weighted_clipped_probs)
+
+            critic_value=q_value_j[point_index,action_index]
+            returns=advantages[j]+values[j]
+
+            critic_loss += (returns - critic_value) ** 2
+
+        total_loss = actor_loss + 0.5 * critic_loss
+
+        return total_loss
+
+    def second_phase_training(self,max_size=100,batch_size=1,n_epochs = 4):
         '''dataloaders'''
         seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
         seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
@@ -474,19 +520,21 @@ class TrainPolicyNet:
         clear_policy_ids=self.buffer.generate_batches(batch_size)
         clear_policy_data_loader=self.get_clear_policy_dataloader(clear_policy_ids,batch_size,self.buffer)
 
-        pi = progress_indicator('Begin new training round: ', max_limit=len(seize_policy_data_loader))
-        for i, seize_policy_batch, clear_policy_batch in zip(seize_policy_data_loader, clear_policy_data_loader):
+        pi = progress_indicator('Begin new training round: ', max_limit=len(seize_policy_data_loader)*n_epochs)
+        for e in range(n_epochs):
+            for i, seize_policy_batch, clear_policy_batch in zip(seize_policy_data_loader, clear_policy_data_loader):
+                self.model_wrapper.model.zero_grad()
 
-            seize_policy_loss=self.get_seize_policy_loss(seize_policy_batch)
-            clear_policy_loss=self.get_clear_policy_loss(clear_policy_batch)
+                seize_policy_loss=self.forward_seize_policy_loss(seize_policy_batch)
+                seize_policy_loss.backward()
 
-            loss =  seize_policy_loss + clear_policy_loss
+                clear_policy_loss=self.forward_clear_policy_loss(clear_policy_batch)
+                clear_policy_loss.backward()
 
-            loss.backward()
+                self.model_wrapper.optimizer.step()
+                self.model_wrapper.optimizer.zero_grad()
 
-            self.model_wrapper.optimizer.step()
-
-            pi.step(i)
+                pi.step(i)
         pi.end()
 
     def view_result(self):
@@ -498,7 +546,6 @@ class TrainPolicyNet:
 
             self.ini_policy_moving_loss.view()
             self.ini_value_moving_loss.view()
-
 
     def save_statistics(self):
         self.gripper_quality_net_statistics.save()
