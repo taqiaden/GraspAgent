@@ -61,7 +61,6 @@ class TrainPolicyNet:
 
         self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
 
-
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         self.last_tracker_size=len(self.data_tracker)
 
@@ -312,14 +311,14 @@ class TrainPolicyNet:
     def quality_loss(self,griper_grasp_quality_score,suction_grasp_quality_score,gripper_score,suction_score,used_gripper,used_suction,gripper_pixel_index,suction_pixel_index):
         loss = torch.tensor(0., device=griper_grasp_quality_score.device) * griper_grasp_quality_score.mean()
         for j in range(griper_grasp_quality_score.shape[0]):
-            positive_margin=1. if used_gripper[j] and used_suction[j] else 0.
+            used_both_arm=used_gripper[j] and used_suction[j]
             if used_gripper[j]:
                 label = gripper_score[j]
                 if label == -1: continue
                 g_pix_A = gripper_pixel_index[j, 0]
                 g_pix_B = gripper_pixel_index[j, 1]
                 prediction = griper_grasp_quality_score[j, 0, g_pix_A, g_pix_B]
-                l = binary_smooth_l1(prediction, label,positive_margin=positive_margin)
+                l = binary_smooth_l1(prediction, label)
 
                 self.gripper_sampling_rate.update(1)
 
@@ -333,7 +332,7 @@ class TrainPolicyNet:
                 s_pix_A = suction_pixel_index[j, 0]
                 s_pix_B = suction_pixel_index[j, 1]
                 prediction = suction_grasp_quality_score[j, 0, s_pix_A, s_pix_B]
-                l = binary_smooth_l1(prediction, label,positive_margin=positive_margin)
+                l = binary_smooth_l1(prediction, label)
 
                 self.gripper_sampling_rate.update(0)
 
@@ -471,7 +470,6 @@ class TrainPolicyNet:
         rgb = rgb.cuda().float().permute(0, 3, 1, 2)
         target_masks = target_masks.cuda().float()
         depth = depth.cuda().float()
-
 
         pcs, masks=self.get_point_clouds(depth)
 
