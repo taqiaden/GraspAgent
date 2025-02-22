@@ -40,7 +40,7 @@ If you find this project helpful for your research, please consider citing the f
 ```
 
 ## Prerequisites
-The version of the main pakages used during the development of this repository are as follows:
+The following pakages version are used during the development of this repository:
 ```
 python=3.10.16
 torch=2.5.1
