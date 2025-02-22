@@ -3,9 +3,6 @@
 
 This repository is under construction.
 
-Stay tuned for the final issue of GraspAgent 2.0.
-
-
 ## Conventions
     - Normal defines a vector emerge out of the surface
     - Approach direction defines a vector pointing to the surface
@@ -21,7 +18,6 @@ Stay tuned for the final issue of GraspAgent 2.0.
         - succeed: the plan has been executed completely
         - failed: Unable to execute part or full of the path
         - reset: path plan is found but execution terminated due to an error
-
 
 ## Acknowledgements
 The collision detection unit and the ROS communication module are mainly handled by by Li Daheng, a senior member at RLIS Lab, CAISA, Bejing, China.
