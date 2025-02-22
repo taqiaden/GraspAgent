@@ -111,16 +111,6 @@ class GraspAgent():
 
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
-        # print(self.buffer.generate_batches(batch_size=3))
-        # exit()
-        # self.online_learning=PPOLearning()
-        # print(self.buffer.probs)
-        # print(self.buffer.is_end_of_episode)
-        # print(self.buffer.last_ending_index)
-        # print(self.buffer.advantages)
-        # print(self.buffer.rewards)
-        # print(self.buffer.values)
-        # print('----')
 
         self.gripper_usage_rate=MovingRate('gripper_usage',min_decay=0.01)
         self.suction_usage_rate=MovingRate('suction_usage',min_decay=0.01)
@@ -139,35 +129,14 @@ class GraspAgent():
         self.depth=None
         self.rgb=None
 
-        '''dense records'''
-        self.gripper_poses_5=None
-        self.gripper_poses_7=None
-        self.gripper_grasp_mask=None
-        self.suction_grasp_mask=None
-        self.gripper_shift_mask=None
-        self.suction_shift_mask=None
-        self.voxel_pc=None
-        self.normals=None
-        self.q_value=None
-        self.clear_policy=None
-        self.shift_end_points=None
-        self.valid_actions_mask=None
-        self.n_grasps=0
-        self.n_shifts=0
-        self.first_action_mask=None
-        self.target_object_mask=None
-        self.mask_numpy=None
-        self.valid_actions_on_target_mask=None
-        self.seg_mask=None
-        self.seize_policy=None
-        self.tmp_occupation_mask=None
+        self.rollback()
 
         '''track task sequence'''
         self.run_sequence=0
 
         self.remove_seg_file()
 
-    def clear(self):
+    def rollback(self):
         self.gripper_poses_5 = None
         self.gripper_poses_7 = None
         self.gripper_grasp_mask = None
@@ -189,6 +158,7 @@ class GraspAgent():
         self.seg_mask=None
         self.seize_policy=None
         self.tmp_occupation_mask=None
+        self.preferred_placement_side=False
 
     def print_report(self):
         print(Fore.BLUE)

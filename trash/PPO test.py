@@ -195,11 +195,14 @@ class Agent():
     def calculate_advanatage(self, reward_arr, value_arr, dones_arr):
         time_steps = len(reward_arr)
         advantage = np.zeros(len(reward_arr), dtype=np.float32)
+        # print(time_steps - 1)
+        # exit()
 
-        for t in range(0, time_steps - 1):
+        for t in range(0, time_steps ):
+            print(t,dones_arr[t])
             discount = 1
             running_advantage = 0
-            for k in range(t, time_steps - 1):
+            for k in range(t, time_steps):
                 if int(dones_arr[k]) == 1:
                     running_advantage += reward_arr[k] - value_arr[k]
                 else:
@@ -211,6 +214,8 @@ class Agent():
 
             advantage[t] = running_advantage
         advantage = torch.tensor(advantage).to(self.actor.device)
+        # print(advantage)
+        exit()
         return advantage
 
     def learn(self):
@@ -225,6 +230,7 @@ class Agent():
             values = torch.tensor(value_arr).to(self.actor.device)
 
             for batch in batches:
+                # print(batch,advantage_arr[batch])
                 states = torch.tensor(state_arr[batch], dtype=torch.float).to(self.actor.device)
                 old_probs = torch.tensor(old_prob_arr[batch]).to(self.actor.device)
                 actions = torch.tensor(action_arr[batch]).to(self.actor.device)
@@ -254,6 +260,7 @@ class Agent():
                 self.critic.optimizer.step()
 
         self.memory.clear_memory()
+        # exit()
 
 
 ### Train the model

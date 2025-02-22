@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--text-prompt", default="plate. stapler. banana. apple. box. shampoo.
 # small ball.")
 parser.add_argument("--text-prompt", default="gloves. ")
+parser.add_argument("--place-side", default="g") # (g) means place the object ath the parallel gripper side bin while (s) means place the object at the suction side
 
 args = parser.parse_args()
 grasp_agent = GraspAgent()
@@ -59,4 +60,4 @@ while True:
             else:
                 break
             '''clear dense data'''
-        grasp_agent.clear()
+        grasp_agent.rollback()

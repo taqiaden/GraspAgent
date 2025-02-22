@@ -68,4 +68,4 @@ class ClearPolicyDataset(data.Dataset):
 
 
     def __len__(self):
-        return len(self.buffer.last_ending_index)+1
+        return self.buffer.last_ending_index+1

@@ -60,14 +60,6 @@ if __name__ == "__main__":
     # target_index = np.random.choice(idx_nonzero)
     # print(open3d.__version__)
     # exit()
-    while True:
-        # print(0.5+torch.randn((1,))/2)
-        approach_ref = torch.rand(size=(1, 3), device='cuda')
-        approach_ref[:, 0:2] = approach_ref[:, 0:2] * torch.clamp(
-            torch.randn(size=(1, 2), device='cuda'), -1., 1.)
-        approach_ref[:, -1] = 1. - approach_ref[:, -1] ** 2
-        approach_ref = F.normalize(approach_ref, dim=-1)
-        print(approach_ref)
     # x=torch.rand((4,7))
     # t1=x.clone()
     # print(x)

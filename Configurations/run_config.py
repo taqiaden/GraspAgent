@@ -13,6 +13,7 @@ offline_point_cloud= False
 report_result=True
 single_arm_operation_mode=False
 activate_segmentation_queries=False
+activate_preferred_placement_side=True
 
 enhance_gripper_firmness=True
 

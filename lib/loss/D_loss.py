@@ -47,8 +47,8 @@ def l1_with_threshold_new(prediction,label,with_smooth=True):
         loss= smooth_l1_loss(loss, torch.zeros_like(loss))
     return loss
 
-def binary_smooth_l1(prediction, label):
-    loss = torch.clamp((1 - prediction) * label - prediction * (label - 1), 0)
+def binary_smooth_l1(prediction, label,positive_margin=0.):
+    loss = torch.clamp((1 - prediction+positive_margin) * label - prediction * (label - 1), 0)
     loss = smooth_l1_loss(loss, torch.zeros_like(loss))
     return loss
 

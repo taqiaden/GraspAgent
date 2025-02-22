@@ -48,11 +48,9 @@ class TrainPolicyNet:
     def __init__(self,learning_rate=5e-5):
 
         self.policy_clip_margin=0.2
-
         self.action_net = None
         self.learning_rate=learning_rate
         self.model_wrapper=ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
-
         self.quality_dataloader=None
 
         '''initialize statistics records'''
@@ -62,6 +60,8 @@ class TrainPolicyNet:
                                                               track_label_balance=True,min_decay=0.01)
 
         self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
+
+
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
         self.last_tracker_size=len(self.data_tracker)
 
@@ -312,13 +312,14 @@ class TrainPolicyNet:
     def quality_loss(self,griper_grasp_quality_score,suction_grasp_quality_score,gripper_score,suction_score,used_gripper,used_suction,gripper_pixel_index,suction_pixel_index):
         loss = torch.tensor(0., device=griper_grasp_quality_score.device) * griper_grasp_quality_score.mean()
         for j in range(griper_grasp_quality_score.shape[0]):
+            positive_margin=1. if used_gripper[j] and used_suction[j] else 0.
             if used_gripper[j]:
                 label = gripper_score[j]
                 if label == -1: continue
                 g_pix_A = gripper_pixel_index[j, 0]
                 g_pix_B = gripper_pixel_index[j, 1]
                 prediction = griper_grasp_quality_score[j, 0, g_pix_A, g_pix_B]
-                l = binary_smooth_l1(prediction, label)
+                l = binary_smooth_l1(prediction, label,positive_margin=positive_margin)
 
                 self.gripper_sampling_rate.update(1)
 
@@ -332,7 +333,7 @@ class TrainPolicyNet:
                 s_pix_A = suction_pixel_index[j, 0]
                 s_pix_B = suction_pixel_index[j, 1]
                 prediction = suction_grasp_quality_score[j, 0, s_pix_A, s_pix_B]
-                l = binary_smooth_l1(prediction, label)
+                l = binary_smooth_l1(prediction, label,positive_margin=positive_margin)
 
                 self.gripper_sampling_rate.update(0)
 
@@ -467,6 +468,11 @@ class TrainPolicyNet:
          action_indexes,point_indexes,probs,rewards,
          end_of_episodes)=clear_policy_batch
 
+        rgb = rgb.cuda().float().permute(0, 3, 1, 2)
+        target_masks = target_masks.cuda().float()
+        depth = depth.cuda().float()
+
+
         pcs, masks=self.get_point_clouds(depth)
 
         b = rgb.shape[0]
@@ -512,17 +518,21 @@ class TrainPolicyNet:
 
         return total_loss
 
-    def second_phase_training(self,max_size=100,batch_size=1,n_epochs = 4):
+    def second_phase_training(self,batch_size=1,n_epochs = 4):
         '''dataloaders'''
-        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
-        seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
-
         clear_policy_ids=self.buffer.generate_batches(batch_size)
+        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=len(clear_policy_ids))
+
+        seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
         clear_policy_data_loader=self.get_clear_policy_dataloader(clear_policy_ids,batch_size,self.buffer)
 
+        assert len(seize_policy_data_loader)==len(clear_policy_data_loader)
+
         pi = progress_indicator('Begin new training round: ', max_limit=len(seize_policy_data_loader)*n_epochs)
+        counter=0
         for e in range(n_epochs):
-            for i, seize_policy_batch, clear_policy_batch in zip(seize_policy_data_loader, clear_policy_data_loader):
+            for seize_policy_batch, clear_policy_batch in zip(seize_policy_data_loader, clear_policy_data_loader):
+                counter+=1
                 self.model_wrapper.model.zero_grad()
 
                 seize_policy_loss=self.forward_seize_policy_loss(seize_policy_batch)
@@ -534,7 +544,7 @@ class TrainPolicyNet:
                 self.model_wrapper.optimizer.step()
                 self.model_wrapper.optimizer.zero_grad()
 
-                pi.step(i)
+                pi.step(counter)
         pi.end()
 
     def view_result(self):
@@ -582,7 +592,9 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.first_phase_training(max_size=100)
+        # train_action_net.first_phase_training(max_size=100)
+        train_action_net.second_phase_training()
+
         train_action_net.export_check_points()
         train_action_net.save_statistics()
         train_action_net.view_result()

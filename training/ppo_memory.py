@@ -50,7 +50,7 @@ class PPOMemory():
             '''1) action is sampled from the stochastic policy'''
             self.append_to_policy_buffer(action_obj)
             '''task in process'''
-            self.effort_penalty(action_obj)
+            self.step_penalty(action_obj)
             self.is_end_of_episode.append(0)
         elif action_obj.policy_index==1:
             '''2) action is sampled from the deterministic policy'''
@@ -73,8 +73,7 @@ class PPOMemory():
                 self.is_end_of_episode[-1]=1
                 self.update_advantages()
 
-
-    def effort_penalty(self,action_obj:Action):
+    def step_penalty(self,action_obj:Action):
         assert len(self.rewards)==len(self.episodic_file_ids)-1
         '''penalize each action to reduce the effort needed to reach the target'''
         k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
@@ -83,37 +82,42 @@ class PPOMemory():
     def positive_reward(self):
         '''add reward to the last action/s that leads to grasp the target in the current action'''
         if len(self.probs)>1:
-            self.rewards[-1] += 1
+            self.rewards[-1] += 1.
             if self.is_synchronous[-1]:
                 # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2]+=1
+                self.rewards[-2]+=1.
 
     def negative_reward(self):
         '''dedict reward to the last action/s that leads to the disappearance of the target in the new state'''
         if len(self.probs)>1:
-            self.rewards[-1] -= 1
+            self.rewards[-1] -= 1.
             if self.is_synchronous[-1]:
                 # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2]-=1
+                self.rewards[-2]-=1.
 
     def generate_batches(self,batch_size):
+        self.update_advantages()
+
         '''arrange batches to the end of the last completed episode'''
         n_states = self.last_ending_index+1
         batch_start = np.arange(0, n_states, batch_size)
         indices = np.arange(n_states, dtype=np.int64)
         np.random.shuffle(indices)
-        batches = [indices[i:i + batch_size] for i in batch_start]
+        # batches = [indices[i:i + batch_size] for i in batch_start]
+        batches=[]
+        for i in batch_start:
+            batches+=indices[i:i + batch_size].tolist()
         return  batches
 
     def update_advantages(self):
-        n_states = self.last_ending_index + 1
-        advantage = np.zeros(n_states, dtype=np.float32)
         start_=len(self.advantages)
+        end_=self.last_ending_index+1
 
-        for t in range(start_, n_states - 1):
+        for t in range(start_, end_):
             discount = 1
             running_advantage = 0
-            for k in range(t, n_states - 1):
+            for k in range(t, end_):
+
                 if self.is_end_of_episode[k] == 1:
                     running_advantage += self.rewards[k] - self.values[k]
                 else:
@@ -123,7 +127,6 @@ class PPOMemory():
                 if self.is_end_of_episode[k] == 1: break
 
             self.advantages.append(running_advantage)
-        return advantage
 
     def pop_policy_buffer(self,drop_size=1):
         for i in range(drop_size):
