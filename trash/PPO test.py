@@ -310,7 +310,6 @@ for i in range(n_games):
     done = False
     score = 0
 
-
     while not done:
         action, prob, val = agent.choose_action(current_state)
         next_state, reward, terminated, truncated, info = env.step(action)

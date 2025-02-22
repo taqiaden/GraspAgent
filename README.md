@@ -40,7 +40,7 @@ If you find this project helpful for your research, please consider citing the f
 ```
 
 ## Prerequisites
-
+The version of the main pakages used during the development of this repository are as follows:
 ```
 python=3.10.16
 torch=2.5.1
@@ -49,6 +49,6 @@ cuda=12.6
 ```
 
 - The segmentation queries are forwarded to a separate repository where a mask of the target object/s is retrieved.
-- We used the open source repository Grounded SAM 2.0 for the dedication and segmentation task:
+- We used the open source repository Grounded SAM 2.0 for the dedication and segmentation tasks:
     - [Grounded SAM 2.0](https://github.com/IDEA-Research/Grounded-SAM-2)
 

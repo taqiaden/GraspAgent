@@ -55,6 +55,7 @@ def soft_clipping(value,min_,max_,a=0.5*np.pi,b=-0.5*np.pi,epsilon=0.01):
         return 0.
 
 if __name__ == "__main__":
+    pass
     # x=np.array([0,1,0,1,0])
     # idx_nonzero, = np.nonzero(x)
     # target_index = np.random.choice(idx_nonzero)
