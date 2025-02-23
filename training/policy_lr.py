@@ -311,7 +311,6 @@ class TrainPolicyNet:
     def quality_loss(self,griper_grasp_quality_score,suction_grasp_quality_score,gripper_score,suction_score,used_gripper,used_suction,gripper_pixel_index,suction_pixel_index):
         loss = torch.tensor(0., device=griper_grasp_quality_score.device) * griper_grasp_quality_score.mean()
         for j in range(griper_grasp_quality_score.shape[0]):
-            used_both_arm=used_gripper[j] and used_suction[j]
             if used_gripper[j]:
                 label = gripper_score[j]
                 if label == -1: continue

@@ -17,7 +17,6 @@ class PPOMemory():
         self.rewards=deque([])
         self.values=deque([])
         self.advantages=deque([])
-        self.is_synchronous=deque([])
         self.action_indexes=deque([])
         self.point_indexes=deque([])
         self.probs=deque([])
@@ -37,7 +36,6 @@ class PPOMemory():
     def append_to_policy_buffer(self, action_obj:Action):
         self.values.append(action_obj.value)
         self.probs.append(action_obj.prob)
-        self.is_synchronous.append(action_obj.is_synchronous)
         self.action_indexes.append(action_obj.action_index)
         self.point_indexes.append(action_obj.point_index)
         self.episodic_file_ids.append(action_obj.file_id)
@@ -76,24 +74,17 @@ class PPOMemory():
     def step_penalty(self,action_obj:Action):
         assert len(self.rewards)==len(self.episodic_file_ids)-1
         '''penalize each action to reduce the effort needed to reach the target'''
-        k = 2 if action_obj.is_synchronous else 1 # less penalty if the robot runs both arms at the same time
-        self.rewards.append(-0.4/k)
+        self.rewards.append(-0.4)
 
     def positive_reward(self):
-        '''add reward to the last action/s that leads to grasp the target in the current action'''
-        if len(self.probs)>1:
+        '''add reward to the last action that leads to grasp the target in the current action'''
+        if len(self.probs)>0:
             self.rewards[-1] += 1.
-            if self.is_synchronous[-1]:
-                # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2]+=1.
 
     def negative_reward(self):
-        '''dedict reward to the last action/s that leads to the disappearance of the target in the new state'''
-        if len(self.probs)>1:
+        '''dedict reward to the last action that leads to the disappearance of the target in the new state'''
+        if len(self.probs)>0:
             self.rewards[-1] -= 1.
-            if self.is_synchronous[-1]:
-                # add rewards to the last two actions if both arms are used in the last run
-                self.rewards[-2]-=1.
 
     def generate_batches(self,batch_size):
         self.update_advantages()
@@ -141,7 +132,6 @@ class PPOMemory():
             self.point_indexes.popleft()
             self.advantages.popleft()
             self.is_end_of_episode.popleft()
-            self.is_synchronous.popleft()
             self.episodic_file_ids.popleft()
             '''move the index of the last episode ending'''
             self.last_ending_index-=1

@@ -7,7 +7,7 @@ This repository is under construction.
     - Normal defines a vector emerge out of the surface
     - Approach direction defines a vector pointing to the surface
     - Approach = -1 * normal
-    - The first three parameters of the generated pose for tyhe gripper are approach[0] and approach [1] and -1* approach[2]
+    - The first three parameters of the generated pose for the gripper are approach[0] and approach [1] and -1* approach[2]
     - The suction sampler outputs the normal direction
     - T_0 refers to a gripper head transformation matrix with zero penetration while T_d embeds the distance term
     - for any sequence we will always give the gripper the first index followed by the suction, e.g. if gripper grasp score locate at the (i) channel then the suction is located at (i+1) channel

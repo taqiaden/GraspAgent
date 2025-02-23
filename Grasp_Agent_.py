@@ -734,7 +734,7 @@ class GraspAgent():
         # if first_action_obj.policy_index==1:
         #     self.tmp_occupation_mask=self.tmp_occupation_mask & self.valid_actions_on_target_mask
 
-        if first_action_obj.is_shift or single_arm_operation_mode:
+        if first_action_obj.is_shift or single_arm_operation_mode or first_action_obj.policy_index==0:
             return first_action_obj, second_action_obj
 
         '''second action'''

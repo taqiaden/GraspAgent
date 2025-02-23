@@ -74,15 +74,17 @@ class GripperPartSampler(nn.Module):
             nn.Linear(16, 3),
         ).to('cuda')
 
+        self.approach_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=3,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
+
         # self.decoder_=self_att_res_mlp_LN(in_c1=64,out_c=7,relu_negative_slope=0.0).to('cuda')
         self.residual_1=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
         self.residual_2=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
-    def forward(self,representation_2d,alpha=0.,random_tensor=None,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
+    def forward(self,representation_2d,approach_seed=None,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
 
-        approach = self.decoder(representation_2d)
+        approach = self.decoder(representation_2d) if approach_seed is None else approach_seed+self.approach_decoder(representation_2d,approach_seed)
         beta = self.residual_1(representation_2d, approach)
         dist_width = self.residual_2(representation_2d, torch.cat([approach, beta], dim=-1))
         pose = torch.cat([approach, beta, dist_width], dim=-1)
@@ -109,8 +111,8 @@ class GripperPartSampler(nn.Module):
             # dist_width_ref[:,-2]+=0.01
             # s=int(randomization_factor*10)
             # dist_step=torch.randint(-s,s+1,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
-
             approach=approach*(1.0-randomization_factor)+approach_ref*randomization_factor
+
             beta=beta*(1.0-randomization_factor)+beta_noise*randomization_factor
             # dist_width=dist_width*(1-randomization_factor)+dist_width_ref*randomization_factor
 
@@ -195,11 +197,14 @@ class ActionNet(nn.Module):
             self.spatial_encoding = depth_xy_spatial_data(batch_size=depth.shape[0])
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-        '''gripper parameters'''
-        gripper_pose=self.gripper_sampler(features,alpha=alpha,random_tensor=random_tensor,clip=clip,randomization_factor=randomization_factor,dist_width_sigmoid=dist_width_sigmoid)
-
         '''suction direction'''
         suction_direction=self.suction_sampler(features)
+
+        '''gripper parameters'''
+        gripper_pose=self.gripper_sampler(features,approach_seed=suction_direction.detach(),clip=clip,randomization_factor=randomization_factor)
+
+
+
 
         '''gripper collision head'''
         gripper_pose_detached=gripper_pose.detach().clone()
