@@ -64,32 +64,20 @@ def randomize_beta(beta,alpha=0.0):
 class GripperPartSampler(nn.Module):
     def __init__(self):
         super().__init__()
-        self.decoder=nn.Sequential(
-            nn.Linear(64, 32, bias=False),
-            nn.LayerNorm([32]),
-            nn.LeakyReLU(negative_slope=gripper_sampler_relu_slope) if gripper_sampler_relu_slope>0. else nn.ReLU(),
-            nn.Linear(32, 16),
-            nn.LayerNorm([16]),
-            nn.LeakyReLU(negative_slope=gripper_sampler_relu_slope) if gripper_sampler_relu_slope > 0. else nn.ReLU(),
-            nn.Linear(16, 3),
-        ).to('cuda')
 
         self.approach_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=3,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
-
-        # self.decoder_=self_att_res_mlp_LN(in_c1=64,out_c=7,relu_negative_slope=0.0).to('cuda')
-        self.residual_1=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
-        self.residual_2=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
+        self.beta_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
+        self.dist_width_decoder=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
 
         self.gripper_regressor_layer=GripperGraspRegressor2()
 
     def forward(self,representation_2d,approach_seed=None,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
 
-        approach = self.decoder(representation_2d) if approach_seed is None else approach_seed+self.approach_decoder(representation_2d,approach_seed)
-        beta = self.residual_1(representation_2d, approach)
-        dist_width = self.residual_2(representation_2d, torch.cat([approach, beta], dim=-1))
+        approach = self.decoder(representation_2d) if approach_seed is None else self.approach_decoder(representation_2d,approach_seed)
+        beta = self.beta_decoder(representation_2d, approach)
+        dist_width = self.dist_width_decoder(representation_2d, torch.cat([approach, beta], dim=-1))
         pose = torch.cat([approach, beta, dist_width], dim=-1)
         pose=self.gripper_regressor_layer(pose,clip=clip,sigmoid=dist_width_sigmoid)
-
 
         if randomization_factor>0.:
             approach=F.normalize(approach, dim=-1)
@@ -124,6 +112,7 @@ class GripperPartSampler(nn.Module):
             beta = F.normalize(beta, dim=-1)
 
             pose = torch.cat([approach, beta, dist_width], dim=-1)
+            pose = self.gripper_regressor_layer(pose, clip=True, sigmoid=dist_width_sigmoid)
 
         return pose
 
