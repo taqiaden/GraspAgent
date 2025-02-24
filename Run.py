@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--text-prompt", default="plate. stapler. banana. apple. box. shampoo.
 # small ball.")
 parser.add_argument("--text-prompt", default="gloves. ")
-parser.add_argument("--place-side", default="g") # (g) means place the object ath the parallel gripper side bin while (s) means place the object at the suction side
+parser.add_argument("--placement-bin", default="g") # (g) means place the object ath the parallel gripper side bin while (s) means place the object at the suction side
 
 args = parser.parse_args()
 grasp_agent = GraspAgent()
@@ -42,7 +42,7 @@ while True:
         '''infer dense action value pairs'''
         grasp_agent.model_inference()
         # grasp_agent.report_current_scene_metrics()
-        # grasp_agent.view_predicted_normals()
+        grasp_agent.view_predicted_normals()
 
         while True:
             # grasp_agent.dense_view()

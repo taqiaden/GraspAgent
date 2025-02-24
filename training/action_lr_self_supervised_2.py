@@ -1,4 +1,6 @@
 import copy
+import os
+
 import numpy as np
 import torch
 from colorama import Fore
@@ -9,8 +11,8 @@ from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset, ActionDataset2
-from lib.IO_utils import custom_print
-from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
+from lib.IO_utils import custom_print, load_pickle, save_pickle
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, cache_dir
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
@@ -37,10 +39,18 @@ balanced_bce_loss=BalancedBCELoss()
 print=custom_print
 
 cos=nn.CosineSimilarity(dim=-1,eps=1e-6)
+cache_name='normals'
 
-def suction_sampler_loss(pc,target_normal):
+def suction_sampler_loss(pc,target_normal,file_index):
+    file_path = cache_dir + cache_name + '/' + file_index + '.pkl'
+    if os.path.exists(file_path):
+        labels = load_pickle(file_path)
+    else:
+        labels = estimate_suction_direction(pc,view=False)  # inference time on local computer = 1.3 s        if file_index is not None:
+        file_path = cache_dir + cache_name + '/' + file_index + '.pkl'
+        save_pickle(file_path, labels)
 
-    labels = estimate_suction_direction(pc, view=False)  # inference time on local computer = 1.3 s
+    # labels = estimate_suction_direction(pc, view=False)  # inference time on local computer = 1.3 s
     labels = torch.from_numpy(labels).to('cuda')
 
     return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
@@ -77,9 +87,9 @@ def critic_loss(c_,s_,f_,prediction_,label_):
             # margin=(1+c_[0])
             # return torch.abs(prediction_ - label_ + 1.)**2, True
             return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
-        # elif c_[0] + s_[0] == 0:
-        #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
-        #     return 0.0*(torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
+        elif c_[0] + s_[0] == 0:
+            # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
+            return (torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
         else:
             return 0.0, False
     else:
@@ -95,7 +105,7 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         elif f_[0] >= f_[1]:
             # return  (  label_ -prediction_+1.)**2, True
 
-            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
+            return (torch.clamp(label_ - prediction_, 0.))**2, True
         else:
             return 0.0, False
 
@@ -182,7 +192,7 @@ class TrainActionNet:
             depth = depth.cuda().float()  # [b,1,480.712]
             pi.step(i)
             max_n = 300
-            m = 16
+            m = 16 if self.moving_collision_rate.val<0.5 else 2
             # if self.moving_out_of_scope.val < 0.5 and i>10:
             #     m *= 2
             #     if self.moving_collision_rate.val < 0.7 : m *= 2
@@ -235,7 +245,7 @@ class TrainActionNet:
 
             n=int(min(max_n,selection_mask.sum()))
 
-            for k in range(n):
+            for _ in range(n):
                 # idx_nonzero, = np.nonzero(selection_mask)
                 dist=MaskedCategorical(probs=selection_p,mask=selection_mask)
 
@@ -309,7 +319,7 @@ class TrainActionNet:
                 pred_=pred_scores_[target_index]
                 gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**2) / m
 
-            suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[0][mask])
+            suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[0][mask],file_index=file_ids[0])
 
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask].detach()#.cpu().numpy()
             suction_head_predictions=suction_quality_classifier[0, 0][mask]

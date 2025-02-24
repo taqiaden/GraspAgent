@@ -48,20 +48,20 @@ class PolicyNet(nn.Module):
         self.rgb_back_bone = res_unet(in_c=5, Batch_norm=use_bn, Instance_norm=use_in,relu_negative_slope=relu_slope).to('cuda')
         self.pre_IN=nn.InstanceNorm2d(5).to('cuda')
 
+        '''clear policy'''
         self.critic=VanillaDecoder().to('cuda')
         self.actor=VanillaDecoder().to('cuda')
+
+        '''seize policy'''
         self.gripper_grasp = QualityRegressor( in_c2=7)
         self.suction_grasp = QualityRegressor( in_c2=3)
+
+        '''handover policy'''
+        self.handover_policy = QualityRegressor( in_c2=10)
 
         # self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-        self.depth_encoder = nn.Sequential(
-            nn.Linear(64, 64, bias=False),
-            nn.LayerNorm([64]),
-            nn.LeakyReLU(negative_slope=relu_slope) if relu_slope > 0. else nn.ReLU(),
-            nn.Linear(64, 64),
-        ).to('cuda')
 
     def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask):
         '''modalities preprocessing'''
@@ -73,8 +73,6 @@ class PolicyNet(nn.Module):
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 
-        '''depth features'''
-        depth_features=self.depth_encoder(rgb_features)
 
         '''Spatial data'''
         # if self.spatial_encoding.shape[0] != rgb.shape[0]:
@@ -90,6 +88,9 @@ class PolicyNet(nn.Module):
         suction_direction_detached = suction_direction.detach().clone()
         suction_direction_detached=reshape_for_layer_norm(suction_direction_detached, camera=camera, reverse=False)
         suction_grasp_score = self.suction_grasp(rgb_features, suction_direction_detached)
+
+        '''handover quality'''
+        handover_score=self.handover_policy(rgb_features,torch.cat([gripper_pose_detached,suction_direction_detached],dim=-1))
 
         '''q value'''
         q_values=self.critic(rgb_features)
@@ -110,5 +111,5 @@ class PolicyNet(nn.Module):
         action_probs=F.softmax(policy_reshaped,dim=-1)
         action_probs=action_probs.reshape(action_logits.shape)
 
-        return griper_grasp_score,suction_grasp_score,q_values,action_probs,depth_features
+        return griper_grasp_score,suction_grasp_score,q_values,action_probs,handover_score
 

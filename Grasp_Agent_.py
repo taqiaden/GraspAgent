@@ -149,8 +149,6 @@ class GraspAgent():
         self.clear_policy = None
         self.shift_end_points = None
         self.valid_actions_mask = None
-        self.n_grasps = 0
-        self.n_shifts = 0
         self.first_action_mask = None
         self.target_object_mask = None
         self.valid_actions_on_target_mask = None
@@ -159,6 +157,7 @@ class GraspAgent():
         self.seize_policy=None
         self.tmp_occupation_mask=None
         self.preferred_placement_side=False
+        self.handover_mask=None
 
     def print_report(self):
         print(Fore.BLUE)
@@ -389,8 +388,9 @@ class GraspAgent():
 
         '''policy net output'''
         griper_grasp_score, suction_grasp_score,\
-         q_value, clear_policy, policy_depth_features = \
+         q_value, clear_policy, handover_scores = \
             self.policy_net(rgb_torch,depth_torch,gripper_pose, suction_direction,self.target_object_mask.float())
+
 
         griper_grasp_score=torch.clip(griper_grasp_score,0.,1.)
         suction_grasp_score=torch.clip(suction_grasp_score,0.,1.)
@@ -406,6 +406,8 @@ class GraspAgent():
         shift_appealing=shift_appealing.squeeze()[mask]
         # view_image(self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
+
+
 
         # griper_grasp_score.fill_(1.)
         # suction_grasp_score.fill_(1.)
@@ -479,9 +481,19 @@ class GraspAgent():
         self.valid_actions_mask[:,2].masked_fill_(self.gripper_shift_mask,True)
         self.valid_actions_mask[:,3].masked_fill_(self.suction_shift_mask,True)
 
-        '''count available actions'''
-        self.n_grasps=torch.count_nonzero(self.valid_actions_mask[:,0:2])
-        self.n_shifts=torch.count_nonzero(self.valid_actions_mask[:,2:4])
+        '''handover processing'''
+        handover_scores=handover_scores.squeeze().permute(1,2,0)[mask]
+        self.handover_mask=handover_scores>0.5
+        if self.args.placement_bin=='g':
+            self.handover_mask[:,0]=False
+            # masked all suctions on target that can not allow a handover to the gripper end
+            self.valid_actions_on_target_mask[:, 1].masked_fill_(~self.handover_mask[:,1],False)
+        elif self.args.placement_bin=='s':
+            self.handover_mask[:,1]=False
+            # masked all gripper grasps on target that can not allow a handover to the suction end
+            self.valid_actions_on_target_mask[:, 0].masked_fill_(~self.handover_mask[:,0],False)
+        else:
+            self.handover_mask.fill_(False)
 
         '''to numpy'''
         self.normals=self.normals.cpu().numpy()
@@ -501,7 +513,9 @@ class GraspAgent():
         print(f'Available grasps on the target object/s is {(self.valid_actions_on_target_mask[:,0]).sum()} for gripper and {self.valid_actions_on_target_mask[:,1].sum()} for suction')
 
         '''clear actions'''
-        print( f'Total action space includes {self.n_grasps} grasps and {self.n_shifts} shifts')
+        n_grasps=torch.count_nonzero(self.valid_actions_mask[:,0:2])
+        n_shifts=torch.count_nonzero(self.valid_actions_mask[:,2:4])
+        print( f'Total action space includes {n_grasps} grasps and {n_shifts} shifts')
         print(f'Total available grasps are  {self.valid_actions_mask[:,0].sum()} using gripper and {self.valid_actions_mask[:,1].sum()} using suction')
         print(f'Total available shifts are  {self.valid_actions_mask[:,2].sum()} using gripper and {self.valid_actions_mask[:,3].sum()} using suction')
 

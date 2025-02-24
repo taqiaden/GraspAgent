@@ -103,6 +103,16 @@ def loop():
             '''get parameters'''
             pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
             pc = transform_to_camera_frame(pc, reverse=True)
+            # a=0.01
+            # b=100
+            # while True:
+            #     a=input(f'a={a}, enter new value')
+            #     b=input(f'b={b}, enter new value')
+            #     a=float(a)
+            #     b=int(b)
+
+            # estimate_suction_direction(pc, view=True)
+            # break
             # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()
             # spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
@@ -123,8 +133,8 @@ def loop():
             view_npy_open3d(pc, color=colors)
 
             '''suction grasp sampler'''
-            suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
-            estimate_suction_direction(pc, view=True, view_mask=suction_sampling_mask&objects_mask )
+            # suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
+            # estimate_suction_direction(pc, view=True)
 
             # break
 
@@ -134,8 +144,8 @@ def loop():
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
 
             '''shift action sampler'''
-            shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
-            estimate_suction_direction(pc, view=True, view_mask=shift_sampling_mask)
+            # shift_sampling_mask=shift_head_predictions.cpu().numpy().squeeze()>0.5
+            # estimate_suction_direction(pc, view=True)
 
             # view_scores(pc, gripper_head_predictions, threshold=0.5)
             # view_scores(pc, suction_head_predictions, threshold=0.5)

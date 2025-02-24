@@ -56,13 +56,11 @@ def scene_point_clouds_mask(point_data):
     z_mask = np.logical_and(point_data[:, 2] < 0.20, point_data[:, 2] > 0.04)
     mask = xy_mask & z_mask
     return point_data[mask]
-def get_o3d_norms(pcd):
 
-    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-    return pcd
-def get_npy_norms(pc):
+def get_npy_norms(pc,radius=0.01, max_nn=100):
     pcd=numpy_to_o3d(pc=pc)
-    pcd=get_o3d_norms(pcd)
+    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=max_nn))
+
     return pcd
 
 def random_down_sampling(point_data,number_of_points):
