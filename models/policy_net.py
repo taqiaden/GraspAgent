@@ -101,6 +101,7 @@ class PolicyNet(nn.Module):
         '''reshape'''
         griper_grasp_score = reshape_for_layer_norm(griper_grasp_score, camera=camera, reverse=True)
         suction_grasp_score = reshape_for_layer_norm(suction_grasp_score, camera=camera, reverse=True)
+        handover_score = reshape_for_layer_norm(handover_score, camera=camera, reverse=True)
         q_values = reshape_for_layer_norm(q_values, camera=camera, reverse=True)
         action_logits = reshape_for_layer_norm(action_logits, camera=camera, reverse=True)
 

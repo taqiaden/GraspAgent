@@ -24,7 +24,6 @@ grasp_agent.initialize_check_points()
 trigger_new_perception()
 
 while True:
-    # img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
     img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
 
     with torch.no_grad():

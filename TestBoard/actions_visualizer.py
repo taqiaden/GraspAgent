@@ -3,13 +3,11 @@ import torch
 from colorama import Fore
 from filelock import FileLock
 from torch.utils import data
-
 from Configurations.config import workers
 from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import GANWrapper
 from dataloaders.action_dl import ActionDataset
-
 from interpolate_bin import alpha
 from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report
@@ -111,7 +109,7 @@ def loop():
             #     a=float(a)
             #     b=int(b)
 
-            # estimate_suction_direction(pc, view=True)
+            estimate_suction_direction(pc, view=True)
             # break
             # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()

@@ -18,11 +18,16 @@ class Action():
             self.is_grasp=None
             self.use_gripper_arm=None
             self.use_suction_arm=None
+            self.arm_index=None
         else:
             self.is_shift = action_index > 1
             self.is_grasp = action_index <= 1
             self.use_gripper_arm = ((action_index == 0) or (action_index == 2))
             self.use_suction_arm = ((action_index == 1) or (action_index == 3))
+            self.arm_index=0 if self.use_gripper_arm else 1
+
+
+        self.is_handover=False
 
         '''rl data'''
         self.value=probs

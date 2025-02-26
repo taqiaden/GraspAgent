@@ -72,7 +72,7 @@ class GripperPartSampler(nn.Module):
     def forward(self,representation_2d,approach_seed=None,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
         # print(self.approach_decoder(representation_2d,approach_seed))
         # exit()
-        approach=approach_seed*self.approach_decoder(representation_2d,approach_seed)
+        approach=approach_seed#*self.approach_decoder(representation_2d,approach_seed)
         # approach = self.decoder(representation_2d) if approach_seed is None else self.approach_decoder(representation_2d,approach_seed)
         beta = self.beta_decoder(representation_2d, approach)
         dist_width = self.dist_width_decoder(representation_2d, torch.cat([approach, beta], dim=-1))
@@ -92,7 +92,7 @@ class GripperPartSampler(nn.Module):
             beta_noise=torch.randn((representation_2d.shape[0],2),device='cuda')
             # beta_noise=F.normalize(beta_noise, dim=-1)
             width_noise=1.-torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**2
-            dist_noise=-0.01+torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**5
+            dist_noise=-0.1+torch.rand(size=(representation_2d.shape[0], 1), device='cuda')**5
 
             # dist_width_ref=torch.zeros((representation_2d.shape[0],2),device='cuda')
             # dist_width_ref[:,-1]+=0.99
@@ -100,8 +100,8 @@ class GripperPartSampler(nn.Module):
             # s=int(randomization_factor*10)
             # dist_step=torch.randint(-s,s+1,(representation_2d.shape[0],1),device='cuda')*randomization_factor/10
             # approach=approach*(1.0-randomization_factor)+approach_ref*randomization_factor
-
-            beta=beta*(1.0-randomization_factor)+beta_noise*randomization_factor
+            b=randomization_factor**0.5
+            beta=beta*(1.0-b)+beta_noise*b
             # dist_width=dist_width*(1-randomization_factor)+dist_width_ref*randomization_factor
 
             dist_width[:,0:1]=(1.0-randomization_factor)*dist_width[:,0:1]+dist_noise*randomization_factor

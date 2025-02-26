@@ -14,6 +14,7 @@ report_result=True
 single_arm_operation_mode=False
 activate_segmentation_queries=False
 activate_preferred_placement_side=True
+activate_handover=True
 
 enhance_gripper_firmness=True
 

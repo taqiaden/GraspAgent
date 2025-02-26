@@ -87,9 +87,9 @@ def critic_loss(c_,s_,f_,prediction_,label_):
             # margin=(1+c_[0])
             # return torch.abs(prediction_ - label_ + 1.)**2, True
             return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
-        elif c_[0] + s_[0] == 0:
-            # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
-            return (torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
+        # elif c_[0] + s_[0] == 0:
+        #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
+        #     return (torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
         else:
             return 0.0, False
     else:
@@ -97,15 +97,12 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         # print(f'f____{sum(c_)} , {sum(s_) }')
         if f_[1] > f_[0]:
             # print('f=', f_)
-
             # return (prediction_ - label_ +1.)**2, True
             # margin=abs(f_[0]-f_[1])
-
             return (torch.clamp(prediction_ - label_ , 0.)) **2, True
         elif f_[0] >= f_[1]:
             # return  (  label_ -prediction_+1.)**2, True
-
-            return (torch.clamp(label_ - prediction_, 0.))**2, True
+            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
         else:
             return 0.0, False
 

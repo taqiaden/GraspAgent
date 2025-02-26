@@ -339,7 +339,6 @@ class TrainPolicyNet:
                 self.suction_quality_net_statistics.update_confession_matrix(label, prediction)
 
                 loss += l
-
         return loss
 
     def first_phase_training(self,max_size=100,batch_size=1):
