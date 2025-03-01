@@ -76,16 +76,17 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
 
 def critic_loss(c_,s_,f_,prediction_,label_):
     if  s_[0] > 0:
-        if s_[1] == 0:
+        if c_[1] + s_[1] == 0:
             return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
+
+        elif s_[1] == 0:
+            return (torch.clamp(prediction_ - label_ , 0.)) ** 2, True
         else:
             return 0.0, False
 
     if sum(c_)+sum(s_) > 0:
         if c_[1] + s_[1] == 0:
-            # print('c=',c_[0])
-            # margin=(1+c_[0])
-            # return torch.abs(prediction_ - label_ + 1.)**2, True
+
             return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
         # elif c_[0] + s_[0] == 0:
         #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
@@ -96,9 +97,7 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         '''improve firmness'''
         # print(f'f____{sum(c_)} , {sum(s_) }')
         if f_[1] > f_[0]:
-            # print('f=', f_)
-            # return (prediction_ - label_ +1.)**2, True
-            # margin=abs(f_[0]-f_[1])
+
             return (torch.clamp(prediction_ - label_ , 0.)) **2, True
         elif f_[0] >= f_[1]:
             # return  (  label_ -prediction_+1.)**2, True
@@ -172,7 +171,7 @@ class TrainActionNet:
         gan.ini_models(train=True)
 
         '''optimizers'''
-        #gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10)
         # gan.critic_rmsprop_optimizer(learning_rate=self.learning_rate)
         gan.critic_adam_optimizer(learning_rate=self.learning_rate*10,beta1=0.9)
         gan.generator_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
@@ -189,13 +188,12 @@ class TrainActionNet:
             depth = depth.cuda().float()  # [b,1,480.712]
             pi.step(i)
             max_n = 300
-            m = 16 if self.moving_collision_rate.val<0.5 else 2
+            m = 16 if (self.moving_collision_rate.val<0.5) or (self.moving_out_of_scope.val>0.1) else 2
             # if self.moving_out_of_scope.val < 0.5 and i>10:
             #     m *= 2
             #     if self.moving_collision_rate.val < 0.7 : m *= 2
             '''generate grasps'''
             with torch.no_grad():
-
                 gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
 
                 r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )
@@ -323,7 +321,6 @@ class TrainActionNet:
             gripper_head_predictions=griper_collision_classifier[0, :].permute(1,2,0)[mask]
             shift_head_predictions = shift_affordance_classifier[0, 0][mask]
             background_class_predictions = background_class.permute(0,2, 3, 1)[0, :, :, 0][mask]
-
 
             '''limits'''
             with torch.no_grad():
@@ -456,7 +453,7 @@ class TrainActionNet:
         self.background_detector_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-5
+    lr = 5e-6
     train_action_net = TrainActionNet( n_samples=None, learning_rate=lr)
     train_action_net.initialize(n_samples=100)
     train_action_net.begin()

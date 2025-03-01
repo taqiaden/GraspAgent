@@ -11,6 +11,11 @@ pr=my_print()
 
 class Action():
     def __init__(self,point_index=None,action_index=None, probs=None, value=None):
+        '''
+        This class accumulates all the data associated to an action
+        '''
+
+
         self.point_index=point_index
         self.action_index=action_index
         if action_index is None:
@@ -26,8 +31,13 @@ class Action():
             self.use_suction_arm = ((action_index == 1) or (action_index == 3))
             self.arm_index=0 if self.use_gripper_arm else 1
 
-
-        self.is_handover=False
+        '''
+        ---Handover state index---
+        0: for initial state of handover (delivering),
+        1: for the second attempt of handover state, 
+        2: for the final step of the handover (catching)
+        '''
+        self.handover_state=None
 
         '''rl data'''
         self.value=probs

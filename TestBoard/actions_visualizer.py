@@ -108,7 +108,6 @@ def loop():
             #     b=input(f'b={b}, enter new value')
             #     a=float(a)
             #     b=int(b)
-
             estimate_suction_direction(pc, view=True)
             # break
             # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
@@ -133,7 +132,6 @@ def loop():
             '''suction grasp sampler'''
             # suction_sampling_mask=suction_head_predictions.cpu().numpy().squeeze()>0.5
             # estimate_suction_direction(pc, view=True)
-
             # break
 
             '''gripper grasp sampler'''

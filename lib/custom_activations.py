@@ -52,8 +52,8 @@ class GripperGraspRegressor2(nn.Module):
             width=self.sigmoid(width)
 
         if clip:
-            dist= torch.clip(dist, 0., 1.)
-            width= torch.clip(width, 0., 1.)
+            dist= torch.clip(dist, 0.02, 0.98)
+            width= torch.clip(width, 0.02, 0.98)
 
         normalized_output = torch.cat([approach, beta, dist, width], dim=1)
         return normalized_output

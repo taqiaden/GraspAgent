@@ -108,6 +108,7 @@ class GraspAgent():
         self.policy_net = None
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
+        self.arm_state=0 # o: arm is at home position, 1, arm is at handover median state
 
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
@@ -742,14 +743,14 @@ class GraspAgent():
                 else: first_action_obj.policy_index=2
                 if action_obj.is_grasp:
                     self.tmp_occupation_mask=self.mask_arm_occupancy(action_obj)
-                    action_obj.is_handover=self.handover_mask[action_obj.point_index,action_obj.arm_index]
+                    action_obj.handover_state=0 if self.handover_mask[action_obj.point_index,action_obj.arm_index] else None
                 break
 
         if not first_action_obj.is_executable: exit('No executable action found ...')
         first_action_obj.target_point=self.voxel_pc[first_action_obj.point_index]
         first_action_obj.print()
 
-        if first_action_obj.is_shift or single_arm_operation_mode or first_action_obj.policy_index==0 or first_action_obj.is_handover:
+        if first_action_obj.is_shift or single_arm_operation_mode or first_action_obj.policy_index==0 or first_action_obj.handover_state is not None:
             return first_action_obj, second_action_obj
 
         '''second action'''
@@ -945,15 +946,20 @@ class GraspAgent():
 
     def process_feedback(self,first_action_obj:Action,second_action_obj:Action, img_grasp_pre, img_suction_pre,img_main_pre):
         pr.title('Process feedback')
-        new_state_is_avaliable=False
+        new_state_available=False
         if first_action_obj.robot_feedback == 'Succeed' or first_action_obj.robot_feedback == 'reset':
             trigger_new_perception()
-            new_state_is_avaliable=True
+            new_state_available=True
+
+            '''handover post processing'''
+            if first_action_obj.handover_state is not None:
+                if self.arm_state==1:
+                    first_action_obj.handover_state=1
 
         if report_result:
             self.report_result(first_action_obj,second_action_obj,img_grasp_pre, img_suction_pre,img_main_pre)
 
-        return new_state_is_avaliable
+        return new_state_available
 
 '''conventions'''
 # normal is a vector emerge out of the surface
