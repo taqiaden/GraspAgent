@@ -18,7 +18,7 @@ from Configurations.config import distance_scope, gripper_width_during_shift, ip
 from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, \
     enhance_gripper_firmness, single_arm_operation_mode, \
-    gripper_grasp, gripper_shift, suction_grasp, suction_shift, activate_segmentation_queries, activate_handover
+    enable_gripper_grasp, enable_gripper_shift, enable_suction_grasp, enable_suction_shift, activate_segmentation_queries, activate_handover
 from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
@@ -108,7 +108,13 @@ class GraspAgent():
         self.policy_net = None
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
-        self.arm_state=0 # o: arm is at home position, 1, arm is at handover median state
+        '''
+        handover_state_
+        None: no handover
+        0: first attempt of handover
+        1: second attempt of handover
+        '''
+        self.last_handover_state_=None
 
         self.buffer=online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
         self.data_tracker = DataTracker2(name=action_data_tracker_path, list_size=10)
@@ -371,6 +377,8 @@ class GraspAgent():
         self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
         self.voxel_pc = transform_to_camera_frame(self.voxel_pc, reverse=True)
         voxel_pc_tensor = torch.from_numpy(self.voxel_pc).to('cuda').float()
+
+        '''pixel-wise to point-wise sampling'''
         self.normals = suction_direction.squeeze().permute(1, 2, 0)[mask] # [N,3]
         poses = gripper_pose.squeeze().permute(1, 2, 0)[mask]
 
@@ -399,14 +407,14 @@ class GraspAgent():
          q_value, clear_policy, handover_scores = \
             self.policy_net(rgb_torch,depth_torch,gripper_pose, suction_direction,self.target_object_mask.float())
 
-
+        '''clip quality score'''
         griper_grasp_score=torch.clip(griper_grasp_score,0.,1.)
         suction_grasp_score=torch.clip(suction_grasp_score,0.,1.)
+        handover_scores=torch.clip(handover_scores,0.,1.)
 
-        '''reshape'''
+        '''pixel-wise to point-wise'''
         griper_object_collision_classifier=griper_collision_classifier[0,0][mask]
         griper_bin_collision_classifier=griper_collision_classifier[0,0][mask]
-
         griper_grasp_score=griper_grasp_score.squeeze()[mask]
         suction_seal_classifier=suction_seal_classifier.squeeze()[mask]
         suction_grasp_score=suction_grasp_score.squeeze()[mask]
@@ -414,6 +422,9 @@ class GraspAgent():
         shift_appealing=shift_appealing.squeeze()[mask]
         # view_image(self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
         self.target_object_mask=self.target_object_mask.squeeze()[mask]
+        self.q_value=q_value.squeeze().permute(1,2,0)[mask]
+        self.clear_policy=clear_policy.squeeze().permute(1,2,0)[mask]
+        handover_scores=handover_scores.squeeze().permute(1,2,0)[mask]
 
 
         '''correct background mask'''
@@ -439,51 +450,45 @@ class GraspAgent():
         '''grasp actions'''
         self.gripper_grasp_mask=(object_mask*gripper_grasp_reachablity_mask
                                *gripper_collision_mask
-                               *gripper_grasbablity_mask* gripper_grasp)
+                               *gripper_grasbablity_mask* enable_gripper_grasp)
         self.suction_grasp_mask=(object_mask*suction_grasp_reachablity_mask
                                *seal_quality_mask
-                               *suctionablity_mask* suction_grasp)
+                               *suctionablity_mask* enable_suction_grasp)
         # view_mask(voxel_pc_,self.gripper_grasp_mask)
         # view_mask(voxel_pc_,self.suction_grasp_mask)
 
         '''shift actions'''
-        self.gripper_shift_mask=(shift_appealing_mask*gripper_shift_reachablity_mask* gripper_shift)#*(shift_affordance_classifier>0.5)
-        self.suction_shift_mask=(shift_appealing_mask*suction_shift_reachablity_mask* suction_shift) #*(shift_affordance_classifier>0.5)
+        self.gripper_shift_mask=(shift_appealing_mask*gripper_shift_reachablity_mask* enable_gripper_shift)
+        self.suction_shift_mask=(shift_appealing_mask*suction_shift_reachablity_mask* enable_suction_shift)
 
         # view_mask(voxel_pc_,(shift_appealing>0.5))
         # view_mask(voxel_pc_,(suction_shift_scope>0.5))
         # view_mask(voxel_pc_,self.suction_shift_mask)
 
-        '''gripper pose convention'''
-        self.gripper_poses_7=poses
-        self.gripper_poses_5 = vectors_to_ratio_metrics(poses.clone())
+        '''change gripper pose represntation'''
+        self.gripper_poses_7=poses # approach 3d, beta 2d , width, dist
+        self.gripper_poses_5 = vectors_to_ratio_metrics(poses.clone()) # #3 angles, width, dist
 
-        '''initiate random policy'''
-        # self.q_value=torch.rand_like(q_value.squeeze().permute(1,2,0)[mask])
-        self.q_value=q_value.squeeze().permute(1,2,0)[mask]
-
-        self.clear_policy=clear_policy.squeeze().permute(1,2,0)[mask]
+        '''initialize the seize policy'''
         self.seize_policy=torch.zeros_like(self.clear_policy)
         self.seize_policy[:,0]=griper_grasp_score
         self.seize_policy[:,1]=suction_grasp_score
 
-        self.valid_actions_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
-        self.valid_actions_on_target_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
-
-        gripper_actions_mask_on_target= self.gripper_grasp_mask & self.target_object_mask
-        suction_actions_mask_on_target= self.suction_grasp_mask & self.target_object_mask
-
-        self.valid_actions_on_target_mask[:,0].masked_fill_(gripper_actions_mask_on_target,True)
-        self.valid_actions_on_target_mask[:,1].masked_fill_(suction_actions_mask_on_target,True)
-
         '''initialize valid actions mask'''
+        self.valid_actions_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
         self.valid_actions_mask[:,0].masked_fill_(self.gripper_grasp_mask,True)
         self.valid_actions_mask[:,1].masked_fill_(self.suction_grasp_mask,True)
         self.valid_actions_mask[:,2].masked_fill_(self.gripper_shift_mask,True)
         self.valid_actions_mask[:,3].masked_fill_(self.suction_shift_mask,True)
 
+        '''initialize valid actions mask on target'''
+        self.valid_actions_on_target_mask=torch.zeros_like(self.q_value,dtype=torch.bool)
+        gripper_actions_mask_on_target= self.gripper_grasp_mask & self.target_object_mask
+        suction_actions_mask_on_target= self.suction_grasp_mask & self.target_object_mask
+        self.valid_actions_on_target_mask[:,0].masked_fill_(gripper_actions_mask_on_target,True)
+        self.valid_actions_on_target_mask[:,1].masked_fill_(suction_actions_mask_on_target,True)
+
         '''handover processing'''
-        handover_scores=handover_scores.squeeze().permute(1,2,0)[mask]
         self.handover_processing(handover_scores)
 
         '''to numpy'''
@@ -499,11 +504,13 @@ class GraspAgent():
     def handover_processing(self,handover_scores):
         self.handover_mask=handover_scores>0.5
         if self.args.placement_bin=='g':
+            '''place at gripper side container'''
             self.handover_mask[:,0]=False
             if activate_handover==False:self.handover_mask[:,1]=False
             # masked all suctions on target that can not allow a handover to the gripper arm
             self.valid_actions_on_target_mask[:, 1].masked_fill_(~self.handover_mask[:,1],False)
         elif self.args.placement_bin=='s':
+            ''''place at the suction side container'''
             self.handover_mask[:,1]=False
             if activate_handover==False:self.handover_mask[:,0]=False
             # masked all gripper grasps on target that can not allow a handover to the suction arm
@@ -721,6 +728,7 @@ class GraspAgent():
         view_npy_open3d(four_pc_stack, color=colors)
 
     def pick_action(self):
+        # TODO: prioritize the grasp with the selected arm when handover is an option
         pr.title('pick action/s')
         first_action_obj=Action()
         second_action_obj=Action()
@@ -827,7 +835,7 @@ class GraspAgent():
         second_action_obj.robot_feedback = robot_feedback_
         return first_action_obj,second_action_obj
 
-    def execute(self,first_action_obj,second_action_obj):
+    def execute(self,  first_action_obj:Action,second_action_obj:Action):
         pr.title('execute action')
         pr.print('Deploy action commands')
         if not first_action_obj.is_valid: return first_action_obj,second_action_obj
@@ -836,12 +844,15 @@ class GraspAgent():
 
         if not simulation_mode:
             pr.print('Run robot')
+            cmd = '''#!/bin/bash
+                                        source /home/yumi/yumi_egm_ws/devel/setup.bash
+                                        rostopic pub -1 /execute_robot std_msgs/Int32 "data: '''
             set_wait_flag()
             if second_action_obj.is_valid and (first_action_obj.is_grasp and second_action_obj.is_grasp):
-                '''grasp with the two arms'''
+                '''dual grasp'''
                 subprocess.run(execute_both_grasp_bash)
             elif first_action_obj.is_grasp:
-                '''grasp'''
+                '''single grasp'''
                 if first_action_obj.use_gripper_arm:
                     subprocess.run(execute_gripper_grasp_bash)
                 else:
@@ -854,6 +865,38 @@ class GraspAgent():
                 else:
                     '''suction'''
                     subprocess.run(execute_suction_shift_bash)
+            elif first_action_obj.handover_state is not None:
+                if first_action_obj.use_gripper_arm:
+                    '''gripper'''
+                    if first_action_obj.handover_state==0:
+                        '''hand'''
+                        subprocess.run(cmd+'8"',shell=True,text=True,capture_output=False,check=True)
+                    elif first_action_obj.handover_state==1:
+                        '''rotate'''
+                        subprocess.run(cmd + '12"', shell=True, text=True, capture_output=False, check=True)
+                    elif first_action_obj.handover_state==2:
+                        '''grasp'''
+                        subprocess.run(cmd + '10"', shell=True, text=True, capture_output=False, check=True)
+                    elif first_action_obj.handover_state==3:
+                        '''drop'''
+                        subprocess.run(cmd + '14"', shell=True, text=True, capture_output=False, check=True)
+
+                else:
+                    '''suction'''
+                    if first_action_obj.handover_state == 0:
+                        '''hand'''
+                        subprocess.run(cmd + '9"', shell=True, text=True, capture_output=False, check=True)
+                    elif first_action_obj.handover_state == 1:
+                        '''rotate'''
+                        subprocess.run(cmd + '13"', shell=True, text=True, capture_output=False, check=True)
+                    elif first_action_obj.handover_state == 2:
+                        '''grasp'''
+                        subprocess.run(cmd + '11"', shell=True, text=True, capture_output=False, check=True)
+                    elif first_action_obj.handover_state == 3:
+                        '''drop'''
+                        subprocess.run(cmd + '15"', shell=True, text=True, capture_output=False, check=True)
+
+
 
         return first_action_obj,second_action_obj
 
@@ -907,7 +950,6 @@ class GraspAgent():
                     print(Fore.YELLOW, 'No object is detected at to the suction side of the bin',Fore.RESET)
                     self.suction_grasp_success_rate.update(0)
 
-
             '''save action instance'''
             # assert gripper_action.result is not None or suction_action.result is not None
             gripper_action,suction_action=save_grasp_sample(self.rgb, self.depth,self.mask_numpy, gripper_action, suction_action,self.run_sequence)
@@ -953,7 +995,7 @@ class GraspAgent():
 
             '''handover post processing'''
             if first_action_obj.handover_state is not None:
-                if self.arm_state==1:
+                if self.last_handover_state_==0:
                     first_action_obj.handover_state=1
 
         if report_result:

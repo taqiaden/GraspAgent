@@ -189,15 +189,13 @@ class TrainActionNet:
             pi.step(i)
             max_n = 300
             m = 16 if (self.moving_collision_rate.val<0.5) or (self.moving_out_of_scope.val>0.1) else 2
-            # if self.moving_out_of_scope.val < 0.5 and i>10:
-            #     m *= 2
-            #     if self.moving_collision_rate.val < 0.7 : m *= 2
+
             '''generate grasps'''
             with torch.no_grad():
                 gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
 
                 r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )
-                print(r_k)
+                # print(r_k)
 
                 gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)
 
@@ -306,7 +304,6 @@ class TrainActionNet:
             generated_critic_score = self.gan.critic(depth.clone(), gripper_pose, detach_backbone=True)
             pred_scores_= generated_critic_score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
 
-            #method 1
             for j in range(m):
                 target_index = tracked_indexes[j][0]
                 weight=tracked_indexes[j][1]

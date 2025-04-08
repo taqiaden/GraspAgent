@@ -20,21 +20,60 @@ suction_shift_data_path = config.home_dir + 'suction_shift_data_tmp.npy'
 suction_pre_shift_data_path = config.home_dir + 'suction_pre_shift_data_tmp.npy'
 suction_end_shift_data_path = config.home_dir + 'suction_end_shift_data_tmp.npy'
 
+handover_rotation_data_path=config.home_dir + 'rotation_angle_tmp.npy'
+
 
 def deploy_action( action):
     if action.is_grasp:
+        '''grasp'''
         if action.use_gripper_arm:
             deploy_gripper_grasp_command(action)
         else:
-            '''suction grasp'''
+            '''suction'''
             deploy_suction_grasp_command(action)
-    else:
+
+    elif action.is_shift:
         '''shift'''
         if action.use_gripper_arm:
             deploy_gripper_shift_command(action)
         else:
-            '''suction grasp'''
+            '''suction'''
             deploy_suction_shift_command(action)
+
+    elif action.handover_state is not None:
+        '''handover'''
+        if action.use_gripper_arm:
+            if action.handover_state==0:
+                '''hold'''
+                deploy_gripper_grasp_command(action)
+            elif action.handover_state==1:
+                '''rotate'''
+                deploy_handover_rotate_command()
+            elif action.handover_state==2:
+                '''handover'''
+                deploy_gripper_grasp_command(action)
+            else:
+                '''drop'''
+                pass
+        else:
+            '''suction'''
+            if action.handover_state==0:
+                '''hold'''
+                deploy_suction_grasp_command(action)
+            elif action.handover_state==1:
+                '''rotate'''
+                deploy_handover_rotate_command()
+            elif action.handover_state==2:
+                '''handover'''
+                deploy_suction_grasp_command(action)
+            else:
+                '''drop'''
+                pass
+
+def deploy_handover_rotate_command( angle=90.):
+    angle=np.array(angle)
+    np.save(handover_rotation_data_path, angle)
+
 
 def deploy_gripper_grasp_command( action):
     pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.23)

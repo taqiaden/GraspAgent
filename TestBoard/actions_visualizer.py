@@ -83,11 +83,11 @@ def loop():
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = gan.generator(
                 depth.clone(),alpha=0.0,clip=True)
 
-            critic_score = gan.critic(depth.clone(), gripper_pose)
-            print(critic_score.mean())
-            print(critic_score.std())
-            print(critic_score.max())
-            print(critic_score.min())
+            # critic_score = gan.critic(depth.clone(), gripper_pose)
+            # print(critic_score.mean())
+            # print(critic_score.std())
+            # print(critic_score.max())
+            # print(critic_score.min())
 
         # view_features(depth_features,reshape=False)
         '''Evaluate generated grasps'''
@@ -108,7 +108,7 @@ def loop():
             #     b=input(f'b={b}, enter new value')
             #     a=float(a)
             #     b=int(b)
-            estimate_suction_direction(pc, view=True)
+            estimate_suction_direction(pc, view=False)
             # break
             # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()

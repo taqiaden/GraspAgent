@@ -12,10 +12,8 @@ pr=my_print()
 class Action():
     def __init__(self,point_index=None,action_index=None, probs=None, value=None):
         '''
-        This class accumulates all the data associated to an action
+        This class maintains record to all data associated to an action
         '''
-
-
         self.point_index=point_index
         self.action_index=action_index
         if action_index is None:
@@ -34,9 +32,11 @@ class Action():
         '''
         ---Handover state index---
         0: for initial state of handover (delivering),
-        1: for the second attempt of handover state, 
+        1: for the second attempt of the handover (rotating), 
         2: for the final step of the handover (catching)
+        3: drop
         '''
+
         self.handover_state=None
 
         '''rl data'''
@@ -116,6 +116,8 @@ class Action():
             return 'grasp'
         elif self.is_shift:
             return 'shift'
+        elif self.handover_state is not None:
+            return 'handover'
 
     def check_collision(self,point_cloud):
         if self.is_valid and self.is_grasp and self.use_gripper_arm:

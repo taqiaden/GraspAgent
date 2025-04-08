@@ -40,7 +40,6 @@ def train():
 
             gripper_scope.model.zero_grad()
 
-
             predictions=gripper_scope.model(input)
 
             '''update confession matrix'''

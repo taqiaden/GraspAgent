@@ -1,9 +1,9 @@
 
-gripper_grasp=False
-suction_grasp=False
+enable_gripper_grasp=False
+enable_suction_grasp=False
 
-gripper_shift=True
-suction_shift=True
+enable_gripper_shift=True
+enable_suction_shift=True
 
 view_grasp_suction_points = True
 view_action= True
