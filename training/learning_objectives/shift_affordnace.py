@@ -6,7 +6,7 @@ from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_effective_length=0.07
+shift_effective_length=0.09
 shift_execution_length=0.15
 
 shift_elevation_threshold = 0.00
@@ -53,6 +53,7 @@ def get_shift_mask(pc,shifted_start_point,end_point,spatial_mask):
 
     '''isolate the bin'''
     shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
+    shift_mask = shift_mask & (pc[:, 2] < shifted_start_point[2] + 0.05) # set the maximum highest in the shift path
     return shift_mask
 
 def estimate_shift_score(pc,shift_mask,shift_scores):

@@ -8,7 +8,7 @@ from colorama import Fore
 
 from Configurations import config
 from Configurations.config import home_dir
-from Configurations.run_config import simulation_mode, offline_point_cloud
+from Configurations.run_config import simulation_mode, offline_point_cloud, activate_refine_point_cloud
 from lib.depth_map import transform_to_camera_frame, point_clouds_to_depth
 from lib.image_utils import view_image
 from lib.pc_utils import refine_point_cloud, random_down_sampling, closest_point, scene_point_clouds_mask
@@ -115,8 +115,8 @@ def get_scene_depth():
     '''load transform, and convert'''
     point_clouds = np.load(sensory_pc_path) # (<191000, 3) number of points is not constant
     # view_npy_open3d(point_clouds)
-    #
-    # point_clouds = refine_point_cloud(point_clouds)
+    if activate_refine_point_cloud:
+        point_clouds = refine_point_cloud(point_clouds)
     # view_npy_open3d(point_clouds)
     transformed_point_clouds = transform_to_camera_frame(point_clouds)
     depth = point_clouds_to_depth(transformed_point_clouds, camera)

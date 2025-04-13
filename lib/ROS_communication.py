@@ -24,20 +24,24 @@ handover_rotation_data_path=config.home_dir + 'rotation_angle_tmp.npy'
 
 
 def deploy_action( action):
-    if action.is_grasp:
+    if action.is_grasp and action.handover_state is None:
         '''grasp'''
         if action.use_gripper_arm:
+            print('deploy gripper grasp command')
             deploy_gripper_grasp_command(action)
         else:
             '''suction'''
+            print('deploy suction grasp command')
             deploy_suction_grasp_command(action)
 
     elif action.is_shift:
         '''shift'''
         if action.use_gripper_arm:
+            print('deploy gripper shift command')
             deploy_gripper_shift_command(action)
         else:
             '''suction'''
+            print('deploy suction shift command')
             deploy_suction_shift_command(action)
 
     elif action.handover_state is not None:
@@ -45,47 +49,61 @@ def deploy_action( action):
         if action.use_gripper_arm:
             if action.handover_state==0:
                 '''hold'''
+                print('deploy handover (gripper grasp) command')
                 deploy_gripper_grasp_command(action)
             elif action.handover_state==1:
                 '''rotate'''
+                print('deploy handover (gripper rotate) command')
                 deploy_handover_rotate_command()
             elif action.handover_state==2:
                 '''handover'''
+                print('deploy handover (suction grasp) command')
                 deploy_gripper_grasp_command(action)
             else:
                 '''drop'''
+                print('deploy handover (drop) command')
                 pass
         else:
             '''suction'''
             if action.handover_state==0:
                 '''hold'''
+                print('deploy handover (suction grasp) command')
                 deploy_suction_grasp_command(action)
             elif action.handover_state==1:
                 '''rotate'''
+                print('deploy handover (suction rotate) command')
                 deploy_handover_rotate_command()
             elif action.handover_state==2:
                 '''handover'''
+                print('deploy handover (gripper grasp) command')
                 deploy_suction_grasp_command(action)
             else:
                 '''drop'''
+                print('deploy handover (drop) command')
                 pass
 
-def deploy_handover_rotate_command( angle=90.):
+def deploy_handover_rotate_command( angle=np.pi/2):
     angle=np.array(angle)
     np.save(handover_rotation_data_path, angle)
 
 
-def deploy_gripper_grasp_command( action):
+def deploy_gripper_grasp_command( action,angle=0.):
     pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.23)
     end_mat = adjust_final_matrix(action.transformation, x_correction=-0.169)
     save_gripper_data(end_mat, action.real_width, gripper_grasp_data_path)
     save_gripper_data(pre_mat, action.real_width, gripper_pre_grasp_data_path)
 
-def deploy_suction_grasp_command( action):
+    angle = np.array(angle)
+    np.save(handover_rotation_data_path, angle)
+
+def deploy_suction_grasp_command( action,angle=0.0):
     pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.25)
     end_mat = adjust_final_matrix(action.transformation, x_correction=-0.184)
     save_suction_data(end_mat, suction_grasp_data_path)
     save_suction_data(pre_mat, suction_pre_grasp_data_path)
+
+    angle = np.array(angle)
+    np.save(handover_rotation_data_path, angle)
 
 def deploy_gripper_shift_command( action):
     pre_mat=adjust_final_matrix(action.transformation, x_correction=-0.23)

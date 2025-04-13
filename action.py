@@ -1,5 +1,6 @@
 import numpy as np
 from Configurations import config
+from Configurations.ENV_boundaries import knee_ref_elevation
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.mesh_utils import construct_gripper_mesh_2
@@ -38,6 +39,11 @@ class Action():
         '''
 
         self.handover_state=None
+        self.handover_angle=None
+        self.handover_result=None
+
+        self.gripper_at_home_position=True
+        self.suction_at_home_position=True
 
         '''rl data'''
         self.value=probs
@@ -60,6 +66,12 @@ class Action():
         self.robot_feedback=None
         self.grasp_result=None
         self.shift_result=None
+
+    def set_activated_arm_position(self,at_home):
+        if self.use_gripper_arm:
+            self.gripper_at_home_position=at_home
+        else:
+            self.suction_at_home_position=at_home
 
     @property
     def action_name(self):
@@ -143,15 +155,33 @@ class Action():
     @property
     def normal(self):
         if self.transformation is not None:
-            normal = self.approach*-1
+            normal = self.transformation[0:3, 0]*-1
             return normal
         else:
             return None
+
+    @property
+    def knee_extreme_point(self):
+        res_elevation = knee_ref_elevation - self.target_point[-1]
+        arm_knee_margin = res_elevation / self.normal[-1]
+        arm_knee_extreme=(self.target_point + self.normal * arm_knee_margin)#[1]
+        return arm_knee_extreme
+
 
     def get_approach_mesh(self):
         if self.is_valid and self.transformation is not None:
             arrow_emerge_point=self.target_point-self.approach*0.05
             arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.3)
+            return arrow_mesh
+        else:
+            return None
+
+    def get_approach_mesh2(self):
+        if self.is_valid and self.transformation is not None:
+            arrow_emerge_point=self.knee_extreme_point
+            legneth=np.linalg.norm(self.target_point-arrow_emerge_point)
+            print('Arrow knee point:',arrow_emerge_point,' Arrow legnth:',legneth)
+            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=0.3)
             return arrow_mesh
         else:
             return None
@@ -170,6 +200,23 @@ class Action():
                 else:
                     arrow_mesh.paint_uniform_color([0.5, 0.5, 0.5])
                 return arrow_mesh
+        else:
+            return None
+
+    def pose_mesh2(self):
+        if self.is_valid:
+            arrow_mesh=self.get_approach_mesh2()
+            if self.is_grasp:
+                arrow_mesh.paint_uniform_color([0.5, 0.9, 0.5])
+            else:
+                arrow_mesh.paint_uniform_color([0.5, 0.5, 0.5])
+
+            if self.use_gripper_arm:
+                if self.is_grasp:
+                    gripper_mesh= self.get_gripper_mesh()
+                    return [arrow_mesh,gripper_mesh]
+
+            return [arrow_mesh]
         else:
             return None
 

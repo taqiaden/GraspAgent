@@ -8,15 +8,17 @@ online_data2=online_data2()
 
 #[key] file id
 '''gripper records'''
-# [0] 1 if gripper is used else 1
-# [1] 0 for grasp 1 for shift
+# [0] 1 if gripper is used else 0
+# [1] 0 for grasp 1 for shift 2 for handover
 # [2] grasp result
 # [3] shift result
 '''suction records'''
-# [4] if suction is used else 1
-# [5] 0 for grasp 1 for shift
+# [4] 1 if suction is used else 0
+# [5] 0 for grasp 1 for shift 2 for handover
 # [6] grasp result
 # [7] shift result
+'''both records'''
+# [8] handover result
 
 gripper_container_size=10
 suction_container_size=10
@@ -61,16 +63,24 @@ class DataTracker2():
         if action_obj.use_gripper_arm:
             '''gripper'''
             new_record[0] = 1 if action_obj.use_gripper_arm else 0
-            new_record[1] = 0 if action_obj.is_grasp else 1
+            if action_obj.handover_state is not None:
+                new_record[1]=2
+            else:
+                new_record[1] = 0 if action_obj.is_grasp else 1
             new_record[2] = action_obj.grasp_result
             new_record[3] = action_obj.shift_result
 
-        else:
+        if action_obj.use_suction_arm:
             '''suction'''
             new_record[4] = 1 if action_obj.use_suction_arm else 0
-            new_record[5] = 0 if action_obj.is_grasp else 1
+            if action_obj.handover_state is not None:
+                new_record[5]=2
+            else:
+                new_record[5] = 0 if action_obj.is_grasp else 1
             new_record[6] = action_obj.grasp_result
             new_record[7] = action_obj.shift_result
+
+        new_record[8]=action_obj.handover_result
 
         self.dict[action_obj.file_id]=new_record
 

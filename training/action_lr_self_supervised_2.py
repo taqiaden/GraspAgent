@@ -15,7 +15,8 @@ from lib.IO_utils import custom_print, load_pickle, save_pickle
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, cache_dir
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds,point_clouds_to_depth
+from lib.image_utils import view_image
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
@@ -25,6 +26,7 @@ from registration import camera
 from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps3
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_seal import suction_seal_loss
+from visualiztion import view_o3d, view_npy_open3d
 
 detach_backbone=False
 
@@ -115,7 +117,7 @@ class TrainActionNet:
         '''model wrapper'''
         self.gan=self.prepare_model_wrapper()
         self.ref_generator=copy.deepcopy(self.gan.generator)
-        self.ref_generator.eval()
+        self.ref_generator.train()
         self.data_loader=None
 
         '''Moving rates'''
@@ -178,6 +180,20 @@ class TrainActionNet:
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
         return gan
 
+    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2):
+        with torch.no_grad():
+            _, _, _, _, _, background_class_3, _ = self.gan.generator(
+                original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
+
+            '''Elevation-based Augmentation'''
+            objects_mask = background_class_3 <= 0.5
+            shift_entities_mask = objects_mask & (original_depth > 0.0001)
+            new_depth = original_depth.clone().detach()
+            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()) * camera.scale
+
+            return new_depth
+
+
     def begin(self):
 
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
@@ -189,15 +205,17 @@ class TrainActionNet:
             pi.step(i)
             max_n = 300
             m = 16 if (self.moving_collision_rate.val<0.5) or (self.moving_out_of_scope.val>0.1) else 2
+            seed=np.random.randint(0,5000)
+            '''Elevation-based augmentation'''
+            depth=self.simulate_elevation_variations(depth,seed)
 
             '''generate grasps'''
             with torch.no_grad():
-                gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),alpha=0.0,dist_width_sigmoid=False)
+                gripper_pose,suction_direction,griper_collision_classifier_2,_,_,background_class_2,_ = self.gan.generator(depth.clone(),seed=seed,alpha=0.0,dist_width_sigmoid=False)
 
                 r_k=(max(self.moving_collision_rate.val , self.moving_out_of_scope.val,0.001) )
-                # print(r_k)
 
-                gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)
+                gripper_pose_ref,_,_,_,_,_,_ = self.ref_generator(depth.clone(),seed=seed,alpha=0.0,randomization_factor=r_k,dist_width_sigmoid=False)
 
                 '''get parameters'''
                 pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
@@ -284,7 +302,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
-                depth.clone(),alpha=0.0,detach_backbone=detach_backbone,dist_width_sigmoid=False)
+                depth.clone(),seed=seed,alpha=0.0,detach_backbone=detach_backbone,dist_width_sigmoid=False)
 
             '''loss computation'''
             suction_loss=suction_quality_classifier.mean()*0.0
@@ -390,7 +408,7 @@ class TrainActionNet:
                 self.export_check_points()
                 self.save_statistics()
                 self.ref_generator = copy.deepcopy(self.gan.generator)
-                self.ref_generator.eval()
+                self.ref_generator.train()
 
         pi.end()
 

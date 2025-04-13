@@ -110,7 +110,7 @@ class GripperParameters:
         if self.is_shift:
             self.shift_end_location=np.float64(label[39:42])
         self.result=label[47] if label[47] is not None else -1
-
+        self.handover_angle=label[51]
     @property
     def approach(self):
         return self.transformation[0:3, 0]
@@ -163,6 +163,7 @@ class SuctionParameters:
         if self.is_shift:
             self.shift_end_location=np.float64(label[42:45])
         self.result=label[48] if label[48] is not None else -1
+        self.handover_angle=label[52]
 
     @property
     def approach(self):

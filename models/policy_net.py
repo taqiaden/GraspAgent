@@ -15,9 +15,9 @@ policy_module_key='policy_net'
 relu_slope=0.01
 
 class QualityRegressor(nn.Module):
-    def __init__(self, in_c2):
+    def __init__(self, in_c2,out_c=1):
         super().__init__()
-        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=in_c2, out_c=1,relu_negative_slope=relu_slope).to('cuda')
+        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=in_c2, out_c=out_c,relu_negative_slope=relu_slope).to('cuda')
         # self.sig=nn.Sigmoid()
     def forward(self, features,pose_2d ):
         output_2d = self.att_block(features,pose_2d)
@@ -57,7 +57,7 @@ class PolicyNet(nn.Module):
         self.suction_grasp = QualityRegressor( in_c2=3)
 
         '''handover policy'''
-        self.handover_policy = QualityRegressor( in_c2=10)
+        self.handover_policy = QualityRegressor( in_c2=10,out_c=2)
 
         # self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)

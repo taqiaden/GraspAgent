@@ -12,10 +12,12 @@ def articulate_action_index(action):
     # 0 for idle, 1 for grasp, 2 for shift
     if action is None:
         return 0
-    elif action.is_grasp:
+    elif action.is_grasp and action.handover_state is None:
         return 1
     elif action.is_shift:
         return 2
+    elif action.is_grasp and action.handover_state is not None:
+        return 3
     else:
         return 0
 
@@ -23,10 +25,12 @@ def articulate_action_result(action):
     # 0 for failure, 1 for success, or None for no record
     if action is None:
         return None
-    elif action.is_grasp:
+    elif action.is_grasp and action.handover_state is None:
         return action.grasp_result
     elif action.is_shift:
         return action.shift_result
+    elif action.is_grasp and action.handover_state is not None:
+        return action.handover_result
     else:
         return None
 
@@ -37,9 +41,9 @@ def standard_label_structure(gripper_action:Action ,suction_action:Action,step_n
              + [gripper_action.real_width] + gripper_action.shift_end_point.tolist()+suction_action.shift_end_point.tolist()+
              [articulate_action_index(gripper_action)] + [articulate_action_index(suction_action)]
                 + [articulate_action_result(gripper_action)] + [articulate_action_result(suction_action)]
-             + [step_number]+[is_end_of_task])
+             + [step_number]+[is_end_of_task]+[gripper_action.handover_angle]+[suction_action.handover_angle])
 
-    assert len(label)==51
+    assert len(label)==53
 
     return np.array(label)
 

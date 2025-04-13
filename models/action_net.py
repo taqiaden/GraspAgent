@@ -64,7 +64,7 @@ class GripperPartSampler(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.approach_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=3,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
+        # self.approach_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=3,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
         self.beta_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
         self.dist_width_decoder=att_res_mlp_LN(in_c1=64, in_c2=5, out_c=2,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
         self.gripper_regressor_layer=GripperGraspRegressor2()
@@ -78,7 +78,7 @@ class GripperPartSampler(nn.Module):
             beta = beta * (1.0 - randomization_factor) + beta_noise * randomization_factor
 
         if np.random.rand() < randomization_factor:
-            width_noise = 1. - torch.rand(size=(beta.shape[0], 1), device='cuda') ** 2
+            width_noise = 1. - torch.rand(size=(beta.shape[0], 1), device='cuda') ** 5
             dist_width[:, 1:2] = (1.0 - randomization_factor) * dist_width[:, 1:2] + width_noise * randomization_factor
 
         if np.random.rand() < randomization_factor:
@@ -144,7 +144,13 @@ class ActionNet(nn.Module):
 
         self.sigmoid=nn.Sigmoid()
 
-    def forward(self, depth,alpha=0.0,random_tensor=None,detach_backbone=False,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
+
+    def set_seeds(self,seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    def forward(self, depth,alpha=0.0,random_tensor=None,seed=None,detach_backbone=False,clip=False,randomization_factor=0.0,dist_width_sigmoid=False):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -174,25 +180,80 @@ class ActionNet(nn.Module):
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
         '''suction direction'''
-        suction_direction=self.suction_sampler(features)
+        normal_direction=self.suction_sampler(features)
 
         '''gripper parameters'''
-        gripper_pose=self.gripper_sampler(features,approach_seed=suction_direction.detach(),clip=clip,randomization_factor=randomization_factor)
+        if self.training:
+            vertical_direction=torch.zeros_like(normal_direction)
+            vertical_direction[:,2]+=1.0
+
+            self.set_seeds(seed)
+            random_mask=torch.rand_like(normal_direction)>0.5
+            gripper_approach_direction=normal_direction.clone().detach()
+            gripper_approach_direction[random_mask]=vertical_direction[random_mask]
+            gripper_pose=self.gripper_sampler(features,approach_seed=gripper_approach_direction,clip=clip,randomization_factor=randomization_factor)
+
+            '''gripper collision head'''
+            gripper_pose_detached = gripper_pose.detach().clone()
+            gripper_pose_detached[:, -2:] = torch.clip(gripper_pose_detached[:, -2:], 0., 1.)
+            griper_collision_classifier = self.gripper_collision(features, gripper_pose_detached)
+        else:
+            '''first forward with approach set to normal'''
+            gripper_pose_1 = self.gripper_sampler(features, approach_seed=normal_direction.detach(), clip=clip,
+                                                randomization_factor=randomization_factor)
+
+            #gripper collision head
+            gripper_pose_1_detached = gripper_pose_1.detach().clone()
+            gripper_pose_1_detached[:, -2:] = torch.clip(gripper_pose_1_detached[:, -2:], 0., 1.)
+            griper_collision_classifier_1 = self.gripper_collision(features, gripper_pose_1_detached)
+
+            '''second forward with approach set to vertical'''
+            vertical_direction = torch.zeros_like(normal_direction)
+            vertical_direction[:, 2] += 1.0
+            gripper_pose_2 = self.gripper_sampler(features, approach_seed=vertical_direction, clip=clip,
+                                                  randomization_factor=randomization_factor)
+
+            # gripper collision head
+            gripper_pose_2_detached = gripper_pose_2.detach().clone()
+            gripper_pose_2_detached[:, -2:] = torch.clip(gripper_pose_2_detached[:, -2:], 0., 1.)
+            griper_collision_classifier_2 = self.gripper_collision(features, gripper_pose_2_detached)
+
+            '''rank best approach based on collision avoidance'''
+            # collision_with bin
+            collision_mask_1=(griper_collision_classifier_1[:,0]<0.5) & (griper_collision_classifier_1[:,1]<0.5)
+            collision_mask_2=(griper_collision_classifier_2[:,0]<0.5) & (griper_collision_classifier_2[:,1]<0.5)
+
+            # check 1: use vertical direction if it solves collision better than normal
+            bad_normal_approach_mask=collision_mask_2 & (~collision_mask_1)
+
+            # print(bad_normal_approach_mask.shape)
+            # print(collision_mask_1.shape)
+            # print((gripper_pose_2[:,-2]>gripper_pose_1[:,-2]).shape)
+
+            # check 2: if both direction are good at avoiding collision, check for better firmness
+            bad_normal_approach_mask=bad_normal_approach_mask | (collision_mask_2 & collision_mask_1 & (gripper_pose_2[:,-2]>gripper_pose_1[:,-2]))
+
+            '''superiority-rank based sampling of poses and associated collision scores'''
+
+            griper_collision_classifier=griper_collision_classifier_1
+            griper_collision_classifier[bad_normal_approach_mask]=griper_collision_classifier_2[bad_normal_approach_mask]
+
+            gripper_pose=gripper_pose_1
+            gripper_pose[bad_normal_approach_mask]=gripper_pose_2[bad_normal_approach_mask]
 
 
 
 
-        '''gripper collision head'''
-        gripper_pose_detached=gripper_pose.detach().clone()
-        gripper_pose_detached[:,-2:]=torch.clip(gripper_pose_detached[:,-2:],0.,1.)
-        griper_collision_classifier = self.gripper_collision(features, gripper_pose_detached)
+
+
+
 
         '''suction quality head'''
-        suction_direction_detached=suction_direction.detach().clone()
-        suction_quality_classifier = self.suction_quality(features, suction_direction_detached)
+        normal_direction_detached=normal_direction.detach().clone()
+        suction_quality_classifier = self.suction_quality(features, normal_direction_detached)
 
         '''shift affordance head'''
-        shift_query_features=torch.cat([suction_direction_detached,self.spatial_encoding], dim=-1)
+        shift_query_features=torch.cat([normal_direction_detached,self.spatial_encoding], dim=-1)
         shift_affordance_classifier = self.shift_affordance(features,shift_query_features )
 
         '''background detection'''
@@ -206,13 +267,13 @@ class ActionNet(nn.Module):
 
         '''reshape'''
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
-        suction_direction = reshape_for_layer_norm(suction_direction, camera=camera, reverse=True)
+        normal_direction = reshape_for_layer_norm(normal_direction, camera=camera, reverse=True)
         griper_collision_classifier = reshape_for_layer_norm(griper_collision_classifier, camera=camera, reverse=True)
         suction_quality_classifier = reshape_for_layer_norm(suction_quality_classifier, camera=camera, reverse=True)
         shift_affordance_classifier = reshape_for_layer_norm(shift_affordance_classifier, camera=camera, reverse=True)
         background_class=reshape_for_layer_norm(background_class, camera=camera, reverse=True)
 
-        return gripper_pose,suction_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,background_class,features
+        return gripper_pose,normal_direction,griper_collision_classifier,suction_quality_classifier,shift_affordance_classifier,background_class,features
 
 class Critic(nn.Module):
     def __init__(self):

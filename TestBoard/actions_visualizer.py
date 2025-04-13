@@ -136,7 +136,6 @@ def loop():
 
             '''gripper grasp sampler'''
             gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
-
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
 
             '''shift action sampler'''
@@ -144,8 +143,8 @@ def loop():
             # estimate_suction_direction(pc, view=True)
 
             # view_scores(pc, gripper_head_predictions, threshold=0.5)
-            # view_scores(pc, suction_head_predictions, threshold=0.5)
-            # view_scores(pc, shift_head_predictions, threshold=0.5)
+            view_scores(pc, suction_head_predictions, threshold=0.5)
+            view_scores(pc, shift_head_predictions, threshold=0.5)
             # view_npy_open3d(pc,normals=normals)
 
             '''limits'''

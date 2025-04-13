@@ -20,7 +20,7 @@ class PPOMemory():
         self.action_indexes=deque([])
         self.point_indexes=deque([])
         self.probs=deque([])
-        self.last_ending_index=None # the end index of the last completed episode
+        self.last_ending_index=-1 # the end index of the last completed episode
         self.is_end_of_episode=deque([])
         self.episodes_counter=0 # track the number of completed episodes in the buffer
         self.episodic_file_ids=deque([])
@@ -29,9 +29,10 @@ class PPOMemory():
         self.non_episodic_file_ids=deque([])
 
     def trim_uncompleted_episodes(self):
-        trim_size = len(self.episodic_file_ids) - self.last_ending_index - 1
-        if trim_size>0:
-            self.pop_policy_buffer(drop_size=trim_size)
+        if len(self.episodic_file_ids)>0:
+            trim_size = len(self.episodic_file_ids) - self.last_ending_index - 1
+            if trim_size>0:
+                self.pop_policy_buffer(drop_size=trim_size)
 
     def append_to_policy_buffer(self, action_obj:Action):
         self.values.append(action_obj.value)
@@ -45,12 +46,14 @@ class PPOMemory():
         if action_obj.is_grasp:
             self.non_episodic_file_ids.append(action_obj.file_id)
         if action_obj.policy_index==0:
+            '''clear the way to the target'''
             '''1) action is sampled from the stochastic policy'''
             self.append_to_policy_buffer(action_obj)
             '''task in process'''
             self.step_penalty(action_obj)
             self.is_end_of_episode.append(0)
         elif action_obj.policy_index==1:
+            '''target is seizeable'''
             '''2) action is sampled from the deterministic policy'''
             '''task end successfully'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
@@ -58,9 +61,11 @@ class PPOMemory():
                 self.last_ending_index = len(self) - 1
                 '''reward +1'''
                 self.positive_reward()
+                print('Add completetion reward to the last episode')
                 self.is_end_of_episode[-1]=1
                 self.update_advantages()
         elif action_obj.policy_index==2:
+            '''target not seen'''
             '''3) action is sampled from the random policy'''
             '''task end with failure'''
             if len(self)>0 and self.is_end_of_episode[-1]==0:
@@ -68,8 +73,10 @@ class PPOMemory():
                 self.last_ending_index = len(self) - 1
                 '''reward -1'''
                 self.negative_reward()
+                print('Add failure penalty to the last episode')
                 self.is_end_of_episode[-1]=1
                 self.update_advantages()
+
 
     def step_penalty(self,action_obj:Action):
         assert len(self.rewards)==len(self.episodic_file_ids)-1
@@ -120,17 +127,19 @@ class PPOMemory():
             self.advantages.append(running_advantage)
 
     def pop_policy_buffer(self,drop_size=1):
+        assert drop_size<=len(self.advantages), f'{drop_size}, {len(self.advantages)}'
         for i in range(drop_size):
             '''update episode counter'''
             if self.is_end_of_episode[0]==1:
                 self.episodes_counter -= 1
             '''pop oldest sample'''
+            print(self.advantages)
+            self.advantages.popleft()
             self.rewards.popleft()
             self.values.popleft()
             self.probs.popleft()
             self.action_indexes.popleft()
             self.point_indexes.popleft()
-            self.advantages.popleft()
             self.is_end_of_episode.popleft()
             self.episodic_file_ids.popleft()
             '''move the index of the last episode ending'''
