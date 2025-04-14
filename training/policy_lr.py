@@ -289,7 +289,7 @@ class TrainPolicyNet:
                 background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
                 objects_mask = background_class_predictions <= 0.5
 
-                target_masks[j] = self.random_target_mask(pc, mask, background_class[j], file_id=file_ids[j])
+                target_masks[j] = self.get_random_target_mask(pc, mask, background_class[j], file_id=file_ids[j])
 
                 # view_image(target_masks[j,0].cpu().numpy().astype(np.float64))
 
@@ -588,8 +588,8 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        # train_action_net.first_phase_training(max_size=100)
-        train_action_net.second_phase_training()
+        train_action_net.first_phase_training(max_size=100)
+        # train_action_net.second_phase_training()
 
         train_action_net.export_check_points()
         train_action_net.save_statistics()

@@ -113,10 +113,9 @@ def loop():
             # normals = suction_direction[j].permute(1,2,0)[mask].detach().cpu().numpy()
             gripper_poses=gripper_pose[j].permute(1,2,0)[mask]#.cpu().numpy()
             # spatial_mask = estimate_object_mask(pc,custom_margin=0.01)
-            suction_head_predictions=suction_quality_classifier[j, 0][mask]
             collision_with_objects_predictions=griper_collision_classifier[j, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[j, 1][mask]
-
+            suction_head_predictions=suction_quality_classifier[j, 0][mask]
             shift_head_predictions = shift_affordance_classifier[j, 0][mask]
             background_class_predictions = background_class.permute(0, 2, 3, 1)[j, :, :, 0][mask]
             objects_mask = background_class_predictions.detach().cpu().numpy() <= 0.5

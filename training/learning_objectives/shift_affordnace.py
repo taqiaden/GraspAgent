@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from torch import nn
-
 from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
@@ -127,8 +126,6 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
             shift_result=False
             break
 
-
-
     if shift_result :
         label= torch.tensor(1, device=prediction_.device).float()
     else:
@@ -137,5 +134,5 @@ def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,predicti
 
     if visualize:
         print(f'Shift label={label}, prediction= {prediction_}')
-        view_shift(pc, spatial_mask, shift_mask, start_point, end_point,signed_distance_mask,target_normal)
+        # view_shift(pc, spatial_mask, shift_mask, start_point, end_point,signed_distance_mask,target_normal)
     return bce_loss(prediction_, label)

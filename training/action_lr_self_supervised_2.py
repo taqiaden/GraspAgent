@@ -207,7 +207,7 @@ class TrainActionNet:
             m = 16 if (self.moving_collision_rate.val<0.5) or (self.moving_out_of_scope.val>0.1) else 2
             seed=np.random.randint(0,5000)
             '''Elevation-based augmentation'''
-            depth=self.simulate_elevation_variations(depth,seed)
+            if np.random.rand()>0.5: depth=self.simulate_elevation_variations(depth,seed)
 
             '''generate grasps'''
             with torch.no_grad():
