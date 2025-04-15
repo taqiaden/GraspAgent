@@ -311,6 +311,8 @@ class TrainPolicyNet:
     def quality_loss(self,griper_grasp_quality_score,suction_grasp_quality_score,gripper_score,suction_score,used_gripper,used_suction,gripper_pixel_index,suction_pixel_index):
         loss = torch.tensor(0., device=griper_grasp_quality_score.device) * griper_grasp_quality_score.mean()
         for j in range(griper_grasp_quality_score.shape[0]):
+
+            weight=1.0
             if used_gripper[j]:
                 label = gripper_score[j]
                 if label == -1: continue
@@ -324,6 +326,7 @@ class TrainPolicyNet:
                 self.gripper_quality_net_statistics.loss = l.item()
                 self.gripper_quality_net_statistics.update_confession_matrix(label, prediction)
                 loss += l
+                if used_suction[j]:weight=2.0
 
             if used_suction[j]:
                 label = suction_score[j]
@@ -338,8 +341,22 @@ class TrainPolicyNet:
                 self.suction_quality_net_statistics.loss = l.item()
                 self.suction_quality_net_statistics.update_confession_matrix(label, prediction)
 
-                loss += l
+                loss += l*weight
+
+
         return loss
+    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2):
+        with torch.no_grad():
+            _, _, _, _, _, background_class_3, _ =  self.action_net(
+                original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
+
+            '''Elevation-based Augmentation'''
+            objects_mask = background_class_3 <= 0.5
+            shift_entities_mask = objects_mask & (original_depth > 0.0001)
+            new_depth = original_depth.clone().detach()
+            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()) * camera.scale
+
+            return new_depth
 
     def first_phase_training(self,max_size=100,batch_size=1):
 
@@ -404,8 +421,9 @@ class TrainPolicyNet:
             '''policy initialization loss'''
             policy_loss = self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=10)
 
-
             loss = policy_loss  + quality_loss
+
+            assert not torch.isnan(loss).any(), f'{loss}'
             # print(policy_loss.item())
             # print(quality_loss.item(),policy_loss.item())
 
@@ -588,7 +606,7 @@ if __name__ == "__main__":
         new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
 
         '''test code'''
-        train_action_net.first_phase_training(max_size=100)
+        train_action_net.first_phase_training(max_size=10)
         # train_action_net.second_phase_training()
 
         train_action_net.export_check_points()

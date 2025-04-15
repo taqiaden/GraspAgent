@@ -85,3 +85,5 @@ def save_grasp_sample(rgb,depth,mask, gripper_action ,suction_action ,run_sequen
     # [48]: suction_result
     # [49]: step_number
     # [50]: is end of an episode
+    # [51] gripper handover angle
+    # [52] suction handover angle

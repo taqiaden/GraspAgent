@@ -829,7 +829,7 @@ class GraspAgent():
             tmp_occupation_mask[:, [1, 3]]=False
 
         '''mask occupied space'''
-        minimum_safety_margin=0.1
+        minimum_safety_margin=0.05
         knee_threeshold=0.2
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])

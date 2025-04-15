@@ -107,6 +107,7 @@ class GripperParameters:
         self.width =-1 if label[38] is None else np.float64(label[38] / config.width_scale)
         self.is_grasp=1 if label[45]==1 else 0
         self.is_shift=1 if label[45]==2 else 0
+        self.is_handover=1 if label[45]==3 else 0
         if self.is_shift:
             self.shift_end_location=np.float64(label[39:42])
         self.result=label[47] if label[47] is not None else -1
@@ -121,7 +122,7 @@ class GripperParameters:
 
     @property
     def distance(self):
-        return ((self.transition-self.target_point)/self.approach).mean()
+        return np.linalg.norm(self.transition-self.target_point)
 
     @property
     def pose_7(self):
@@ -160,6 +161,8 @@ class SuctionParameters:
         self.transformation = np.float64(label[22:38].copy().reshape(-1, 4))
         self.is_grasp=1 if label[46]==1 else 0
         self.is_shift=1 if label[46]==2 else 0
+        self.is_handover=1 if label[46]==3 else 0
+
         if self.is_shift:
             self.shift_end_location=np.float64(label[42:45])
         self.result=label[48] if label[48] is not None else -1
