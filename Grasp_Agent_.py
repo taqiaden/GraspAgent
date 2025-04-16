@@ -1,5 +1,7 @@
 import subprocess
 import smbclient.path
+
+from explore_arms_scope import report_failed_gripper_path_plan, report_failed_suction_path_plan
 from lib.dataset_utils import online_data2
 import numpy as np
 import torch
@@ -21,7 +23,8 @@ from Configurations.run_config import simulation_mode, \
     enable_gripper_grasp, enable_gripper_shift, enable_suction_grasp, enable_suction_shift, \
     activate_segmentation_queries, activate_handover, only_handover, highest_elevation_to_grasp, \
     report_for_handover, report_for_shift, report_for_grasp, \
-    zero_out_distance_when_collision, handover_quality_bias, suction_grasp_bias, gripper_grasp_bias
+    zero_out_distance_when_collision, handover_quality_bias, suction_grasp_bias, gripper_grasp_bias, \
+    sample_action_with_argmax, quality_exponent
 from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
 from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
@@ -314,18 +317,17 @@ class GraspAgent():
         mask_=self.valid_actions_on_target_mask if sample_from_target_actions else self.valid_actions_mask
         if self.tmp_occupation_mask is not None: mask_=mask_ & self.tmp_occupation_mask
         # print('test',selected_policy[mask_].shape,sample_from_target_actions)
-        dist=MaskedCategorical(probs=selected_policy,mask=mask_)
-        flattened_action_index= dist.sample()
+        if sample_action_with_argmax:
+            flattened_action_index=(selected_policy*mask_).argmax()
+        else:
+            dist=MaskedCategorical(probs=selected_policy,mask=mask_)
+            flattened_action_index= dist.sample()
 
         if sample_from_target_actions:
             probs=None
             value=None
-            try:
-                flattened_action_index = torch.squeeze(flattened_action_index).item()
-            except Exception as e:
-                print(str(e))
-                print(flattened_action_index)
-                assert 1==2
+            flattened_action_index = torch.squeeze(flattened_action_index).item()
+
             self.valid_actions_on_target_mask[flattened_action_index] = False
         else:
             probs = torch.squeeze(dist.log_prob(flattened_action_index)).item()
@@ -549,6 +551,12 @@ class GraspAgent():
         gripper_grasp_scope,suction_grasp_scope=self.grasp_reachablity(voxel_pc_tensor)
         gripper_shift_scope, suction_shift_scope=self.shift_reachablity( voxel_pc_tensor)
 
+        '''add exponent term'''
+        if quality_exponent!=1.:
+            griper_grasp_score=griper_grasp_score**quality_exponent
+            suction_grasp_score = suction_grasp_score ** quality_exponent
+            handover_scores = handover_scores ** quality_exponent
+
         '''clip quality scores'''
         griper_grasp_score=torch.clip(griper_grasp_score,0.,1.)
         suction_grasp_score=torch.clip(suction_grasp_score,0.,1.)
@@ -579,7 +587,7 @@ class GraspAgent():
         '''correct background mask'''
         # if self.last_handover_action is None:
         #     background_class=self.background_manual_correction(background_class,voxel_pc_tensor)
-
+        # view_mask(self.voxel_pc, background_class < 0.5)
         '''actions masks'''
         object_mask=background_class<0.5
         # view_mask(self.voxel_pc, object_mask )
@@ -1239,7 +1247,11 @@ class GraspAgent():
                     first_action_obj.set_activated_arm_position(at_home=True)
 
                 self.last_handover_action==first_action_obj
-
+        elif first_action_obj.robot_feedback == 'Failed':
+            if first_action_obj.is_grasp and second_action_obj.is_executable is None:
+                print('report failed path planning')
+                if first_action_obj.use_gripper_arm:report_failed_gripper_path_plan(first_action_obj.transformation)
+                else: report_failed_suction_path_plan(first_action_obj.transformation)
 
         if report_result:
             self.report_result(first_action_obj,second_action_obj,img_grasp_pre, img_suction_pre,img_main_pre)

@@ -9,6 +9,7 @@ from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.image_utils import view_image
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet, Critic, action_module_key2
 from registration import camera
@@ -60,7 +61,7 @@ class TrainActionNet:
 
         return gan
 
-    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2):
+    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
         with torch.no_grad():
             _, _, _, _, _, background_class_3, _ = self.gan.generator(
                 original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
@@ -69,7 +70,7 @@ class TrainActionNet:
             objects_mask = background_class_3 <= 0.5
             shift_entities_mask = objects_mask & (original_depth > 0.0001)
             new_depth = original_depth.clone().detach()
-            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()) * camera.scale
+            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()**exponent) * camera.scale
 
             return new_depth
 
@@ -105,6 +106,9 @@ class TrainActionNet:
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
             gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
 
+            view_image(depth[0,0].cpu().numpy().astype(np.float64))
+
+            view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
 
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
 
@@ -114,20 +118,16 @@ class TrainActionNet:
             view_scores(pc, shift_head_predictions, threshold=0.5)
 
 
-
-
-
-
-
 if __name__ == "__main__":
-    lr = 5e-6
-    train_action_net = TrainActionNet( n_samples=None, learning_rate=lr)
-    train_action_net.initialize(n_samples=100)
-    train_action_net.begin()
 
-    cuda_memory_report()
-    train_action_net.initialize(n_samples=None)
     with torch.no_grad():
+        lr = 5e-6
+        train_action_net = TrainActionNet(n_samples=None, learning_rate=lr)
+        train_action_net.initialize(n_samples=100)
+        train_action_net.begin()
+
+        cuda_memory_report()
+        train_action_net.initialize(n_samples=None)
         train_action_net.begin()
 
 

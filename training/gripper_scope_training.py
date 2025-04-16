@@ -31,7 +31,7 @@ def train():
 
     for epoch in range(epochs):
         pi = progress_indicator('EPOCH {}: '.format(epoch + 1), max_limit=len(data_loader))
-        statistics=TrainingTracker(name=gripper_scope_module_key,iterations_per_epoch=len(data_loader),samples_size=len(dataset))
+        statistics=TrainingTracker(name=gripper_scope_module_key,iterations_per_epoch=len(data_loader))
 
         for i, batch in enumerate(data_loader, 0):
             input,label,target_index=batch
@@ -49,7 +49,7 @@ def train():
             loss.backward()
             gripper_scope.optimizer.step()
 
-            statistics.running_loss+=binary_l1(predictions, label).mean().item()
+            statistics.loss=binary_l1(predictions, label).mean().item()
 
             pi.step(i)
         statistics.print()

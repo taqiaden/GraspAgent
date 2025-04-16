@@ -24,6 +24,7 @@ from models.action_net import action_module_key2, ActionNet
 from models.policy_net import policy_module_key, PolicyNet
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
+from training.learning_objectives.shift_affordnace import shift_labeling
 from training.learning_objectives.suction_seal import l1_smooth_loss
 from training.ppo_memory import PPOMemory
 import random
@@ -186,7 +187,7 @@ class TrainPolicyNet:
 
         return pixel_mask
 
-    def policy_init_loss(self,q_value,pcs,masks,target_masks,action_probs,objects_mask,sample_size=2):
+    def policy_init_loss(self,q_value,pcs,masks,target_masks,action_probs,sample_size=2):
         value_loss = torch.tensor(0., device=q_value.device)
         for j in range(q_value.shape[0]):
             mask = masks[j]
@@ -204,26 +205,25 @@ class TrainPolicyNet:
 
             # view_npy_open3d(pc=target_object_points)
 
-            def sample_(sampling_p):
-                # dist = MaskedCategorical(probs=sampling_p, mask=objects_mask)
-                dist = Categorical(probs=sampling_p)
-                index = dist.sample()
-                dist.probs[index] = 0
-                target_point = pc[index]
-                min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
-                max_ref = 0.5
-                if min_dist_ < max_ref:
-                    label = (1 - (min_dist_ / max_ref)) **2
-                else:
-                    label = 0.
-                return index, label
 
             '''gripper grasp sampling'''
             sampling_p = torch.rand_like(gripper_grasp_value, device='cpu')
             indexes_list=[]
             dist_list=[]
             for k in range(sample_size):
-                shared_index, label = sample_(sampling_p)
+                dist = Categorical(probs=sampling_p)
+                shared_index = dist.sample()
+                dist.probs[shared_index] = 0
+
+                '''labeling'''
+                target_point = pc[shared_index]
+                min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
+                max_ref = 0.5
+                if min_dist_ < max_ref:
+                    label = (1 - (min_dist_ / max_ref)) **2
+                else:
+                    label = 0.
+
                 indexes_list.append(shared_index)
                 dist_list.append(label)
 
@@ -272,13 +272,13 @@ class TrainPolicyNet:
 
         return loss
 
-    def generate_random_target_mask(self,depth,file_ids,target_masks,pcs,masks):
+    def generate_random_target_mask(self,depth,file_ids,target_masks,pcs,masks,seed):
         '''action space'''
         if self.action_net is None: self.initialize_action_net()
 
         with torch.no_grad():
-            _, _, _, _, _ \
-                , background_class, _ = self.action_net(depth.clone(), clip=True)
+            _, _, _, _, shift_appealing_classifier \
+                , background_class, _ = self.action_net(depth.clone(), seed=seed,clip=True)
 
             for j in range(depth.shape[0]):
                 pc=pcs[j]
@@ -293,7 +293,7 @@ class TrainPolicyNet:
 
                 # view_image(target_masks[j,0].cpu().numpy().astype(np.float64))
 
-        return target_masks,objects_mask
+        return target_masks,objects_mask,shift_appealing_classifier
 
     def get_point_clouds(self,depth):
 
@@ -345,7 +345,9 @@ class TrainPolicyNet:
 
 
         return loss
-    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2):
+    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
+        if self.action_net is None: self.initialize_action_net()
+
         with torch.no_grad():
             _, _, _, _, _, background_class_3, _ =  self.action_net(
                 original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
@@ -354,7 +356,7 @@ class TrainPolicyNet:
             objects_mask = background_class_3 <= 0.5
             shift_entities_mask = objects_mask & (original_depth > 0.0001)
             new_depth = original_depth.clone().detach()
-            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()) * camera.scale
+            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()**exponent) * camera.scale
 
             return new_depth
 
@@ -379,6 +381,10 @@ class TrainPolicyNet:
             suction_score = suction_score.cuda().float()
             normal = normal.cuda().float()
 
+            '''Elevation-based augmentation'''
+            seed=np.random.randint(0,5000)
+            if np.random.rand()>0.5: depth=self.simulate_elevation_variations(depth,seed=seed)
+
             b = rgb.shape[0]
             w = rgb.shape[2]
             h = rgb.shape[3]
@@ -386,7 +392,7 @@ class TrainPolicyNet:
             pcs,masks=self.get_point_clouds(depth)
 
             '''random target for policy initialization'''
-            target_masks, objects_mask = self.generate_random_target_mask(depth, file_ids, target_masks, pcs, masks)
+            altered_target_masks, objects_mask,shift_appealing_classifier = self.generate_random_target_mask(depth, file_ids, target_masks.clone(), pcs, masks,seed)
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
@@ -405,13 +411,18 @@ class TrainPolicyNet:
 
             griper_grasp_quality_score, suction_grasp_quality_score, \
                  q_value, action_probs,_ = \
-                self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
+                self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, altered_target_masks)
 
+            # view_image(rgb[0].cpu().numpy().astype(np.float64).transpose(1,2,0))
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 0]
-            # view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            # view_image(altered_target_masks[0, 0].cpu().numpy().astype(np.float64))
+            # # target_value=q_value[0, 0]
+            # # view_image(target_value.detach().cpu().numpy().astype(np.float64))
             # target_value=q_value[0, 2]
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
+            # shift_appealing_mask=shift_appealing_classifier[0,0]>0.5
+            # shift_appealing_mask[~masks[0]]=False
+            # view_image((target_value * shift_appealing_mask).detach().cpu().numpy().astype(np.float64) )
 
             '''accumulate loss'''
             quality_loss=self.quality_loss(griper_grasp_quality_score,suction_grasp_quality_score,
@@ -419,7 +430,7 @@ class TrainPolicyNet:
                                     gripper_pixel_index,suction_pixel_index)
 
             '''policy initialization loss'''
-            policy_loss = self.policy_init_loss(q_value, pcs, masks, target_masks, action_probs, objects_mask, sample_size=10)
+            policy_loss = self.policy_init_loss(q_value, pcs, masks, altered_target_masks, action_probs,  sample_size=10)
 
             loss = policy_loss  + quality_loss
 

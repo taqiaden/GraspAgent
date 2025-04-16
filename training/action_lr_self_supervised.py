@@ -371,7 +371,7 @@ class TrainActionNet:
                 shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=self.shift_head_statistics.label_balance_indicator)
                 shift_target_point = pc[shift_target_index]
                 shift_prediction_=shift_head_predictions[shift_target_index]
-                shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)/m
+                shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_)/m
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 

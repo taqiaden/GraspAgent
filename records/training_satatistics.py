@@ -68,17 +68,17 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.001,min_decay=0.001):
+    def __init__(self,name='000',decay_rate=0.001,min_decay=0.001,initial_val=0.0):
         self.name=name
         self.min_decay=min_decay
         self.decay_rate = decay_rate
         self.counter = 0
-        self.moving_rate=0.0
+        self.moving_rate=initial_val
         self.momentum=0.0
         self.convergence=0.0
 
         '''load latest'''
-        self.upload()
+        self.upload(initial_val)
         self.set_decay_rate()
 
         self.last_value=None
@@ -116,8 +116,8 @@ class MovingRate():
         save_new_data_point(self.convergence, self.name + '_convergence.txt')
 
 
-    def upload(self):
-        self.moving_rate=get_float('moving_rate_',section=self.name)
+    def upload(self,initial_val):
+        self.moving_rate=get_float('moving_rate_',section=self.name,default=initial_val)
         self.counter = get_float('counter_', section=self.name)
         self.momentum = get_float('momentum_', section=self.name)
         self.convergence = get_float('convergence_', section=self.name)

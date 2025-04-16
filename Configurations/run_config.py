@@ -2,6 +2,7 @@
 enable_gripper_grasp=True
 enable_suction_grasp=True
 
+sample_action_with_argmax=False
 enable_gripper_shift=False
 enable_suction_shift=False
 activate_refine_point_cloud=False
@@ -17,9 +18,10 @@ activate_preferred_placement_side=False
 activate_handover=False
 only_handover=False
 
-handover_quality_bias=10.
-gripper_grasp_bias=2.
-suction_grasp_bias=1.
+quality_exponent=1.0
+handover_quality_bias=0.
+gripper_grasp_bias=0.
+suction_grasp_bias=0.
 
 
 enhance_gripper_firmness=True

@@ -86,24 +86,27 @@ def deploy_handover_rotate_command( angle=np.pi/2):
     angle=np.array(angle)
     np.save(handover_rotation_data_path, angle)
 
+def deploy_gripper_grasp_command_( T,width,angle=0.):
+    pre_mat = adjust_final_matrix(T, x_correction=-0.23)
+    end_mat = adjust_final_matrix(T, x_correction=-0.169)
+    save_gripper_data(end_mat, width, gripper_grasp_data_path)
+    save_gripper_data(pre_mat, width, gripper_pre_grasp_data_path)
+    angle = np.array(angle)
+    np.save(handover_rotation_data_path, angle)
 
 def deploy_gripper_grasp_command( action,angle=0.):
-    pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.23)
-    end_mat = adjust_final_matrix(action.transformation, x_correction=-0.169)
-    save_gripper_data(end_mat, action.real_width, gripper_grasp_data_path)
-    save_gripper_data(pre_mat, action.real_width, gripper_pre_grasp_data_path)
+    deploy_gripper_grasp_command_(T=action.transformation, width=action.real_width, angle=angle)
 
+def deploy_suction_grasp_command_( T,angle=0.0):
+    pre_mat = adjust_final_matrix(T, x_correction=-0.25)
+    end_mat = adjust_final_matrix(T, x_correction=-0.184)
+    save_suction_data(end_mat, suction_grasp_data_path)
+    save_suction_data(pre_mat, suction_pre_grasp_data_path)
     angle = np.array(angle)
     np.save(handover_rotation_data_path, angle)
 
 def deploy_suction_grasp_command( action,angle=0.0):
-    pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.25)
-    end_mat = adjust_final_matrix(action.transformation, x_correction=-0.184)
-    save_suction_data(end_mat, suction_grasp_data_path)
-    save_suction_data(pre_mat, suction_pre_grasp_data_path)
-
-    angle = np.array(angle)
-    np.save(handover_rotation_data_path, angle)
+    deploy_suction_grasp_command_(action.transformation, angle=angle)
 
 def deploy_gripper_shift_command( action):
     pre_mat=adjust_final_matrix(action.transformation, x_correction=-0.23)

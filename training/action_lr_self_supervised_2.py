@@ -29,7 +29,8 @@ from training.learning_objectives.suction_seal import suction_seal_loss
 from visualiztion import view_o3d, view_npy_open3d
 
 detach_backbone=False
-
+generator_exponent = 1.0
+discriminator_exponent = 1.0
 lock = FileLock("file.lock")
 
 training_buffer = online_data2()
@@ -79,17 +80,17 @@ def model_dependent_sampling(pc,model_predictions,model_max_score,model_score_ra
 def critic_loss(c_,s_,f_,prediction_,label_):
     if  s_[0] > 0:
         if c_[1] + s_[1] == 0:
-            return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
+            return (torch.clamp(prediction_ - label_ + 1., 0.))**discriminator_exponent, True
 
         elif s_[1] == 0:
-            return (torch.clamp(prediction_ - label_ , 0.)) ** 2, True
+            return (torch.clamp(prediction_ - label_ , 0.)) ** discriminator_exponent, True
         else:
             return 0.0, False
 
     if sum(c_)+sum(s_) > 0:
         if c_[1] + s_[1] == 0:
 
-            return (torch.clamp(prediction_ - label_ + 1., 0.))**2, True
+            return (torch.clamp(prediction_ - label_ + 1., 0.))**discriminator_exponent, True
         # elif c_[0] + s_[0] == 0:
         #     # return  0.*torch.abs(  label_ -prediction_+ 1.)**2, True
         #     return (torch.clamp(label_ - prediction_ + 1., 0.))**2 , True
@@ -100,10 +101,10 @@ def critic_loss(c_,s_,f_,prediction_,label_):
         # print(f'f____{sum(c_)} , {sum(s_) }')
         if f_[1] > f_[0]:
 
-            return (torch.clamp(prediction_ - label_ , 0.)) **2, True
+            return (torch.clamp(prediction_ - label_ , 0.)) **discriminator_exponent, True
         elif f_[0] >= f_[1]:
             # return  (  label_ -prediction_+1.)**2, True
-            return 0.0*(torch.clamp(label_ - prediction_, 0.))**2, True
+            return 0.0*(torch.clamp(label_ - prediction_, 0.))**discriminator_exponent, True
         else:
             return 0.0, False
 
@@ -180,7 +181,7 @@ class TrainActionNet:
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate)
         return gan
 
-    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2):
+    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
         with torch.no_grad():
             _, _, _, _, _, background_class_3, _ = self.gan.generator(
                 original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
@@ -189,7 +190,7 @@ class TrainActionNet:
             objects_mask = background_class_3 <= 0.5
             shift_entities_mask = objects_mask & (original_depth > 0.0001)
             new_depth = original_depth.clone().detach()
-            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()) * camera.scale
+            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()**exponent) * camera.scale
 
             return new_depth
 
@@ -199,14 +200,16 @@ class TrainActionNet:
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
         gripper_pose=None
         for i, batch in enumerate(self.data_loader, 0):
+            # print(i)
 
             depth,file_ids= batch
             depth = depth.cuda().float()  # [b,1,480.712]
             pi.step(i)
             max_n = 300
             m = 16 if (self.moving_collision_rate.val<0.5) or (self.moving_out_of_scope.val>0.1) else 2
-            seed=np.random.randint(0,5000)
+
             '''Elevation-based augmentation'''
+            seed=np.random.randint(0,5000)
             if np.random.rand()>0.5: depth=self.simulate_elevation_variations(depth,seed)
 
             '''generate grasps'''
@@ -299,15 +302,15 @@ class TrainActionNet:
             '''zero grad'''
             self.gan.critic.zero_grad()
             self.gan.generator.zero_grad()
-
+            
             '''generated grasps'''
-            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
+            gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_appealing_classifier,background_class,depth_features = self.gan.generator(
                 depth.clone(),seed=seed,alpha=0.0,detach_backbone=detach_backbone,dist_width_sigmoid=False)
 
             '''loss computation'''
             suction_loss=suction_quality_classifier.mean()*0.0
             gripper_loss=griper_collision_classifier.mean()*0.0
-            shift_loss=shift_affordance_classifier.mean()*0.0
+            shift_loss=shift_appealing_classifier.mean()*0.0
             background_loss=background_class.mean()*0.0
             suction_sampling_loss = suction_direction.mean()*0.0
             gripper_sampling_loss = gripper_pose.mean()*0.0
@@ -327,14 +330,14 @@ class TrainActionNet:
                 weight=tracked_indexes[j][1]
                 label=ref_scores_[target_index]
                 pred_=pred_scores_[target_index]
-                gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**2) / m
+                gripper_sampling_loss += weight * (torch.clamp(label - pred_, 0)**generator_exponent) / m
 
             suction_sampling_loss += suction_sampler_loss(pc, suction_direction.permute(0, 2, 3, 1)[0][mask],file_index=file_ids[0])
 
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask].detach()#.cpu().numpy()
             suction_head_predictions=suction_quality_classifier[0, 0][mask]
             gripper_head_predictions=griper_collision_classifier[0, :].permute(1,2,0)[mask]
-            shift_head_predictions = shift_affordance_classifier[0, 0][mask]
+            shift_head_predictions = shift_appealing_classifier[0, 0][mask]
             background_class_predictions = background_class.permute(0,2, 3, 1)[0, :, :, 0][mask]
 
             '''limits'''
@@ -345,8 +348,8 @@ class TrainActionNet:
                 gripper_head_score_range = (gripper_head_max_score - torch.min(griper_collision_classifier[:,i%2])).item()
                 suction_head_max_score = torch.max(suction_quality_classifier).item()
                 suction_head_score_range = (suction_head_max_score - torch.min(suction_quality_classifier)).item()
-                shift_head_max_score = torch.max(shift_affordance_classifier).item()
-                shift_head_score_range = (shift_head_max_score - torch.min(shift_affordance_classifier)).item()
+                shift_head_max_score = torch.max(shift_appealing_classifier).item()
+                shift_head_score_range = (shift_head_max_score - torch.min(shift_appealing_classifier)).item()
 
             '''background detection head'''
             try:
@@ -385,7 +388,7 @@ class TrainActionNet:
                 shift_target_index = model_dependent_sampling(pc, shift_head_predictions, shift_head_max_score,shift_head_score_range,probability_exponent=10,balance_indicator=self.shift_head_statistics.label_balance_indicator)
                 shift_target_point = pc[shift_target_index]
                 shift_prediction_=shift_head_predictions[shift_target_index]
-                shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_,normals,shift_target_index)/m
+                shift_loss+=shift_affordance_loss(pc,shift_target_point,objects_mask,self.shift_head_statistics,shift_prediction_)/m
 
             if non_zero_background_loss_counter>0: background_loss/non_zero_background_loss_counter
 

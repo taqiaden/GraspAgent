@@ -35,7 +35,7 @@ def get_shift_parameteres(shift_target_point):
     shifted_start_point=start_point + ((direction * shift_contact_margin) / np.linalg.norm(direction))
     return direction,start_point,end_point,shifted_start_point
 
-def get_shift_mask(pc,shifted_start_point,end_point,spatial_mask):
+def get_shift_mask(pc,shifted_start_point,end_point,target_mask):
     '''signed distance'''
     direction=end_point-shifted_start_point
     d=direction/np.linalg.norm(direction)
@@ -51,7 +51,7 @@ def get_shift_mask(pc,shifted_start_point,end_point,spatial_mask):
     distances = np.linalg.norm(distances, axis=1)
 
     '''isolate the bin'''
-    shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & spatial_mask
+    shift_mask = (s < 0.0) & (t < 0.0) & (distances < shift_contact_margin) & (pc[:, 2] > shifted_start_point[2] + shift_elevation_threshold) & target_mask
     shift_mask = shift_mask & (pc[:, 2] < shifted_start_point[2] + 0.05) # set the maximum highest in the shift path
     return shift_mask
 
@@ -97,39 +97,41 @@ def check_collision_for_shift(normals,target_index,pc):
                 transformed_pc[:, 2] > transformed_target_point[2] + interference_allowance)
     return signed_distance_mask.sum() > 0, signed_distance_mask,target_normal
 
-def shift_affordance_loss(pc,shift_target_point,spatial_mask,statistics,prediction_,normals,target_index,visualize=False):
+def shift_labeling(pc,target_mask,shift_target_point,check_iterations=5):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     # shift_mask = get_shift_mask(pc, shifted_start_point, end_point, spatial_mask)
-    shift_result=True
-    start_randomization_scope=0.001
-    end_randomization_scope=0.03
+    shift_result = True
+    start_randomization_scope = 0.001
+    end_randomization_scope = 0.03
 
-    '''collision check'''
-    # collision,signed_distance_mask,target_normal=check_collision_for_shift(normals,target_index,pc)
 
-    # if collision: shift_result=False
-    # else:
-    for i in range(5):
-        start=shifted_start_point.copy()
-        start[0]=start[0]+np.random.randn()*start_randomization_scope
-        start[1]=start[1]+np.random.randn()*start_randomization_scope
+    for i in range(check_iterations):
+        start = shifted_start_point.copy()
+        start[0] = start[0] + np.random.randn() * start_randomization_scope
+        start[1] = start[1] + np.random.randn() * start_randomization_scope
 
-        end=end_point.copy()
-        end[0]=end[0]+np.random.randn()*end_randomization_scope
-        end[1]=end[1]+np.random.randn()*end_randomization_scope
+        end = end_point.copy()
+        end[0] = end[0] + np.random.randn() * end_randomization_scope
+        end[1] = end[1] + np.random.randn() * end_randomization_scope
 
-        # print('S----',shifted_start_point,start)
-        # print('E----',end_point,end)
 
-        shift_mask_result = get_shift_mask(pc, start, end, spatial_mask)
-        if shift_mask_result.sum()==0:
-            shift_result=False
+        shift_mask_result = get_shift_mask(pc, start, end, target_mask)
+        if shift_mask_result.sum() == 0:
+            shift_result = False
             break
+
+
+    return shift_result
+
+def shift_affordance_loss(pc,shift_target_point,target_mask,statistics,prediction_,visualize=False):
+    shift_result=shift_labeling(pc,target_mask,shift_target_point,check_iterations=5)
 
     if shift_result :
         label= torch.tensor(1, device=prediction_.device).float()
     else:
         label= torch.tensor(0, device=prediction_.device).float()
+
+
     statistics.update_confession_matrix(label, prediction_.detach())
 
     if visualize:
