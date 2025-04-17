@@ -103,6 +103,7 @@ def sample_pose(model,feasible_rate):
         score=model(pose)
         pivot_point=1-feasible_rate
         selection_p=1-abs(pivot_point-score.item())
+        selection_p=0. if selection_p<0.1 else selection_p
         # print(selection_p,'-----',score)
         if np.random.rand()<selection_p**2.0:
             break
@@ -124,7 +125,9 @@ def generate_gripper_sample(gripper_pool,model):
     feasible = process_feedback(state_)
 
     '''update rate record'''
-    if feasible:gripper_feasible_pose_rate.update(1)
+    if feasible:
+        if gripper_feasible_pose_rate.val>0.8: return
+        gripper_feasible_pose_rate.update(1)
     else: gripper_feasible_pose_rate.update(0)
 
     '''save gripper label'''
@@ -151,7 +154,9 @@ def generate_suction_sample(suction_pool,model):
     feasible = process_feedback(state_)
 
     '''update rate record'''
-    if feasible:suction_feasible_pose_rate.update(1)
+    if feasible:
+        if suction_feasible_pose_rate.val>0.8: return
+        suction_feasible_pose_rate.update(1)
     else: suction_feasible_pose_rate.update(0)
 
     '''save suction label'''

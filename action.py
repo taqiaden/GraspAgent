@@ -67,6 +67,31 @@ class Action():
         self.grasp_result=None
         self.shift_result=None
 
+    def clear(self):
+        self.is_shift = None
+        self.is_grasp = None
+        self.use_gripper_arm = None
+        self.use_suction_arm = None
+        self.arm_index = None
+
+        self.is_synchronous=None
+        self.policy_index=None
+        self.file_id=None
+
+        self.handover_state=None
+        self.handover_angle=None
+        self.handover_result=None
+
+        self.is_executable=None
+        self.executed=None
+        self.robot_feedback=None
+        self.grasp_result=None
+        self.shift_result=None
+
+        self.width=None
+
+
+
     def set_activated_arm_position(self,at_home):
         if self.use_gripper_arm:
             self.gripper_at_home_position=at_home

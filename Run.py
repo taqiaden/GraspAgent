@@ -61,9 +61,23 @@ while True:
                 break # comment out if you need to visualize all actions one by one
             if first_action_obj is not None and not simulation_mode:
                 '''execute action/s'''
-                first_action_obj,second_action_obj = grasp_agent.execute(first_action_obj,second_action_obj)
-                '''wait'''
-                first_action_obj,second_action_obj =grasp_agent.wait_robot_feedback(first_action_obj,second_action_obj)
+                grasp_agent.deploy_action_metrics(first_action_obj,second_action_obj)
+                for i in range(2):
+                    first_action_obj,second_action_obj = grasp_agent.run_robot(first_action_obj,second_action_obj)
+                    '''wait'''
+                    first_action_obj,second_action_obj =grasp_agent.wait_robot_feedback(first_action_obj,second_action_obj)
+                    if i==0 and first_action_obj.is_synchronous:
+                        '''if dual actions is kinetically unfeasible switch to single action'''
+                        switch_to_single_action,first_action_obj,second_action_obj=grasp_agent.completion_check_for_dual_grasp(first_action_obj,second_action_obj)
+                        if switch_to_single_action:
+                            '''second attempt'''
+                            first_action_obj, second_action_obj = grasp_agent.run_robot(first_action_obj,
+                                                                                        second_action_obj)
+                            first_action_obj, second_action_obj = grasp_agent.wait_robot_feedback(first_action_obj,
+                                                                                                  second_action_obj)
+                        else:
+                            break
+                    else:break
                 '''report result'''
                 new_state_is_avaliable=grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
                 if new_state_is_avaliable: break

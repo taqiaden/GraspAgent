@@ -837,7 +837,7 @@ class GraspAgent():
             tmp_occupation_mask[:, [1, 3]]=False
 
         '''mask occupied space'''
-        minimum_safety_margin=0.05
+        minimum_safety_margin=0.07
         knee_threeshold=0.2
         x_dist = np.abs(self.voxel_pc[:, 0] - action_obj.target_point[0])
         y_dist = np.abs(self.voxel_pc[:, 1] - action_obj.target_point[1])
@@ -1030,12 +1030,34 @@ class GraspAgent():
         second_action_obj.robot_feedback = robot_feedback_
         return first_action_obj,second_action_obj
 
-    def execute(self,  first_action_obj:Action,second_action_obj:Action):
-        pr.title('execute action')
+    def swap_actions(self,first_action_obj:Action,second_action_obj:Action):
+        return second_action_obj,first_action_obj
+    def completion_check_for_dual_grasp(self,first_action_obj:Action,second_action_obj:Action):
+        if first_action_obj.robot_feedback=='Failed_l': # left is the suction arm
+            if first_action_obj.use_suction_arm:
+                first_action_obj,second_action_obj,self.swap_actions(first_action_obj,second_action_obj)
+            second_action_obj.clear()
+
+            return True, first_action_obj, second_action_obj
+        elif first_action_obj.robot_feedback=='Failed_r': # right is the gripper arm
+            if first_action_obj.use_gripper_arm:
+                first_action_obj,second_action_obj,self.swap_actions(first_action_obj,second_action_obj)
+            second_action_obj.clear()
+
+            return True, first_action_obj, second_action_obj
+        else:
+            return  False, first_action_obj,second_action_obj
+
+
+    def deploy_action_metrics(self,first_action_obj:Action,second_action_obj:Action):
         pr.print('Deploy action commands')
-        if not first_action_obj.is_valid: return first_action_obj,second_action_obj
-        deploy_action( first_action_obj)
-        if  second_action_obj.is_valid: deploy_action(second_action_obj)
+        if not first_action_obj.is_valid: return first_action_obj, second_action_obj
+        deploy_action(first_action_obj)
+        if second_action_obj.is_valid: deploy_action(second_action_obj)
+
+    def run_robot(self,  first_action_obj:Action,second_action_obj:Action):
+        pr.title('execute action')
+
 
         if not simulation_mode:
             pr.print('Run robot')
@@ -1058,10 +1080,6 @@ class GraspAgent():
                     '''suction'''
                     subprocess.run(["bash", './bash/pass_command.sh', "4"])
             elif first_action_obj.handover_state is not None:
-                # print('---------test')
-                # print(first_action_obj.use_gripper_arm)
-                # print(first_action_obj.use_suction_arm)
-                # print(first_action_obj.handover_state)
 
                 if first_action_obj.use_gripper_arm:
                     '''gripper'''
