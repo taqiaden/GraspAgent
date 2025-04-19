@@ -6,6 +6,7 @@ from models.decoders import   att_res_mlp_LN
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 from registration import camera, standardize_depth
+from visualiztion import view_features
 
 use_bn=False
 use_in=True
@@ -34,7 +35,7 @@ class VanillaDecoder(nn.Module):
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
             nn.LeakyReLU(negative_slope=relu_slope) if relu_slope > 0. else nn.ReLU(),
-            nn.Linear(16, 4),
+            nn.Linear(16, 1),
         ).to('cuda')
     def forward(self, features ):
         return self.decoder(features)
@@ -62,6 +63,11 @@ class PolicyNet(nn.Module):
         # self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
+    def dilated_mask(self,mask,kernel_size=57):
+        kernel=torch.ones((kernel_size,kernel_size),dtype=torch.float32,device=mask.device).view(1,1,kernel_size,kernel_size)
+        thickened_mask=F.conv2d(mask,kernel,padding=int((kernel_size-1)/2)).clamp(0,1)
+
+        return thickened_mask
 
     def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask):
         '''modalities preprocessing'''

@@ -27,19 +27,28 @@ local_online_pools2=False
 if where_am_i=='chaoyun-server': # server
     online_data_dir = r'/home/taqiaden/online_data/'
     online_data_dir2 = r'/home/taqiaden/online_data2/'
+    demonstrations_data_dir=r'/home/taqiaden/demonstrations_dataset/'
     local_online_pools2=True
+    local_demonstrations=True
 
 elif where_am_i=='yumi': #edge unit
     online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
     online_data_dir2=ip_address+r'\taqiaden_hub\online_data2//'
+    demonstrations_data_dir=ip_address+r'\taqiaden_hub\demonstrations_dataset//'
     local_online_pools=False
+    local_demonstrations=False
+
 
 else:
     # online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
     # online_data_dir=r'/home/taqiaden/online_data/'
     online_data_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
     online_data_dir2=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data2/'
+    demonstrations_data_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/demonstrations_dataset/'
+
     local_online_pools2=True
+    local_demonstrations=True
+
 
 
 online_data_local_dir=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/online_data/'
@@ -71,7 +80,7 @@ class modality_pool():
         self.load_as_image=self.load_image_from_local if self.is_local else self.load_image_from_server
 
         '''set directory'''
-        if not self.os.path.exists(self.dir): os.mkdir(self.dir)
+        if not self.os.path.exists(self.dir): self.os.mkdir(self.dir)
 
     def make_dir(self):
         if not self.os.path.exists(self.dir):
@@ -310,6 +319,10 @@ class online_data(data_pool):
 class online_data2(data_pool):
     def __init__(self):
         super(online_data2,self).__init__(dir=online_data_dir2,is_local=local_online_pools2,dataset_name='online2')
+
+class demonstrations_data(data_pool):
+    def __init__(self):
+        super(demonstrations_data,self).__init__(dir=demonstrations_data_dir,is_local=local_demonstrations,dataset_name='demonstrations')
 
 class online_data_local(data_pool):
     def __init__(self):

@@ -218,9 +218,9 @@ class TrainPolicyNet:
                 '''labeling'''
                 target_point = pc[shared_index]
                 min_dist_ = np.min(np.linalg.norm(target_object_points - target_point[np.newaxis, :], axis=-1))
-                max_ref = 0.5
+                max_ref = 0.15
                 if min_dist_ < max_ref:
-                    label = (1 - (min_dist_ / max_ref)) **2
+                    label = (1 - (min_dist_ / max_ref)) **0.3
                 else:
                     label = 0.
 
@@ -237,23 +237,7 @@ class TrainPolicyNet:
                 value_loss += (gripper_shift_value[shared_index] - label ) ** 2
                 value_loss += (suction_shift_value[shared_index] - label ) ** 2
 
-            # mean_=sum(dist_list)/len(dist_list)
 
-            # for k in range(sample_size):
-            #     first_index=indexes_list[k]
-            #     for l in range(sample_size):
-            #         second_index = indexes_list[l]
-            #         # weight=1+abs(dist_list[k]-dist_list[l])**2
-            #         sign=1. if dist_list[k]>dist_list[l] else -1.
-            #         sign=0. if dist_list[k]==dist_list[l] else sign
-            #         print((dist_list[k]>=dist_list[l])==(gripper_grasp_value[first_index]>=gripper_grasp_value[second_index]))
-            #         value_loss+=torch.clamp((gripper_grasp_value[first_index]-gripper_grasp_value[second_index])*sign,0.)
-            #         value_loss+=torch.clamp((suction_grasp_value[first_index]-suction_grasp_value[second_index])*sign,0.)
-            #         value_loss+=torch.clamp((gripper_shift_value[first_index]-gripper_shift_value[second_index])*sign,0.)
-            #         value_loss+=torch.clamp((suction_shift_value[first_index]-suction_shift_value[second_index])*sign,0.)
-
-
-                    # print('Gripper grasp initialization result: ',((pred[0]>=pred[1])==(label[0]>=label[1])).item())
         '''adapt policy net to value net'''
         policy_label = q_value.detach().clone()
         policy_label = policy_label.reshape(policy_label.shape[0], -1)
@@ -413,12 +397,14 @@ class TrainPolicyNet:
                  q_value, action_probs,_ = \
                 self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, altered_target_masks)
 
+
             # view_image(rgb[0].cpu().numpy().astype(np.float64).transpose(1,2,0))
             # view_image(target_masks[0, 0].cpu().numpy().astype(np.float64))
             # view_image(altered_target_masks[0, 0].cpu().numpy().astype(np.float64))
             # # target_value=q_value[0, 0]
             # # view_image(target_value.detach().cpu().numpy().astype(np.float64))
-            # target_value=q_value[0, 2]
+            # target_value=action_probs[0, 2]
+            # print(target_value.max())
             # view_image(target_value.detach().cpu().numpy().astype(np.float64))
             # shift_appealing_mask=shift_appealing_classifier[0,0]>0.5
             # shift_appealing_mask[~masks[0]]=False
@@ -430,9 +416,9 @@ class TrainPolicyNet:
                                     gripper_pixel_index,suction_pixel_index)
 
             '''policy initialization loss'''
-            policy_loss = self.policy_init_loss(q_value, pcs, masks, altered_target_masks, action_probs,  sample_size=10)
+            # policy_loss = self.policy_init_loss(q_value, pcs, masks, altered_target_masks, action_probs,  sample_size=10)
 
-            loss = policy_loss  + quality_loss
+            loss =  quality_loss
 
             assert not torch.isnan(loss).any(), f'{loss}'
             # print(policy_loss.item())
