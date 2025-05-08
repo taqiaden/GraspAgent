@@ -3,6 +3,24 @@ from label_unpack import  LabelObj2
 import numpy as np
 from training.ppo_memory import PPOMemory
 
+class DemonstrationsDataset(data.Dataset):
+    def __init__(self, data_pool,file_ids):
+        super().__init__()
+        self.data_pool = data_pool
+        self.files_indexes = file_ids
+
+    def __getitem__(self, idx):
+        target_index = self.files_indexes[idx]
+        label = self.data_pool.label.load_as_numpy(target_index)
+        rgb = self.data_pool.rgb.load_as_image(target_index)
+        depth=self.data_pool.depth.load_as_numpy(target_index)
+        label=np.array([x if x is not None else -1 for x in label])
+        return rgb,depth[np.newaxis,:,:],label
+
+
+    def __len__(self):
+        return len(self.files_indexes)
+
 class SeizePolicyDataset(data.Dataset):
     def __init__(self, data_pool,file_ids):
         super().__init__()

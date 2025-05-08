@@ -97,6 +97,14 @@ class TrainActionNet:
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
                 depth.clone(),seed=seed,alpha=0.0,detach_backbone=detach_backbone,dist_width_sigmoid=False)
 
+            # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
+            # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
+            #
+            # print(self.gan.generator.gripper_sampler.width_biased_tanh.b.data)
+            # # print(self.gan.generator.gripper_sampler.width_biased_tanh.k.data)
+            #
+            # exit()
+
             suction_head_predictions=suction_quality_classifier[0, 0][mask]
             shift_head_predictions = shift_affordance_classifier[0, 0][mask]
             background_class_predictions = background_class.permute(0, 2, 3, 1)[0, :, :, 0][mask]
@@ -106,9 +114,9 @@ class TrainActionNet:
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
             gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
 
-            view_image(depth[0,0].cpu().numpy().astype(np.float64))
+            # view_image(depth[0,0].cpu().numpy().astype(np.float64))
 
-            view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
+            # view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
 
             dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
 
@@ -121,7 +129,7 @@ class TrainActionNet:
 if __name__ == "__main__":
 
     with torch.no_grad():
-        lr = 5e-6
+        lr = 1e-6
         train_action_net = TrainActionNet(n_samples=None, learning_rate=lr)
         train_action_net.initialize(n_samples=100)
         train_action_net.begin()

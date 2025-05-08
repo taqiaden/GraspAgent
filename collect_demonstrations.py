@@ -27,7 +27,7 @@ def save_new_demonstration(rgb,depth,label):
     '''update index'''
     save_key(demonstrations_counter_key, index)
 
-label=np.array([None]*5,dtype=object)
+label=np.array([np.nan]*5,dtype=object)
 trigger_new_perception()
 '''get modalities'''
 depth=get_scene_depth()
@@ -43,6 +43,6 @@ save_new_demonstration(rgb,depth,label)
 # [0]: 0: first contrastive scene, 1: second contrastive scene, None: not a contrastive
 # [1]: 1: No grasp points, None: not defined
 # [2]: 1: No suction points, None: not defined
-# [3]: 1: Priorty to grasp, None: not defined
+# [3]: 1: Priority to grasp, None: not defined
 # [4]: 1: Priority to suction, None: not defined
 # [5]:

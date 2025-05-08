@@ -9,8 +9,8 @@ knee_ref_elevation = 0.25
 
 floor_elevation=0.05
 
-ref_pc_center=torch.tensor([0.4364,-0.0091,0.0767]).to('cuda')
-ref_pc_center_6=torch.tensor([0.4364,-0.0091,0.0767,0,0,0]).to('cuda')
+ref_pc_center=torch.tensor([0.4364,-0.0091,0.0767],device='cuda')
+ref_pc_center_6=torch.tensor([0.4364,-0.0091,0.0767,0,0,0],device='cuda')
 
 depth_lower_bound=1100.
 depth_mean=1180.

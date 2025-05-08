@@ -96,9 +96,10 @@ def resize_image(im,size):
     image = np.asarray(image)
     return image
 
-def view_image(image,title=''):
+def view_image(image,title='',hide_axis=False):
     # cv2.imshow(title, image)
     # cv2.waitKey(0)
     plt.imshow(image)
+    if hide_axis: plt.axis('off')
     plt.show()
 

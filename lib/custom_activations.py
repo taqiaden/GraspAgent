@@ -52,8 +52,8 @@ class GripperGraspRegressor2(nn.Module):
             width=self.sigmoid(width)
 
         if clip:
-            dist= torch.clip(dist, 0.02, 0.98)
-            width= torch.clip(width, 0.02, 0.98)
+            dist= torch.clip(dist, 0.0, 1.)
+            width= torch.clip(width, 0.0, 1.)
 
         normalized_output = torch.cat([approach, beta, dist, width], dim=1)
         return normalized_output
@@ -65,3 +65,14 @@ class GrowingCosineUnit(nn.Module):
     def forward(self, input):
         cos_=torch.cos(input)
         return input*cos_
+
+class BiasedTanh(nn.Module):
+    def __init__(self,weight=True,bias=True):
+        super().__init__()
+        self.b = nn.Parameter(torch.tensor(0.5)) if bias else None
+        self.k = nn.Parameter(torch.tensor(1.)) if weight else None
+
+    def forward(self, x):
+        if self.b is not None: x=torch.tanh(x) + self.b
+        if self.k is not None: x= self.k*x
+        return x

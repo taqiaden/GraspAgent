@@ -1,4 +1,5 @@
 import torch
+from pyglet.window.key import PRINT
 from torch import nn
 import torch.nn.functional as F
 from lib.models_utils import reshape_for_layer_norm
@@ -64,14 +65,32 @@ class PolicyNet(nn.Module):
         # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
     def dilated_mask(self,mask,kernel_size=57):
-        kernel=torch.ones((kernel_size,kernel_size),dtype=torch.float32,device=mask.device).view(1,1,kernel_size,kernel_size)
-        thickened_mask=F.conv2d(mask,kernel,padding=int((kernel_size-1)/2)).clamp(0,1)
+        kernel=torch.ones((kernel_size,kernel_size),dtype=torch.float32,device=mask.device)
+        corner_size=int((kernel_size-3)/2)
+        kernel[:corner_size,:corner_size]=0.
+        kernel[:corner_size,-corner_size:]=0.
+        kernel[-corner_size:,:corner_size]=0.
+        kernel[-corner_size:,-corner_size:]=0.
+
+        kernel=kernel.view(1,1,kernel_size,kernel_size)
+        thickened_mask=F.conv2d(mask,kernel,padding=int((kernel_size-1)/2)).clamp(0,1)>0.5
 
         return thickened_mask
 
-    def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask):
+    def forward(self, rgb,depth,gripper_pose,suction_direction,target_mask,shift_mask):
         '''modalities preprocessing'''
         depth = standardize_depth(depth)
+
+        '''action mask'''
+        dilated_target_mask=self.dilated_mask(target_mask,kernel_size=71)
+
+        # dilated_target_mask2=reshape_for_layer_norm(dilated_target_mask, camera=camera, reverse=False)
+        # shift_mask2=reshape_for_layer_norm(shift_mask, camera=camera, reverse=False)
+        # view_features(dilated_target_mask2,hide_axis=True)
+        # view_features(shift_mask2,hide_axis=True)
+        # view_features(dilated_target_mask2&shift_mask2,hide_axis=True)
+
+        actions_mask=dilated_target_mask & shift_mask
 
         '''concatenate and decode'''
         input_channels=torch.cat([rgb,depth,target_mask],dim=1)
@@ -114,9 +133,13 @@ class PolicyNet(nn.Module):
         # depth_features=reshape_for_layer_norm(depth_features, camera=camera, reverse=True)
 
         '''Categorical policy'''
-        policy_reshaped=action_logits.reshape(action_logits.shape[0],-1)
-        action_probs=F.softmax(policy_reshaped,dim=-1)
-        action_probs=action_probs.reshape(action_logits.shape)
+        action_logits=action_logits.view(-1,1,480*712) # [b,1,w,h]
+        actions_mask = actions_mask.view(-1, 1, 480 * 712)
+
+        action_logits[actions_mask]=F.softmax(action_logits[actions_mask],dim=-1)
+        action_logits[~actions_mask]*=0.
+
+        action_probs=action_logits.view(-1,1,480,712)
 
         return griper_grasp_score,suction_grasp_score,q_values,action_probs,handover_score
 

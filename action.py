@@ -45,6 +45,8 @@ class Action():
         self.gripper_at_home_position=True
         self.suction_at_home_position=True
 
+        self.contact_with_container=None
+
         '''rl data'''
         self.value=probs
         self.prob=value

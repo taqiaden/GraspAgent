@@ -134,17 +134,27 @@ print(f'total samples = {len(indexes)}')
 
 pi = progress_indicator('progress ', max_limit=len(indexes))
 print()
+counter=0
+acu_width=0
+acu_dist=0
 for i in range(len(indexes)):
     current_index=indexes[i]
     label = online_data.label.load_as_numpy(current_index)
     label_obj = LabelObj(label=label)
-    if label_obj.success and label_obj.is_gripper: continue
+    if label_obj.success and label_obj.is_gripper:
+        counter+=1
+        acu_width+=label[21]
+        acu_dist+=label[22]
+        print(f'mean dist= {acu_dist/counter}')
+        print(f'mean width= {acu_width/counter}')
+
     # online_data.point_clouds.remove_file(current_index)
-    online_data.depth.remove_file(current_index)
-    online_data.label.remove_file(current_index)
+
 
 
     pi.step(i)
+
+
 
 pi.end()
 

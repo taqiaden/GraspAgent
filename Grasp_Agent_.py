@@ -248,7 +248,6 @@ class GraspAgent():
         pi.step(2)
 
         policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
-
         policy_net.ini_model(train=False)
         self.model_time_stamp=policy_net.model_time_stamp()
         self.policy_net = policy_net.model
@@ -547,7 +546,7 @@ class GraspAgent():
         background_class, shift_appealing,mask,voxel_pc_tensor=\
         self.models_inference()
 
-        '''Reachablity inference'''
+        '''Reachability inference'''
         gripper_grasp_scope,suction_grasp_scope=self.grasp_reachablity(voxel_pc_tensor)
         gripper_shift_scope, suction_shift_scope=self.shift_reachablity( voxel_pc_tensor)
 
@@ -944,6 +943,9 @@ class GraspAgent():
                         if self.handover_mask is not None and self.handover_mask[action_obj.point_index, action_obj.arm_index]:
                             action_obj.handover_state=0
                             self.last_handover_action=action_obj
+                    elif first_action_obj.is_shift:
+                        first_action_obj.contact_with_container=1 if self.obj
+
                     first_action_obj=action_obj
                     break
 

@@ -5,7 +5,7 @@ from Configurations.ENV_boundaries import bin_center
 from training.learning_objectives.suction_seal import transform_point_to_normal_in_plane
 from visualiztion import view_shift_pose
 
-shift_effective_length=0.09
+shift_effective_length=0.1
 shift_execution_length=0.15
 
 shift_elevation_threshold = 0.00
@@ -97,7 +97,7 @@ def check_collision_for_shift(normals,target_index,pc):
                 transformed_pc[:, 2] > transformed_target_point[2] + interference_allowance)
     return signed_distance_mask.sum() > 0, signed_distance_mask,target_normal
 
-def shift_labeling(pc,target_mask,shift_target_point,check_iterations=5):
+def shift_labeling(pc,target_mask,shift_target_point,check_iterations=3):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
     # shift_mask = get_shift_mask(pc, shifted_start_point, end_point, spatial_mask)
     shift_result = True
