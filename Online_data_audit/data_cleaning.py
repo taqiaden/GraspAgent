@@ -1,14 +1,19 @@
+import math
 import os
 
 import numpy as np
+import scipy
 import torch
+from matplotlib import pyplot as plt
 
+from Configurations import config
 from label_unpack import LabelObj
 from lib.dataset_utils import online_data
 from lib.models_utils import initialize_model_state
 from lib.report_utils import progress_indicator
 from lib.report_utils import progress_indicator as pi
 from models.scope_net import scope_net_vanilla
+from distfit import distfit
 
 online_data = online_data()
 
@@ -127,6 +132,32 @@ def check_collision_in_data():
     print(f'instances with collision={counters[0]}')
     print(f'instances without collision={counters[1]}')
 # check_collision_in_data()
+def find_best_distribtuion_fit(data):
+    dist = distfit()
+    dist.fit_transform(data)
+    print(dist.summary)
+
+def view_log_norm_dist(data):
+    shape, location, scale = scipy.stats.lognorm.fit(data)
+    mu, sigma = np.log(scale), shape
+    print('------------------------------------------')
+    print('shape: ',shape)
+    print('location: ',location)
+    print('scale: ',scale)
+    print('mu: ',mu)
+    x=np.linspace(min(data),max(data),100)
+    plt.plot(x,scipy.stats.lognorm.pdf(x,shape,location,scale),'r-',lw=2)
+    plt.show()
+
+def get_skewed_normal_distribution(data):
+    print('--------------------------------')
+    print('mean: ',np.mean(data))
+    print('median: ',np.median(data))
+    print('std: ',np.std(data))
+
+    print('mode: ',scipy.stats.mode(data,keepdims=True)[0][0])
+    print('skewness: ',scipy.stats.skew(data))
+    print('kurtosis: ',scipy.stats.kurtosis(data))
 
 '''remove selective samples'''
 indexes=online_data.get_indexes()
@@ -137,22 +168,89 @@ print()
 counter=0
 acu_width=0
 acu_dist=0
+dist_list=[]
+width_list=[]
 for i in range(len(indexes)):
     current_index=indexes[i]
     label = online_data.label.load_as_numpy(current_index)
     label_obj = LabelObj(label=label)
     if label_obj.success and label_obj.is_gripper:
         counter+=1
-        acu_width+=label[21]
-        acu_dist+=label[22]
-        print(f'mean dist= {acu_dist/counter}')
-        print(f'mean width= {acu_width/counter}')
+        acu_width+=(label[21]-0.7)**2.
+        acu_dist+=(label[22]-0.32)**2.
 
-    # online_data.point_clouds.remove_file(current_index)
+        width_list.append(np.copy(label[21])/ (config.width_scale*config.width_scope))
+        dist_list.append(np.copy(label[22])/config.distance_scope)
+
+        # dist mean =0.32 std =0.3
+        # width mean =0.7 std =18.8
+        # print(f'std dist= {math.sqrt(acu_dist/counter)}')
+        # print(f'std width= {math.sqrt(acu_width/counter)}')
+
+        pi.step(i)
+
+get_skewed_normal_distribution(dist_list)
+get_skewed_normal_distribution(width_list)
+
+# generated_skewed_data=scipy.stats.skewnorm.rvs(0.32,loc=0.319,scale=0.159,size=10000)
+# plt.hist(generated_skewed_data,bins=15,edgecolor='black')
+# plt.show()
+x=np.asarray(dist_list)
+x[x<=0]=0.01
+x=np.log(np.asarray(x))
+log_mean=x.mean()
+log_std=x.std()
+print('dist mean',log_mean)
+print('dist std',log_std)
+generated_skewed_data=np.random.lognormal(mean=log_mean,sigma=log_std,size=10000)
+generated_skewed_data = torch.distributions.LogNormal(loc=log_mean, scale=log_std)
+generated_skewed_data = generated_skewed_data.sample((10000,)).numpy()
+generated_skewed_data=generated_skewed_data[generated_skewed_data<1.0]
+plt.hist(generated_skewed_data,bins=150,edgecolor='black',color='gray')
+plt.xlim(0,1.)
+
+plt.show()
+
+
+x=1-np.asarray(width_list)
+x[x<=0]=0.01
+x=np.log(np.asarray(x))
+log_mean=x.mean()
+log_std=x.std()
+print('width mean',log_mean)
+print('width std',log_std)
+generated_skewed_data=np.random.lognormal(mean=log_mean,sigma=log_std,size=10000)
+generated_skewed_data=1-generated_skewed_data[generated_skewed_data<1.0]
+
+plt.hist(generated_skewed_data,bins=150,edgecolor='black',color='gray')
+plt.xlim(0,1.)
+plt.show()
+
+# generated_skewed_data=scipy.stats.skewnorm.rvs(-0.642,loc=0.697,scale=0.138,size=10000)
+# plt.hist(generated_skewed_data,bins=15,edgecolor='black')
+# plt.show()
+
+plt.hist(dist_list,bins=15,edgecolor='black',color='gray')
+plt.xlim(0,1.)
+
+plt.show()
+
+plt.hist(width_list,bins=15,edgecolor='black',color='gray')
+plt.xlim(0,1.)
+
+plt.show()
+
+view_log_norm_dist(dist_list)
+# view_log_norm_dist(width_list)
+
+find_best_distribtuion_fit(np.asarray(dist_list))
+find_best_distribtuion_fit(np.asarray(width_list))
 
 
 
-    pi.step(i)
+
+
+
 
 
 

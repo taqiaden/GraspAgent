@@ -71,11 +71,9 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visua
 
     if gen_out_of_scope==0:
         '''check collision'''
-
         T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
         gen_has_collision,pred_firmness_val,collision_val = gripper_firmness_check(T_d,width, pc, with_allowance=True, visualize=visualize )
-        # print(gen_has_collision,pred_firmness_val,collision_val)
-
+        # print('------------------------',gen_has_collision,int(pred_firmness_val)/10,int(collision_val*10)/10)
     else:
         gen_has_collision, pred_firmness_val, collision_val = 1, 0, 1
 
@@ -94,7 +92,7 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visua
     # print('G: ', target_generated_pose)
 
 
-    return (collision_val,ref_collision_val), (gen_out_of_scope,ref_out_of_scope),(pred_firmness_val,ref_firmness_val)
+    return (int(collision_val*10)/10,int(ref_collision_val*10)/10), (gen_out_of_scope,ref_out_of_scope),(int(pred_firmness_val)/20,int(ref_firmness_val)/20)
 
 
 
@@ -165,3 +163,37 @@ def gripper_collision_loss(gripper_target_pose, gripper_target_point,pc,objects_
         bin_collision_statistics.loss=bin_collision_loss.item()
 
     return (object_collision_loss+bin_collision_loss)/2
+
+def gripper_object_collision_loss(gripper_target_pose, gripper_target_point,pc,objects_mask,prediction_,objects_collision_statistics,visualize=False):
+    T_d, width, distance = pose_7_to_transformation(gripper_target_pose, gripper_target_point)
+    collision_with_objects = grasp_collision_detection(T_d, width, pc[objects_mask], visualize=visualize)
+
+    object_collision_label = torch.ones_like(prediction_[0]) if collision_with_objects  else torch.zeros_like(prediction_[0])
+    object_collision_pred=prediction_[0]
+
+    objects_collision_statistics.update_confession_matrix(object_collision_label, object_collision_pred)
+
+    if visualize: print(f'  objects collision (label ={object_collision_label}, prediction= {object_collision_pred})')
+    object_collision_loss=bce_loss(object_collision_pred, object_collision_label)
+
+    with torch.no_grad():
+        objects_collision_statistics.loss=object_collision_loss.item()
+
+    return object_collision_loss
+
+def gripper_bin_collision_loss(gripper_target_pose, gripper_target_point,pc,objects_mask,prediction_,bin_collision_statistics,visualize=False):
+    T_d, width, distance = pose_7_to_transformation(gripper_target_pose, gripper_target_point)
+    collision_with_bin= grasp_collision_detection(T_d, width, pc[~objects_mask], visualize=visualize)
+
+    bin_collision_label = torch.ones_like(prediction_[1]) if collision_with_bin  else torch.zeros_like(prediction_[1])
+    bin_collision_pred=prediction_[1]
+
+    bin_collision_statistics.update_confession_matrix(bin_collision_label, bin_collision_pred)
+
+    if visualize: print(f'bin collision (label ={bin_collision_label}, prediction= {bin_collision_pred})')
+    bin_collision_loss=bce_loss(bin_collision_pred, bin_collision_label)
+
+    with torch.no_grad():
+        bin_collision_statistics.loss=bin_collision_loss.item()
+
+    return bin_collision_loss

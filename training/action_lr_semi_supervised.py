@@ -453,7 +453,7 @@ class TrainActionNet:
 
 if __name__ == "__main__":
     lr = 5e-6
-    train_action_net = TrainActionNet(batch_size=2, n_samples=None, learning_rate=lr)
+    train_action_net = TrainActionNet(batch_size=1, n_samples=None, learning_rate=lr)
     train_action_net.initialize(n_samples=None)
     train_action_net.begin()
     for i in range(1000):

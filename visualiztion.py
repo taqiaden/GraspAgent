@@ -19,6 +19,11 @@ from pose_object import pose_7_to_transformation
 parallel_jaw_model= 'new_gripper.ply'
 
 object_prediction_threshold = 0.5
+def plt_features(x,bins=100):
+    for i in range(x.shape):
+        x = x[:, i].detach().cpu().numpy()
+        plt.hist(x, bins=100)
+        plt.show()
 
 def view_features(x,reshape=True,max_iteration=None,view_one_by_one=True,hide_axis=False):
     from lib.models_utils import reshape_for_layer_norm

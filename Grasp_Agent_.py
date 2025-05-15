@@ -418,6 +418,7 @@ class GraspAgent():
         q_value, clear_policy, handover_scores,\
             griper_collision_classifier,suction_seal_classifier,\
             background_class,shift_appealing,mask,voxel_pc_tensor
+
     def grasp_reachablity(self,voxel_pc_tensor):
         '''grasp reachability'''
         suction_grasp_scope = self.get_suction_grasp_reachability(voxel_pc_tensor, self.normals)

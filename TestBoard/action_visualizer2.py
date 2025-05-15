@@ -11,7 +11,7 @@ from lib.dataset_utils import online_data2
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import view_image
 from lib.report_utils import progress_indicator
-from models.action_net import ActionNet, Critic, action_module_key2
+from models.action_net import ActionNet, Critic, action_module_key2, action_module_key
 from registration import camera
 from visualiztion import dense_grasps_visualization
 from visualiztion import view_score2
@@ -57,7 +57,7 @@ class TrainActionNet:
     def prepare_model_wrapper(self):
         '''load  models'''
         gan = GANWrapper(action_module_key2, ActionNet, Critic)
-        gan.ini_models(train=True)
+        gan.ini_models(train=False)
 
         return gan
 
@@ -87,7 +87,7 @@ class TrainActionNet:
             m = 1
             seed=np.random.randint(0,5000)
             '''Elevation-based augmentation'''
-            depth=self.simulate_elevation_variations(depth,seed)
+            # depth=self.simulate_elevation_variations(depth,seed)
 
             '''get parameters'''
             pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
@@ -95,7 +95,7 @@ class TrainActionNet:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
-                depth.clone(),seed=seed,alpha=0.0,detach_backbone=detach_backbone,dist_width_sigmoid=False)
+                depth.clone(),seed=seed,detach_backbone=detach_backbone,randomization_factor=0.0)
 
             # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
             # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
@@ -108,11 +108,11 @@ class TrainActionNet:
             suction_head_predictions=suction_quality_classifier[0, 0][mask]
             shift_head_predictions = shift_affordance_classifier[0, 0][mask]
             background_class_predictions = background_class.permute(0, 2, 3, 1)[0, :, :, 0][mask]
-            objects_mask = background_class_predictions.detach().cpu().numpy() <= 0.5
+            objects_mask = background_class_predictions.detach().cpu().numpy() <= .5
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask]#.cpu().numpy()
             collision_with_objects_predictions=griper_collision_classifier[0, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
-            gripper_sampling_mask=(collision_with_objects_predictions<0.5) & (collision_with_bin_predictions<0.5)
+            gripper_sampling_mask=(collision_with_objects_predictions<.7) & (collision_with_bin_predictions<.7)
 
             # view_image(depth[0,0].cpu().numpy().astype(np.float64))
 

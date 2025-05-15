@@ -128,6 +128,7 @@ class att_res_mlp_LN(nn.Module):
             self.query_IN=nn.InstanceNorm1d(in_c2)
 
             self.query = nn.Sequential(
+                # nn.LayerNorm([in_c2]),
                 nn.Linear(in_c2, 32)
             ).to('cuda')
 
@@ -160,16 +161,16 @@ class att_res_mlp_LN(nn.Module):
             ).to('cuda')
 
         def forward(self, key_value_input, query_input):
-            normalized_query_input=self.query_IN(query_input.t()).t()
+            # normalized_query_input=self.query_IN(query_input.t()).t()
             '''residual'''
-            inputs = torch.cat([key_value_input, normalized_query_input], dim=-1)
+            inputs = torch.cat([key_value_input, query_input], dim=-1)
             res = self.res(inputs)
 
             '''key value from input1'''
             key = self.key(key_value_input)
             value = self.value(key_value_input)
             '''Query from input2'''
-            query = self.query(normalized_query_input)
+            query = self.query(query_input)
             '''attention score'''
             att_map = key * query
             att_map = F.softmax(att_map, dim=-1)
