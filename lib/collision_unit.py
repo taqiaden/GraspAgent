@@ -35,6 +35,9 @@ def grasp_collision_detection(T_d_,width,point_data, visualize=False,with_allowa
 def gripper_firmness_check(T_d_,width,point_data, visualize=False,with_allowance=True):
     T_d=np.copy(T_d_)
     assert np.any(np.isnan(T_d))==False,f'{T_d}'
+    assert np.any(np.isnan(width))==False,f'{width}'
+    assert np.any(np.isnan(point_data))==False,f'{point_data}'
+
     #########################################################
     '''Push the gripper to the maximum inference allowance'''
     if with_allowance:
@@ -189,12 +192,14 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points):
     val_z_small = (z < z_max) & (z > z_min)
     val_small = val_x_small & val_y_small & val_z_small
     dist_ = x_max - x
-    firmness_weight = dist_[val_small].sum()
+    firmness_points=dist_[val_small]
+    firmness_weight = firmness_points.mean() if firmness_points.size>0 else 0
 
     # print('points in gripper cavity=',points_in_cavity)
 
     if np.any(~val_small):
-        collision_weight=dist_[~val_small].sum()
+        collision_points = dist_[~val_small]
+        collision_weight = collision_points.mean() if collision_points.size > 0 else 0
         # print(collision_points[~val_small])
         return 1, firmness_weight,collision_weight
     else:

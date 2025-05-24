@@ -66,6 +66,7 @@ def scope_drift_intensity(pose_7):
     return sum(k)
 def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visualize=False):
 
+
     gen_out_of_scope=scope_drift_intensity(target_generated_pose)
     ref_out_of_scope=scope_drift_intensity(target_ref_pose)
 
@@ -73,26 +74,29 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,visua
         '''check collision'''
         T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
         gen_has_collision,pred_firmness_val,collision_val = gripper_firmness_check(T_d,width, pc, with_allowance=True, visualize=visualize )
-        # print('------------------------',gen_has_collision,int(pred_firmness_val)/10,int(collision_val*10)/10)
+        # print('------------------------',pred_firmness_val,collision_val,int(pred_firmness_val*1000)/30,int(collision_val*1000)/30)
+
+        pred_firmness_val, collision_val = int(pred_firmness_val*1000)/30,  int(collision_val*1000)/30
     else:
-        gen_has_collision, pred_firmness_val, collision_val = 1, 0, 1
+        gen_has_collision, pred_firmness_val, collision_val = None, None, None
 
     if ref_out_of_scope==0:
         '''check firmness of the label'''
         T_d_label, width_label, distance_label = pose_7_to_transformation(target_ref_pose, target_point)
         ref_has_collision,ref_firmness_val,ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc,with_allowance=True,  visualize=visualize)
+        ref_firmness_val, ref_collision_val =  int(ref_firmness_val*1000)/30,  int(ref_collision_val*1000)/30
         # print(ref_has_collision,ref_firmness_val,ref_collision_val)
         # if ref_has_collision==0:
         #     print('ref: ', target_ref_pose)
         #     print('G: ', target_generated_pose)
     else:
-        ref_has_collision, ref_firmness_val, ref_collision_val=1,0,1
+        ref_has_collision, ref_firmness_val, ref_collision_val=None,None,None
     #
     # print('ref: ', target_ref_pose)
     # print('G: ', target_generated_pose)
 
 
-    return (int(collision_val*10)/10,int(ref_collision_val*10)/10), (gen_out_of_scope,ref_out_of_scope),(int(pred_firmness_val)/20,int(ref_firmness_val)/20)
+    return (collision_val,ref_collision_val), (gen_out_of_scope,ref_out_of_scope),(pred_firmness_val,ref_firmness_val)
 
 
 

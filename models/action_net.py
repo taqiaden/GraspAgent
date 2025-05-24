@@ -23,12 +23,13 @@ from visualiztion import view_features, plt_features
 
 action_module_key = 'action_net'
 action_module_key2 = 'action_net2'
+action_module_key3 = 'action_net3'
 
-critic_relu_slope = 0.2
-classification_relu_slope = 0.1
-generator_backbone_relu_slope = 0.1
-gripper_sampler_relu_slope = 0.1
-suction_sampler_relu_slope = 0.1
+critic_relu_slope = 0.
+classification_relu_slope = 0.
+generator_backbone_relu_slope = 0.
+gripper_sampler_relu_slope = 0.
+suction_sampler_relu_slope = 0.
 
 
 class GripperGraspSampler(nn.Module):
@@ -44,10 +45,10 @@ class GripperGraspSampler(nn.Module):
         #     nn.Linear(16, 7),
         # ).to('cuda')
         # self.approach_decoder=att_res_mlp_LN(in_c1=64, in_c2=3, out_c=3,relu_negative_slope=gripper_sampler_relu_slope).to('cuda')
-        self.betadecoder = att_res_mlp_LN(in_c1=64, in_c2=3 , out_c=2,
+        self.beta_decoder = att_res_mlp_LN(in_c1=64, in_c2=3 +1, out_c=2,
                                            relu_negative_slope=gripper_sampler_relu_slope).to(
             'cuda')
-        self.distwidthdecoder = att_res_mlp_LN(in_c1=64, in_c2=5 , out_c=2,
+        self.dist_width_decoder = att_res_mlp_LN(in_c1=64, in_c2=5+1, out_c=2,
                                                  relu_negative_slope=gripper_sampler_relu_slope).to(
             'cuda')
         self.gripper_regressor_layer = GripperGraspRegressor2()
@@ -111,7 +112,6 @@ class GripperGraspSampler(nn.Module):
         pose[:,3:5] = torch.floor(pose[:,3:5] * 10) / 10
 
         width_noise = torch.distributions.LogNormal(loc=-1.312, scale=0.505)
-
         width_noise = 1.-width_noise.sample((pose.shape[0], 1)).cuda()
 
         pose[:, 6:7] = (1.0 - randomization_factor) * pose[:, 6:7] + width_noise * randomization_factor
@@ -150,30 +150,34 @@ class GripperGraspSampler(nn.Module):
 
         return pose
 
-    def forward(self, representation_2d, depth, approach_seed=None, randomization_factor=0.0  ):
+    def forward(self, representation_2d, depth,latent_vector, approach_seed=None, randomization_factor=0.0  ):
         approach = approach_seed
         # approach=self.approach_decoder(representation_2d,approach_seed)
-        beta = self.betadecoder(representation_2d, approach)
-        dist_width = self.distwidthdecoder(representation_2d, torch.cat([ approach, beta], dim=1))
-        pose = torch.cat([approach, beta, dist_width], dim=1)
+
+        beta = self.beta_decoder(representation_2d, torch.cat([approach,depth],dim=1))
+        dist_width = self.dist_width_decoder(representation_2d, torch.cat([ approach, beta,depth], dim=1))
         # pose=self.d(representation_2d)
         # dist_width[:, 0] = self.tanh(dist_width[:, 0])+0.32
         # dist_width[:, -1] = self.tanh(dist_width[:, -1])+0.7
         # beta=self.tanh(beta)
+        # dist_width=(self.tanh(dist_width)+1.)/2
+        pose = torch.cat([approach, beta, dist_width], dim=1)
 
-        if randomization_factor > 0.:
-            # print(beta)
-            # pose = self.latent_noise_injection(approach, beta, dist_width, randomization_factor)
-            pose = self.latent_noise_injection2(pose,randomization_factor)
+        pose = self.gripper_regressor_layer(pose)
+
+        # if randomization_factor > 0.:
+        #     # print(beta)
+        #     # pose = self.latent_noise_injection(approach, beta, dist_width, randomization_factor)
+        #     pose = self.latent_noise_injection2(pose,randomization_factor)
 
             # print(pose[:,3:5])
 
             # print('------',randomization_factor)
-        else:
-            # print('no randomization')
-            # pose = torch.cat([approach, beta, dist_width], dim=1)
-            pose = self.gripper_regressor_layer(pose)
-            # clamp_mask=pose[:,-1]<1.1
+        # else:
+        #     # print('no randomization')
+        #     # pose = torch.cat([approach, beta, dist_width], dim=1)
+        #     pose = self.gripper_regressor_layer(pose)
+        #     # clamp_mask=pose[:,-1]<1.1
             # pose[:,-1][clamp_mask]=torch.clamp(pose[:,-1][clamp_mask],max=1.0)
             # clamp_mask=pose[:,-2]>-0.1
             # pose[:,-2][clamp_mask]=torch.clamp(pose[:,-2][clamp_mask],min=0.0)
@@ -204,19 +208,25 @@ class SuctionPartSampler(nn.Module):
 class CollisionNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.object_collision_decoder = att_res_mlp_LN(in_c1=64, in_c2=7 , out_c=2,
+        self.object_collision_decoder_ = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
                                                     relu_negative_slope=classification_relu_slope).to(
             'cuda')
-        self.bin_collision_decoder = att_res_mlp_LN(in_c1=64, in_c2=7 , out_c=2,
+        self.bin_collision_decoder_ = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
                                                 relu_negative_slope=classification_relu_slope).to(
             'cuda')
+
+        self.sigmoid = nn.Sigmoid()
+
     def forward(self, representation, query):
 
-        objects_collision=self.object_collision_decoder(representation, query)
+        objects_collision=self.object_collision_decoder_(representation, query)
 
-        bin_collision=self.bin_collision_decoder(representation, query)
+        bin_collision=self.bin_collision_decoder_(representation, query)
 
-        return torch.cat([objects_collision,bin_collision],dim=1)
+        output=torch.cat([objects_collision,bin_collision],dim=1)
+        output=self.sigmoid(output)
+
+        return output
 
 class ActionNet(nn.Module):
     def __init__(self):
@@ -232,6 +242,9 @@ class ActionNet(nn.Module):
         self.suction_sampler = SuctionPartSampler()
 
         self.gripper_collision = CollisionNet()
+
+        # self.pre_IN=nn.InstanceNorm2d(64).to('cuda')
+
 
         self.suction_quality = att_res_mlp_LN(in_c1=64, in_c2=3, out_c=1,
                                               relu_negative_slope=classification_relu_slope).to(
@@ -253,17 +266,17 @@ class ActionNet(nn.Module):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-    def gripper_sample_and_classify_(self,features, depth,approach_direction,randomization_factor):
+    def gripper_sample_and_classify_(self,features, depth,approach_direction,randomization_factor,latent_vector):
 
-        gripper_pose = self.gripper_sampler(features, depth, approach_seed=approach_direction,
+        gripper_pose = self.gripper_sampler(features, depth,latent_vector, approach_seed=approach_direction,
                                             randomization_factor=randomization_factor)
         '''gripper collision head'''
         gripper_pose_detached = gripper_pose.detach().clone()
         gripper_pose_detached[:, -2:] = torch.clip(gripper_pose_detached[:, -2:], 0., 1.)
-        griper_collision_classifier = self.gripper_collision(features, gripper_pose_detached)
+        griper_collision_classifier = self.gripper_collision(features, torch.cat([gripper_pose_detached,depth],dim=1))
         return gripper_pose,griper_collision_classifier
 
-    def gripper_sampling_and_quality_inference(self,features, depth,normal_direction,seed,randomization_factor):
+    def gripper_sampling_and_quality_inference(self,features, depth,normal_direction,seed,randomization_factor,latent_vector):
         '''gripper parameters'''
         if self.training:
             vertical_direction = torch.zeros_like(normal_direction)
@@ -274,15 +287,15 @@ class ActionNet(nn.Module):
             gripper_approach_direction = normal_direction.clone().detach()
             gripper_approach_direction[random_mask] = vertical_direction[random_mask]
 
-            gripper_pose,griper_collision_classifier=self.gripper_sample_and_classify_( features, depth, gripper_approach_direction, randomization_factor)
+            gripper_pose,griper_collision_classifier=self.gripper_sample_and_classify_( features, depth, gripper_approach_direction, randomization_factor,latent_vector)
         else:
             '''first forward with approach set to normal'''
-            gripper_pose_1,griper_collision_classifier_1=self.gripper_sample_and_classify_( features, depth, normal_direction.detach(), randomization_factor)
+            gripper_pose_1,griper_collision_classifier_1=self.gripper_sample_and_classify_( features, depth, normal_direction.detach(), randomization_factor,latent_vector)
 
             '''second forward with approach set to vertical'''
             vertical_direction = torch.zeros_like(normal_direction)
             vertical_direction[:, 2] += 1.0
-            gripper_pose_2,griper_collision_classifier_2=self.gripper_sample_and_classify_( features, depth, vertical_direction, randomization_factor)
+            gripper_pose_2,griper_collision_classifier_2=self.gripper_sample_and_classify_( features, depth, vertical_direction, randomization_factor,latent_vector)
 
             '''rank best approach based on collision avoidance'''
             # collision_with bin
@@ -306,7 +319,7 @@ class ActionNet(nn.Module):
 
         return gripper_pose,griper_collision_classifier
 
-    def dist_noisfication(self, dist, randomization_factor=0.1):
+    def sample_random_dist(self, dist, randomization_factor=0.1):
 
         dist_noise = torch.distributions.LogNormal(loc=-1.312, scale=0.505)
         dist_noise = dist_noise.sample((dist.shape[0], 1)).cuda()
@@ -316,7 +329,7 @@ class ActionNet(nn.Module):
 
         return dist
 
-    def width_noisfication(self, width, randomization_factor=0.1):
+    def sample_random_width(self, width, randomization_factor=0.1):
 
         width_noise = torch.distributions.LogNormal(loc=-1.337, scale=0.791)
         width_noise = width_noise.sample((width.shape[0], 1)).cuda()
@@ -325,31 +338,33 @@ class ActionNet(nn.Module):
         width = torch.clip(width, 0.0, 1.)
 
         return width
-    def ref_generator_forward(self,depth,approach_direction,randomization_factor=0.):
+    def ref_generator_forward(self,depth,latent_vector,approach_direction,randomization_factor=0.):
         '''input standardization'''
         depth = standardize_depth(depth)
         features = self.back_bone(depth)
 
+        '''reshape'''
         depth = reshape_for_layer_norm(depth, camera=camera, reverse=False)
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
         approach_direction = reshape_for_layer_norm(approach_direction, camera=camera, reverse=False)
 
-        gripper_pose = self.gripper_sampler(features, depth, approach_seed=approach_direction,
+        '''sampling'''
+        gripper_pose = self.gripper_sampler(features, depth,latent_vector, approach_seed=approach_direction,
                                             randomization_factor=randomization_factor)
 
-        noisy_dist=gripper_pose[:,5:6].detach().clone()
-        noisy_dist=self.dist_noisfication( noisy_dist, randomization_factor=0.3)
-
-        noisy_width=gripper_pose[:,6:7].detach().clone()
-        noisy_width=self.width_noisfication( noisy_width, randomization_factor=0.3)
+        # noisy_dist=gripper_pose[:,5:6].detach().clone()
+        # noisy_dist=self.dist_noisfication( noisy_dist, randomization_factor=0.3)
+        #
+        # noisy_width=gripper_pose[:,6:7].detach().clone()
+        # noisy_width=self.width_noisfication( noisy_width, randomization_factor=0.3)
 
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
-        noisy_dist = reshape_for_layer_norm(noisy_dist, camera=camera, reverse=True)
-        noisy_width = reshape_for_layer_norm(noisy_width, camera=camera, reverse=True)
+        # noisy_dist = reshape_for_layer_norm(noisy_dist, camera=camera, reverse=True)
+        # noisy_width = reshape_for_layer_norm(noisy_width, camera=camera, reverse=True)
 
-        return gripper_pose,noisy_dist,noisy_width
+        return gripper_pose#,noisy_dist,noisy_width
 
-    def forward(self, depth, seed=None, detach_backbone=False, randomization_factor=0.0):
+    def forward(self, depth,latent_vector, seed=None, detach_backbone=False, randomization_factor=0.0):
         '''input standardization'''
         depth = standardize_depth(depth)
 
@@ -359,6 +374,8 @@ class ActionNet(nn.Module):
                 features = self.back_bone(depth)
         else:
             features = self.back_bone(depth)
+
+        # features = self.pre_IN(features)
 
         # depth_features=features.detach().clone()
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
@@ -385,7 +402,7 @@ class ActionNet(nn.Module):
 
 
         '''gripper sampler and quality inference'''
-        gripper_pose,griper_collision_classifier=self.gripper_sampling_and_quality_inference( features, depth, normal_direction, seed, randomization_factor )
+        gripper_pose,griper_collision_classifier=self.gripper_sampling_and_quality_inference( features, depth, normal_direction, seed, randomization_factor ,latent_vector)
 
         # view_features(gripper_pose)
         # plt_features(gripper_pose)
@@ -402,7 +419,7 @@ class ActionNet(nn.Module):
         background_class = self.background_detector(features, self.spatial_encoding)
 
         '''sigmoid'''
-        griper_collision_classifier = self.sigmoid(griper_collision_classifier)
+        # griper_collision_classifier = self.sigmoid(griper_collision_classifier)
         suction_quality_classifier = self.sigmoid(suction_quality_classifier)
         shift_affordance_classifier = self.sigmoid(shift_affordance_classifier)
         background_class = self.sigmoid(background_class)
@@ -442,21 +459,22 @@ class Critic(nn.Module):
         self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=critic_relu_slope).to('cuda')
         # self.dropout=nn.Dropout2d(0.2)
-        # self.pre_IN=nn.InstanceNorm2d(5).to('cuda')
+        # self.pre_IN=nn.InstanceNorm2d(64).to('cuda')
 
 
-        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=7 , out_c=1, relu_negative_slope=critic_relu_slope,
+        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=8, relu_negative_slope=critic_relu_slope,
                                         drop_out_ratio=0.0).to('cuda')
-        # self.att_block2 = att_res_mlp_LN(in_c1=64, in_c2=7 + 1 + 8, out_c=8, relu_negative_slope=critic_relu_slope,
-        #                                  drop_out_ratio=0.0).to('cuda')
+        self.att_block2 = att_res_mlp_LN(in_c1=64, in_c2=7 + 1 + 8, out_c=8, relu_negative_slope=critic_relu_slope,
+                                         drop_out_ratio=0.0).to('cuda')
+        #
+        self.decoder = nn.Sequential(
+            nn.LayerNorm([16]),
+            nn.LeakyReLU(negative_slope=critic_relu_slope) if critic_relu_slope > 0. else nn.ReLU(),
+            # nn.Dropout(0.3),
+            nn.Linear(16, 1),
+        ).to('cuda')
 
-        # self.decoder = nn.Sequential(
-        #     nn.LayerNorm([16]),
-        #     nn.LeakyReLU(negative_slope=critic_relu_slope) if critic_relu_slope > 0. else nn.ReLU(),
-        #     # nn.Dropout(0.3),
-        #     nn.Linear(16, 1),
-        # ).to('cuda')
-        # add_spectral_norm_selective(self,layer_types=(nn.Conv2d,nn.Linear))
+        # add_spectral_norm_selective(self)
 
     def forward(self, depth, pose, detach_backbone=False):
         '''input standardization'''
@@ -470,19 +488,24 @@ class Critic(nn.Module):
         else:
             features = self.back_bone(depth)
 
-        # features=self.dropout(features)
+        # features=self.pre_IN(features)
 
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
-        # depth = reshape_for_layer_norm(depth, camera=camera, reverse=False)
+        depth = reshape_for_layer_norm(depth, camera=camera, reverse=False)
         pose = reshape_for_layer_norm(pose, camera=camera, reverse=False)
 
+        if self.training:
+            max_ = features.max()
+            if max_ > 100:
+                print(Fore.RED, f'Warning: Critic ----- Res U net outputs high values up to {max_}', Fore.RESET)
+
         # view_features(features_2d)
-        # query = torch.cat([depth, pose], dim=1)
+        query = torch.cat([depth, pose], dim=1)
 
         '''decode'''
-        output= self.att_block(features,pose)  #+ self.att_block1(features,query) * self.tanh(self.att_block2(features,query))
-        # output2 = self.att_block2(features, torch.cat([query, output1], dim=1))
-        # output = self.decoder(torch.cat([output1, output2], dim=1))
+        output1= self.att_block(features,query)  #+ self.att_block1(features,query) * self.tanh(self.att_block2(features,query))
+        output2 = self.att_block2(features, torch.cat([query, output1], dim=1))
+        output = self.decoder(torch.cat([output1, output2], dim=1))
 
         # output_2d=torch.cat([output_1,output_2],dim=1)
         output = reshape_for_layer_norm(output, camera=camera, reverse=True)

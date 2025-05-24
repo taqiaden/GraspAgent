@@ -67,14 +67,14 @@ def visualize_vox(npy):
                 if npy[i, j, k] == 1: points_list.append((i, j, k))
     points_list = np.asarray(points_list)
     view_npy_open3d(points_list)
-def dense_grasps_visualization(pc, generated_pose_7,view_mask,view_all=False):
+def dense_grasps_visualization(pc, generated_pose_7,view_mask,sampling_p=None,view_all=False):
     T_d_list = []
     width_list = []
     total_size=view_mask.sum()
     if total_size<1: return
     # sampled_indexes=np.where(view_mask==1)[0]
     # np.random.shuffle(sampled_indexes)
-    selection_p=torch.rand(view_mask.size()).cuda()
+    selection_p=sampling_p if sampling_p is not None else torch.rand(view_mask.size()).cuda()
     sampled_size=total_size if view_all else int(math.log(total_size+1,2)*30)
     sampled_size=min(total_size,sampled_size)
 

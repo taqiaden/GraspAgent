@@ -196,24 +196,26 @@ get_skewed_normal_distribution(width_list)
 # plt.hist(generated_skewed_data,bins=15,edgecolor='black')
 # plt.show()
 x=np.asarray(dist_list)
-x[x<=0]=0.01
+x=x[x>0.]
 x=np.log(np.asarray(x))
 log_mean=x.mean()
 log_std=x.std()
 print('dist mean',log_mean)
 print('dist std',log_std)
-generated_skewed_data=np.random.lognormal(mean=log_mean,sigma=log_std,size=10000)
+
+
+# generated_skewed_data=np.random.lognormal(mean=log_mean,sigma=log_std,size=10000)
 generated_skewed_data = torch.distributions.LogNormal(loc=log_mean, scale=log_std)
 generated_skewed_data = generated_skewed_data.sample((10000,)).numpy()
 generated_skewed_data=generated_skewed_data[generated_skewed_data<1.0]
 plt.hist(generated_skewed_data,bins=150,edgecolor='black',color='gray')
-plt.xlim(0,1.)
+# plt.xlim(0,1.)
 
 plt.show()
 
-
 x=1-np.asarray(width_list)
-x[x<=0]=0.01
+x=x[x>0.]
+
 x=np.log(np.asarray(x))
 log_mean=x.mean()
 log_std=x.std()
@@ -222,8 +224,9 @@ print('width std',log_std)
 generated_skewed_data=np.random.lognormal(mean=log_mean,sigma=log_std,size=10000)
 generated_skewed_data=1-generated_skewed_data[generated_skewed_data<1.0]
 
-plt.hist(generated_skewed_data,bins=150,edgecolor='black',color='gray')
-plt.xlim(0,1.)
+plt.hist(x,bins=150,edgecolor='black',color='gray')
+# plt.xlim(0,1.)
+
 plt.show()
 
 # generated_skewed_data=scipy.stats.skewnorm.rvs(-0.642,loc=0.697,scale=0.138,size=10000)

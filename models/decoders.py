@@ -118,17 +118,19 @@ class att_res_mlp_LN(nn.Module):
         def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0., shallow_decoder=False,drop_out_ratio=0.0):
             super().__init__()
             self.key = nn.Sequential(
+                nn.LayerNorm([in_c1]),
                 nn.Linear(in_c1, 32),
             ).to('cuda')
 
             self.value = nn.Sequential(
+                nn.LayerNorm([in_c1]),
                 nn.Linear(in_c1, 32),
             ).to('cuda')
 
-            self.query_IN=nn.InstanceNorm1d(in_c2)
+            # self.query_IN=nn.InstanceNorm1d(in_c2)
 
             self.query = nn.Sequential(
-                # nn.LayerNorm([in_c2]),
+                nn.LayerNorm([in_c2]),
                 nn.Linear(in_c2, 32)
             ).to('cuda')
 

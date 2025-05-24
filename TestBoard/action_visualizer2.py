@@ -10,8 +10,9 @@ from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import view_image
+from lib.math_utils import seeds
 from lib.report_utils import progress_indicator
-from models.action_net import ActionNet, Critic, action_module_key2, action_module_key
+from models.action_net import ActionNet, Critic, action_module_key2, action_module_key, action_module_key3
 from registration import camera
 from visualiztion import dense_grasps_visualization
 from visualiztion import view_score2
@@ -93,9 +94,11 @@ class TrainActionNet:
             pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
             pc = transform_to_camera_frame(pc, reverse=True)
 
+            latent_vector=torch.randn(size=(depth.numel(),8),device=depth.device)
+
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class,depth_features = self.gan.generator(
-                depth.clone(),seed=seed,detach_backbone=detach_backbone,randomization_factor=0.0)
+                depth.clone(),latent_vector,seed=seed,detach_backbone=detach_backbone,randomization_factor=0.0)
 
             # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
             # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
@@ -112,13 +115,14 @@ class TrainActionNet:
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask]#.cpu().numpy()
             collision_with_objects_predictions=griper_collision_classifier[0, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
-            gripper_sampling_mask=(collision_with_objects_predictions<.7) & (collision_with_bin_predictions<.7)
+            gripper_sampling_mask=(collision_with_objects_predictions<.9) & (collision_with_bin_predictions<.9)
 
             # view_image(depth[0,0].cpu().numpy().astype(np.float64))
 
             # view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
+            sampling_p=1.-torch.sqrt(collision_with_objects_predictions*collision_with_bin_predictions)
 
-            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),view_all=False)
+            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),sampling_p=sampling_p,view_all=False)
 
             suction_head_predictions[~torch.from_numpy(objects_mask).cuda()]*=0.
 
@@ -127,6 +131,7 @@ class TrainActionNet:
 
 
 if __name__ == "__main__":
+    seeds(0)
 
     with torch.no_grad():
         lr = 1e-6
