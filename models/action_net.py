@@ -52,6 +52,7 @@ class GripperGraspSampler(nn.Module):
                                                  relu_negative_slope=gripper_sampler_relu_slope).to(
             'cuda')
         self.gripper_regressor_layer = GripperGraspRegressor2()
+        self.dropout=nn.Dropout(0.1)
 
         # self.soft_plus = nn.Softplus()
         self.tanh = nn.Tanh()
@@ -151,6 +152,7 @@ class GripperGraspSampler(nn.Module):
         return pose
 
     def forward(self, representation_2d, depth,latent_vector, approach_seed=None, randomization_factor=0.0  ):
+        representation_2d=self.dropout(representation_2d)
         approach = approach_seed
         # approach=self.approach_decoder(representation_2d,approach_seed)
 
@@ -208,20 +210,20 @@ class SuctionPartSampler(nn.Module):
 class CollisionNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.object_collision_decoder_ = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
-                                                    relu_negative_slope=classification_relu_slope).to(
+        self.object_collision_decoder = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
+                                                    relu_negative_slope=classification_relu_slope,shallow_decoder=True).to(
             'cuda')
-        self.bin_collision_decoder_ = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
-                                                relu_negative_slope=classification_relu_slope).to(
+        self.bin_collision_decoder = att_res_mlp_LN(in_c1=64, in_c2=7 +1, out_c=1,
+                                                relu_negative_slope=classification_relu_slope,shallow_decoder=True).to(
             'cuda')
 
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, representation, query):
 
-        objects_collision=self.object_collision_decoder_(representation, query)
+        objects_collision=self.object_collision_decoder(representation, query)
 
-        bin_collision=self.bin_collision_decoder_(representation, query)
+        bin_collision=self.bin_collision_decoder(representation, query)
 
         output=torch.cat([objects_collision,bin_collision],dim=1)
         output=self.sigmoid(output)

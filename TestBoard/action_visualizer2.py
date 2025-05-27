@@ -57,9 +57,8 @@ class TrainActionNet:
 
     def prepare_model_wrapper(self):
         '''load  models'''
-        gan = GANWrapper(action_module_key2, ActionNet, Critic)
+        gan = GANWrapper(action_module_key3, ActionNet, Critic)
         gan.ini_models(train=False)
-
         return gan
 
     def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
@@ -126,8 +125,8 @@ class TrainActionNet:
 
             suction_head_predictions[~torch.from_numpy(objects_mask).cuda()]*=0.
 
-            view_scores(pc, suction_head_predictions, threshold=0.5)
-            view_scores(pc, shift_head_predictions, threshold=0.5)
+            # view_scores(pc, suction_head_predictions, threshold=0.5)
+            # view_scores(pc, shift_head_predictions, threshold=0.5)
 
 
 if __name__ == "__main__":
