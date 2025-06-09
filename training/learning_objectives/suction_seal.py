@@ -122,7 +122,7 @@ def seal_check_B(target_point,points_within_spherical_seal_region,visualize=Fals
 
     return np.max(grad) < c
 
-def suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial_mask,visualize=False):
+def get_suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial_mask,visualize=False):
     target_normal = normals[target_index]
     target_point=pc[target_index]
     shifted_pc=pc-target_point[np.newaxis]

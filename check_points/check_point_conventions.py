@@ -1,8 +1,10 @@
 import torch
 
-from Configurations.config import weight_decay
 from lib.models_utils import initialize_model, export_model_state, get_model_time_stamp
 from lib.optimizer import export_optm, load_opt
+import torch.nn.init as init
+
+weight_decay = 0.000001
 
 
 class ModelWrapper():
@@ -13,8 +15,9 @@ class ModelWrapper():
         self.model_name=module_key+'_model'
         self.optimizer_name=module_key+'_optimizer'
 
-        self.weight_decay = 0.000001
         self.learning_rate=1*1e-5
+
+
 
     '''model operations'''
     def ini_model(self,train=True,file_index=None):
@@ -38,17 +41,17 @@ class ModelWrapper():
         if learning_rate is not None: self.learning_rate=learning_rate
         if params_group is None:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate, betas=(beta1, 0.999), eps=1e-8,
-                                         weight_decay=self.weight_decay)
+                                         weight_decay=weight_decay)
         else:
             self.optimizer = torch.optim.Adam(params_group, betas=(beta1, 0.999),
                                               eps=1e-8,
-                                              weight_decay=self.weight_decay)
+                                              weight_decay=weight_decay)
         self.optimizer = load_opt(self.optimizer, file_name)
         return self.optimizer
 
     def ini_sgd_optimizer(self,learning_rate=None):
         if learning_rate is not None: self.learning_rate=learning_rate
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate, weight_decay=weight_decay)
         return self.optimizer
 
     def export_optimizer(self,file_index=None):

@@ -1,5 +1,4 @@
 import torch
-from pyglet.window.key import PRINT
 from torch import nn
 import torch.nn.functional as F
 from lib.models_utils import reshape_for_layer_norm
@@ -14,12 +13,13 @@ use_in=True
 
 policy_module_key='policy_net'
 
-relu_slope=0.01
+relu_slope=0.0
 
 class QualityRegressor(nn.Module):
-    def __init__(self, in_c2,out_c=1):
+    def __init__(self, in_c2,out_c=1,drop_out_ratio=0.):
         super().__init__()
-        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=in_c2, out_c=out_c,relu_negative_slope=relu_slope).to('cuda')
+
+        self.att_block = att_res_mlp_LN(in_c1=64, in_c2=in_c2, out_c=out_c,relu_negative_slope=relu_slope,shallow_decoder=True,drop_out_ratio=drop_out_ratio).to('cuda')
         # self.sig=nn.Sigmoid()
     def forward(self, features,pose_2d ):
         output_2d = self.att_block(features,pose_2d)
@@ -55,11 +55,11 @@ class PolicyNet(nn.Module):
         self.actor=VanillaDecoder().to('cuda')
 
         '''seize policy'''
-        self.gripper_grasp = QualityRegressor( in_c2=7)
-        self.suction_grasp = QualityRegressor( in_c2=3)
+        self.gripper_grasp = QualityRegressor( in_c2=7,drop_out_ratio=0.5)
+        self.suction_grasp = QualityRegressor( in_c2=3,drop_out_ratio=0.5)
 
         '''handover policy'''
-        self.handover_policy = QualityRegressor( in_c2=10,out_c=2)
+        self.handover_policy = QualityRegressor( in_c2=10,out_c=2,drop_out_ratio=.5)
 
         # self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding=reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)

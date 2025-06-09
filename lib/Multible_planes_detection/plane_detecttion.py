@@ -12,7 +12,7 @@ from visualiztion import view_npy_open3d
 
 '''Note: Plane detection method is borrowed from (https://github.com/yuecideng/Multiple_Planes_Detection)'''
 
-cache_dir = os.getcwd() + r'/training/cache/'
+cache_dir = os.getcwd() + r'/cache/'
 
 x_vec = np.array([1., 0., 0.])
 y_vec = np.array([0., 1., 0.])

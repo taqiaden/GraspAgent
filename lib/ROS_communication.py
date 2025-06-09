@@ -111,12 +111,18 @@ def deploy_suction_grasp_command( action,angle=0.0):
 def deploy_gripper_shift_command( action):
     pre_mat=adjust_final_matrix(action.transformation, x_correction=-0.23)
     end_mat = action.transformation
-    end_mat = shift_a_distance(end_mat,  +0.003)
+
+    if action.contact_with_container:
+        print('add safety gap to avoid friction during shift')
+        end_mat = shift_a_distance(end_mat,  -0.003)
+    else: end_mat = shift_a_distance(end_mat,  +0.006)
     end_mat=adjust_final_matrix(end_mat, x_correction=-0.169)
 
     shift_end_mat = np.copy(action.transformation)
     shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
-    shift_end_mat=shift_a_distance(shift_end_mat, -0.00)
+
+    if action.contact_with_container:shift_end_mat=shift_a_distance(shift_end_mat, -0.007)
+    else: shift_end_mat=shift_a_distance(shift_end_mat, +0.003)
     shift_end_mat=adjust_final_matrix(shift_end_mat, x_correction=-0.169)
 
     save_gripper_data(pre_mat, action.real_width, gripper_pre_shift_data_path)
@@ -126,11 +132,16 @@ def deploy_gripper_shift_command( action):
 def deploy_suction_shift_command( action):
     pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.25)
     end_mat=action.transformation
-    end_mat=shift_a_distance(end_mat,- 0.007)
+    if action.contact_with_container:
+        print('add safety gap to avoid friction during shift')
+        end_mat = shift_a_distance(end_mat,  -0.011)
+    else: end_mat = shift_a_distance(end_mat,  -0.003)
     end_mat = adjust_final_matrix(end_mat, x_correction=-0.184)
     shift_end_mat = np.copy(action.transformation)
     shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
-    shift_end_mat=shift_a_distance(shift_end_mat,- 0.013)
+    if action.contact_with_container:shift_end_mat=shift_a_distance(shift_end_mat,- 0.017)
+    else: shift_end_mat=shift_a_distance(shift_end_mat,- 0.007)
+
     shift_end_mat = adjust_final_matrix(shift_end_mat, x_correction=-0.184)
 
     save_suction_data(pre_mat, suction_pre_shift_data_path)

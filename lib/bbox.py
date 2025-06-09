@@ -123,7 +123,7 @@ def unit_metrics_to_real_scope(relative_pose_5):
     beta2=beta_ratio*config.beta_scope
     distance=relative_pose_5[-2]*config.distance_scope
     width=relative_pose_5[-1]
-    width=np.clip(width,0.2,1)*config.width_scope
+    width=np.clip(width,0.0,1)*config.width_scope
     return theta2,phi2,beta2,distance,width
 
 def convert_angles_to_transformation_form(relative_pose_5,center_point):

@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.autograd import Function
+
 
 class GripperGraspRegressor(nn.Module):
     def __init__(self):
@@ -76,3 +78,34 @@ class BiasedTanh(nn.Module):
         if self.b is not None: x=torch.tanh(x) + self.b
         if self.k is not None: x= self.k*x
         return x
+
+
+class ReLUForwardLeakyReLUBackward(Function):
+    # last_output=None
+    @staticmethod
+    def forward(ctx, x, slope=0.01):
+        # Forward pass: Standard ReLU (output = max(0, x))
+        ctx.save_for_backward(x)  # Save input for backward pass
+        ctx.slope = slope          # Save slope for backward
+
+        return torch.where(x >= 0, x, x * 0.)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Backward pass: LeakyReLU gradient (slope for x < 0)
+        x, = ctx.saved_tensors
+        slope = ctx.slope
+        grad_input = grad_output.clone()
+
+        grad_input[x < 0]*=slope
+        return grad_input, None     # None for gradient w.r.t. slope (not a tensor)
+
+# Wrap it in a module for ease of use
+class LGRelu(nn.Module):
+    def __init__(self, slope=0.01):
+        super().__init__()
+        self.slope = slope
+
+    def forward(self, x):
+        return ReLUForwardLeakyReLUBackward.apply(x, self.slope)
+

@@ -1,28 +1,28 @@
 
 enable_gripper_grasp=True
-enable_suction_grasp=True
+enable_suction_grasp=False
 
 sample_action_with_argmax=False
-enable_gripper_shift=False
-enable_suction_shift=False
+enable_gripper_shift=True
+enable_suction_shift=True
 activate_refine_point_cloud=False
 simulation_mode = False
 offline_point_cloud= False
 report_result=True
 report_for_handover=False
-report_for_shift=True
-report_for_grasp=True
+report_for_shift=False
+report_for_grasp=False
 single_arm_operation_mode=False
 activate_segmentation_queries=False
 activate_preferred_placement_side=False
 activate_handover=False
 only_handover=False
+activate_shift_from_beneath_objects=False
 
-quality_exponent=1.0
+quality_exponent=2.0
 handover_quality_bias=0.
 gripper_grasp_bias=0.
 suction_grasp_bias=0.
-
 
 enhance_gripper_firmness=True
 zero_out_distance_when_collision=False

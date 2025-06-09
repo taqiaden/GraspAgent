@@ -68,7 +68,7 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.001,min_decay=0.001,initial_val=0.0):
+    def __init__(self,name='000',decay_rate=0.1,min_decay=0.01,initial_val=0.0):
         self.name=name
         self.min_decay=min_decay
         self.decay_rate = decay_rate
@@ -133,29 +133,32 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker:
-    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False,min_decay=0.001):
-        self.name=name
-        self.iterations_per_epoch=iterations_per_epoch
+    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False,min_decay=0.01):
+        try:
+            self.name=name
+            self.iterations_per_epoch=iterations_per_epoch
 
-        self.running_loss_ = None
+            self.running_loss_ = None
 
-        '''confession matrix'''
-        self.confession_matrix=ConfessionMatrix()
+            '''confession matrix'''
+            self.confession_matrix=ConfessionMatrix()
 
-        '''balance indicator'''
-        self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
-        self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
+            '''balance indicator'''
+            self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
+            self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
-        self.loss_moving_average_=self.load_loss_moving_average()
-        self.convergence=self.load_convergence()
-        self.momentum=self.load_momentum()
-        self.decay_rate=0.001
-        self.min_decay=min_decay
-        self.counter=self.load_counter()
-        self.last_loss=None
+            self.loss_moving_average_=self.load_loss_moving_average()
+            self.convergence=self.load_convergence()
+            self.momentum=self.load_momentum()
+            self.decay_rate=0.001
+            self.min_decay=min_decay
+            self.counter=self.load_counter()
+            self.last_loss=None
 
-        self.set_decay_rate()
-        self.tmp_counter=0
+            self.set_decay_rate()
+            self.tmp_counter=0
+        except Exception as e:
+            print(str(e))
 
     def set_decay_rate(self):
         x=0.1*(1-0.0045)**self.counter

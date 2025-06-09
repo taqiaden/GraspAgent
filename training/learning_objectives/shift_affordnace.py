@@ -97,44 +97,32 @@ def check_collision_for_shift(normals,target_index,pc):
                 transformed_pc[:, 2] > transformed_target_point[2] + interference_allowance)
     return signed_distance_mask.sum() > 0, signed_distance_mask,target_normal
 
-def shift_labeling(pc,target_mask,shift_target_point,check_iterations=3):
+def shift_labeling(pc,target_mask,shift_target_point):
     direction, start_point, end_point, shifted_start_point = get_shift_parameteres(shift_target_point)
-    # shift_mask = get_shift_mask(pc, shifted_start_point, end_point, spatial_mask)
-    shift_result = True
-    start_randomization_scope = 0.001
-    end_randomization_scope = 0.03
+
+    start = shifted_start_point.copy()
+    start[0] = start[0]
+    start[1] = start[1]
+
+    end = end_point.copy()
+    end[0] = end[0]
+    end[1] = end[1]
+
+    shift_mask_result = get_shift_mask(pc, start, end, target_mask)
 
 
-    for i in range(check_iterations):
-        start = shifted_start_point.copy()
-        start[0] = start[0] + np.random.randn() * start_randomization_scope
-        start[1] = start[1] + np.random.randn() * start_randomization_scope
-
-        end = end_point.copy()
-        end[0] = end[0] + np.random.randn() * end_randomization_scope
-        end[1] = end[1] + np.random.randn() * end_randomization_scope
-
-
-        shift_mask_result = get_shift_mask(pc, start, end, target_mask)
-        if shift_mask_result.sum() == 0:
-            shift_result = False
-            break
-
-
-    return shift_result
+    return shift_mask_result
 
 def shift_affordance_loss(pc,shift_target_point,target_mask,statistics,prediction_,visualize=False):
-    shift_result=shift_labeling(pc,target_mask,shift_target_point,check_iterations=5)
+    shift_mask_result=shift_labeling(pc,target_mask,shift_target_point)
+    shift_points=shift_mask_result.sum()
 
-    if shift_result :
-        label= torch.tensor(1, device=prediction_.device).float()
+    if shift_points == 0:
+        label = torch.tensor(0, device=prediction_.device).float()
+        statistics.update_confession_matrix(label, prediction_.detach())
+
     else:
-        label= torch.tensor(0, device=prediction_.device).float()
+        label = torch.tensor(1, device=prediction_.device).float()
+        statistics.update_confession_matrix(label, prediction_.detach())
 
-
-    statistics.update_confession_matrix(label, prediction_.detach())
-
-    if visualize:
-        print(f'Shift label={label}, prediction= {prediction_}')
-        # view_shift(pc, spatial_mask, shift_mask, start_point, end_point,signed_distance_mask,target_normal)
     return bce_loss(prediction_, label)

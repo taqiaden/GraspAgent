@@ -179,7 +179,6 @@ def gripper_object_collision_loss(gripper_target_pose, gripper_target_point,pc,o
 
     if visualize: print(f'  objects collision (label ={object_collision_label}, prediction= {object_collision_pred})')
     object_collision_loss=bce_loss(object_collision_pred, object_collision_label)
-
     with torch.no_grad():
         objects_collision_statistics.loss=object_collision_loss.item()
 

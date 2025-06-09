@@ -3,7 +3,6 @@ import os
 import time
 import numpy as np
 import torch
-from pygame.examples.fonty import print_unicode
 from torch.distributions import Categorical
 import torch.nn.functional as F
 from Configurations.config import workers
@@ -11,7 +10,7 @@ from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
 from dataloaders.policy_dl import SeizePolicyDataset, ClearPolicyDataset, DemonstrationsDataset
 from lib.IO_utils import load_pickle, save_pickle
-from lib.Multible_planes_detection.plane_detecttion import cache_dir
+from lib.Multible_planes_detection.plane_detecttion import cache_dir, bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2,demonstrations_data
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
@@ -21,7 +20,7 @@ from lib.math_utils import seeds
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
 from lib.sklearn_clustering import dbscan_clustering
-from models.action_net import action_module_key2, ActionNet
+from models.action_net import action_module_key, ActionNet
 from models.policy_net import policy_module_key, PolicyNet
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
@@ -172,9 +171,9 @@ class TrainPolicyNet:
         return data_loader
 
     def initialize_action_net(self):
-        action_net = GANWrapper(action_module_key2, ActionNet)
-        action_net.ini_generator(train=False)
-        self.action_net=action_net.generator
+        actions_net = ModelWrapper(model=ActionNet(), module_key=action_module_key)
+        actions_net.ini_model(train=False)
+        self.action_net=actions_net.model
 
     def get_random_target_mask(self,pc,mask,background_class,file_id):
         pixel_mask=background_class<=0.5
@@ -287,16 +286,17 @@ class TrainPolicyNet:
 
         return loss
 
-    def generate_random_target_mask(self,depth,file_ids,target_masks,pcs,masks,seed):
+    def generate_random_target_mask(self,depth,file_ids,target_masks,pcs,masks):
         '''action space'''
         if self.action_net is None: self.initialize_action_net()
 
         with torch.no_grad():
             _, _, _, _, shift_appealing_classifier \
-                , background_class, _ = self.action_net(depth.clone(), seed=seed,clip=True)
+                , background_class = self.action_net(depth.clone())
 
             for j in range(depth.shape[0]):
                 pc=pcs[j]
+                # print(pc.shape)
                 mask=masks[j]
 
                 '''pick random cluster to be the target'''
@@ -360,25 +360,27 @@ class TrainPolicyNet:
 
 
         return loss
-    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
-        if self.action_net is None: self.initialize_action_net()
+    def analytical_bin_mask(self, pc, file_ids):
+        try:
+            bin_mask = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
+                                            file_index=file_ids[0], cache_name='bin_planes2')
+        except Exception as error_message:
+            print(file_ids[0])
+            print(error_message)
+            bin_mask = None
+        return bin_mask
+    def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.2, exponent=2.0):
+        '''Elevation-based Augmentation'''
+        shift_entities_mask = objects_mask & (original_depth > 0.0001)
+        new_depth = original_depth.clone().detach()
+        new_depth[shift_entities_mask] -= max_elevation * (np.random.rand() ** exponent) * camera.scale
 
-        with torch.no_grad():
-            _, _, _, _, _, background_class_3, _ =  self.action_net(
-                original_depth.clone(),seed=seed, alpha=0.0, dist_width_sigmoid=False)
-
-            '''Elevation-based Augmentation'''
-            objects_mask = background_class_3 <= 0.5
-            shift_entities_mask = objects_mask & (original_depth > 0.0001)
-            new_depth = original_depth.clone().detach()
-            new_depth[shift_entities_mask] -= max_elevation * (np.random.rand()**exponent) * camera.scale
-
-            return new_depth
-
+        return new_depth
     def first_phase_training(self,max_size=100,batch_size=1):
 
         '''dataloaders'''
-        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
+        # seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
+        seize_policy_ids = self.experience_sampling(int(batch_size*max_size))
         seize_policy_data_loader=self.get_seize_policy_dataloader(seize_policy_ids,batch_size)
 
         '''demonstrations'''
@@ -391,7 +393,7 @@ class TrainPolicyNet:
         for i,(seize_policy_batch,demonstrations_batch) in enumerate(zip(seize_policy_data_loader,demonstrations_data_loader),start=0):
 
             '''learn from demonstrations'''
-            rgb, depth,labels=demonstrations_batch
+            rgb, depth,labels,file_ids=demonstrations_batch
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             depth = depth.cuda().float()
 
@@ -399,20 +401,33 @@ class TrainPolicyNet:
             self.model_wrapper.model.zero_grad()
 
             b = rgb.shape[0]
+            pcs, masks = self.get_point_clouds(depth)
 
             '''Elevation-based augmentation'''
-            seed = np.random.randint(0, 5000)
-            if np.random.rand() > 0.5: depth = self.simulate_elevation_variations(depth, seed=seed)
+            for k in range(depth.shape[0]):
+                '''background detection head'''
+                bin_mask = self.analytical_bin_mask(pcs[k], file_ids[k])
+                if bin_mask is None: continue
+                objects_mask_numpy = bin_mask <= 0.5
+                objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
+                objects_mask_pixel_form = torch.ones_like(depth)
+                objects_mask_pixel_form[0, 0][masks[k]] = objects_mask_pixel_form[0, 0][masks[k]] * objects_mask
+                objects_mask_pixel_form = objects_mask_pixel_form > 0.5
+                if np.random.rand() > 0.7:
+                    depth[i:i+1] = self.simulate_elevation_variations(depth[i:i+1], objects_mask_pixel_form, exponent=5.0)
+                    pcs[k], masks[k] = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
+                    pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
 
             with torch.no_grad():
                 gripper_pose,normal_direction, _, _, shift_appealing_classifier \
-                    , background_class, _ = self.action_net(depth.clone(), seed=seed,clip=True)
+                    , background_class = self.action_net(depth.clone())
+
+
             target_masks=background_class<0.5
             griper_grasp_quality_score, suction_grasp_quality_score, \
                 q_value, action_probs, _ = \
                 self.model_wrapper.model(rgb, depth.clone(), gripper_pose, normal_direction, target_masks.float(), target_masks)
 
-            pcs, masks = self.get_point_clouds(depth)
 
 
             demonstration_loss=torch.tensor(0.,device=rgb.device)
@@ -441,12 +456,15 @@ class TrainPolicyNet:
                     target_gripper_predictions=griper_grasp_quality_score[j,0][masks[j]]
                     target_suction_predictions=suction_grasp_quality_score[j,0][masks[j]]
                     demonstration_loss+=(torch.clamp(target_gripper_predictions[objects_mask]-target_suction_predictions[objects_mask],0.)).mean()
+                else:
+                    assert False,f'{labels}'
 
             self.demonstrations_statistics.loss=demonstration_loss.item()
+            # print('---',labels)
+            # print('....',objects_mask[objects_mask].shape)
             demonstration_loss.backward()
 
             self.model_wrapper.optimizer.step()
-
 
             '''learn from robot actions'''
             rgb, depth,target_masks, pose_7, gripper_pixel_index, \
@@ -461,10 +479,6 @@ class TrainPolicyNet:
             suction_score = suction_score.cuda().float()
             normal = normal.cuda().float()
 
-            '''Elevation-based augmentation'''
-            seed=np.random.randint(0,5000)
-            if np.random.rand()>0.5: depth=self.simulate_elevation_variations(depth,seed=seed)
-
             b = rgb.shape[0]
             w = rgb.shape[2]
             h = rgb.shape[3]
@@ -472,7 +486,7 @@ class TrainPolicyNet:
             pcs,masks=self.get_point_clouds(depth)
 
             '''random target for policy initialization'''
-            altered_target_masks, objects_mask,shift_appealing_classifier = self.generate_random_target_mask(depth, file_ids, target_masks.clone(), pcs, masks,seed)
+            altered_target_masks, objects_mask,shift_appealing_classifier = self.generate_random_target_mask(depth, file_ids, target_masks.clone(), pcs, masks)
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()
@@ -699,29 +713,32 @@ if __name__ == "__main__":
 
     wait = wi('Begin synchronized trianing')
 
+
     # counter=0
 
     while True:
-        new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
-
-        '''test code'''
-        train_action_net.first_phase_training(max_size=10)
-        # train_action_net.second_phase_training()
-
-        train_action_net.export_check_points()
-        train_action_net.save_statistics()
-        train_action_net.view_result()
-        continue
-
-        '''online learning'''
-        if new_data_tracker:
-            cuda_memory_report()
-
+        # try:
+            new_buffer,new_data_tracker=train_action_net.synchronize_buffer()
+    
+            '''test code'''
             train_action_net.first_phase_training(max_size=10)
+            # train_action_net.second_phase_training()
+    
             train_action_net.export_check_points()
             train_action_net.save_statistics()
             train_action_net.view_result()
-        else:
-            wait.step(0.5)
-
-        # counter+=1
+            continue
+    
+            '''online learning'''
+            if new_data_tracker:
+                cuda_memory_report()
+    
+                train_action_net.first_phase_training(max_size=10)
+                train_action_net.export_check_points()
+                train_action_net.save_statistics()
+                train_action_net.view_result()
+            else:
+                wait.step(0.5)
+        # except Exception as e:
+        #     print(str(e))
+            # counter+=1
