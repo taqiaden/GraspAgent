@@ -48,12 +48,12 @@ class TrainPolicyNet:
 
         '''initialize statistics records'''
         self.gripper_quality_net_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_gripper_quality',
-                                                              track_label_balance=True, min_decay=0.01)
+                                                              track_label_balance=True, min_decay=0.005)
         self.suction_quality_net_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_suction_quality',
-                                                              track_label_balance=True, min_decay=0.01)
+                                                              track_label_balance=True, min_decay=0.005)
 
         self.demonstrations_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_demonstrations',
-                                                         track_label_balance=False, min_decay=0.01)
+                                                         track_label_balance=False, min_decay=0.005)
 
         self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
 
@@ -63,7 +63,7 @@ class TrainPolicyNet:
         self.buffer_time_stamp = None
         self.data_tracker_time_stamp = None
 
-        self.gripper_sampling_rate = MovingRate('gripper_sampling_rate', min_decay=0.01)
+        self.gripper_sampling_rate = MovingRate('gripper_sampling_rate', min_decay=0.005)
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)

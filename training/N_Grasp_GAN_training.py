@@ -87,7 +87,7 @@ def firmness_loss(c_,s_,f_,prediction_,label_,loss_terms_counters,prediction_uni
         elif (  f_[0]-f_[1] > 0.)  and loss_terms_counters[4] < loss_terms_counters[3] and prediction_uniqness>np.random.rand() :
             margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
             loss_terms_counters[4] += 1.0
-            return 0.*(torch.clamp(label_-prediction_  , 0.) ** firmness_expo) , True, loss_terms_counters,False
+            return (torch.clamp(label_-prediction_  , 0.) ** firmness_expo) , True, loss_terms_counters,False
         else:
             return 0.0, False, loss_terms_counters,False
     else:
@@ -120,7 +120,7 @@ def collision_loss(c_,s_,f_,prediction_,label_,loss_terms_counters,prediction_un
         elif  c_[0]==0 and f_[0]>0. and loss_terms_counters[2]<loss_terms_counters[1] and prediction_uniqness>np.random.rand() :
             margin = f_[1]+c_[0]
             loss_terms_counters[2] += 1
-            return 0.*(torch.clamp(label_-prediction_  +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
+            return (torch.clamp(label_-prediction_  +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
         else:
             return 0.0, False,loss_terms_counters,False
     else:

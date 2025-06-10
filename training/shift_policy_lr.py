@@ -1,19 +1,17 @@
 import numpy as np
 import torch
-import torch.nn.functional as F
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
-from check_points.check_point_conventions import ModelWrapper
+from check_points.check_point_conventions import ModelWrapper, ActorCriticWrapper
 from dataloaders.shift_policy_dl import ClearPolicyDataset
 from lib.Multible_planes_detection.plane_detecttion import  bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
 from lib.image_utils import view_image
-from lib.loss.D_loss import binary_smooth_l1, binary_l1
 from lib.report_utils import progress_indicator
 from models.action_net import action_module_key, ActionNet
-from models.shift_policy_net import shift_policy_module_key, ShiftPolicyNet
+from models.shift_policy_net import shift_policy_module_key,  ShiftPolicyCriticNet, ShiftPolicyActorNet
 from records.training_satatistics import MovingRate
 from registration import camera
 from training.ppo_memory import PPOMemory
@@ -40,7 +38,7 @@ class TrainPolicyNet:
         self.policy_clip_margin = 0.2
         self.action_net = None
         self.learning_rate = learning_rate
-        self.model_wrapper = ModelWrapper(model=ShiftPolicyNet(), module_key=shift_policy_module_key)
+        self.model_wrapper = ActorCriticWrapper(module_key=shift_policy_module_key,actor=ShiftPolicyActorNet,critic=ShiftPolicyCriticNet)
 
         '''initialize statistics records'''
 
@@ -59,8 +57,9 @@ class TrainPolicyNet:
         self.ini_value_moving_loss = MovingRate(shift_policy_module_key + '_ini_value_moving_loss', min_decay=0.01)
 
     def initialize_model(self):
-        self.model_wrapper.ini_model(train=True)
-        self.model_wrapper.ini_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
+        self.model_wrapper.ini_models(train=True)
+        self.model_wrapper.actor_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
+        self.model_wrapper.critic_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
 
     def synchronize_buffer(self):
         new_buffer = False
@@ -133,7 +132,10 @@ class TrainPolicyNet:
         pose_7_stack = torch.zeros((b, 7, w, h), device=rgb.device)
         normal_stack = torch.zeros((b, 3, w, h), device=rgb.device)
 
-        q_value, action_probs= self.model_wrapper.model(rgb, depth.clone(), pose_7_stack, normal_stack, target_masks)
+        action_probs= self.model_wrapper.actor(rgb, depth.clone(), target_masks,shift_mask=None)
+        q_value= self.model_wrapper.critic(rgb, depth.clone(), target_masks)
+
+
 
         '''accumulate critic actor loss'''
         actor_loss = torch.tensor(0., device=q_value.device)
@@ -200,8 +202,8 @@ class TrainPolicyNet:
 
     def export_check_points(self):
         try:
-            self.model_wrapper.export_model()
-            self.model_wrapper.export_optimizer()
+            self.model_wrapper.export_models()
+            self.model_wrapper.export_optimizers()
         except Exception as e:
             print(str(e))
 
@@ -210,11 +212,11 @@ if __name__ == "__main__":
     # seeds(0)
     lr = 1e-4
     train_action_net = TrainPolicyNet(learning_rate=lr)
-    train_action_net.initialize_model()
+
+    train_action_net.initialize_model()s
     train_action_net.synchronize_buffer()
 
     wait = wi('Begin synchronized trianing')
-
 
     while True:
         new_buffer, new_data_tracker = train_action_net.synchronize_buffer()

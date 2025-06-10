@@ -274,7 +274,7 @@ class TrainActionNet:
             normal_approach[0][mask] = normal_approach[0][mask] +normal_approach_point_wise_form
             normal_approach=normal_approach.permute(0,3,1,2)
 
-            if i % 10 == 0 and i != 0:
+            if i % 30 == 0 and i != 0:
                 self.export_check_points()
                 self.save_statistics()
                 self.view_result()

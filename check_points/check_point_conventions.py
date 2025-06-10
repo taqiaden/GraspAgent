@@ -67,6 +67,7 @@ class GANWrapper():
         self.critic_optimizer=None
         self.generator_optimizer=None
         self.learning_rate=1*1e-5
+        self.generator_model_name=self.module_key+'_generator'
 
     '''model operations'''
     def ini_generator(self,train=True,wait=True):
@@ -125,9 +126,87 @@ class GANWrapper():
                                                     weight_decay=weight_decay)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key + '_generator_optimizer')
 
+    def model_time_stamp(self):
+        return get_model_time_stamp(self.generator_model_name)
+
     def export_optimizers(self):
         export_optm(self.generator_optimizer, self.module_key + '_generator_optimizer')
         export_optm(self.critic_optimizer, self.module_key + '_critic_optimizer')
+
+class ActorCriticWrapper():
+    def __init__(self,module_key,actor,critic=None):
+        self.module_key=module_key
+        self.critic=critic
+        self.actor=actor
+        self.critic_optimizer=None
+        self.actor_optimizer=None
+        self.learning_rate=1*1e-5
+        self.actor_model_name=self.module_key+'_actor'
+
+    '''model operations'''
+    def ini_actor(self,train=True,wait=True):
+        self.actor = initialize_model(self.actor(), self.module_key+'_actor',wait=wait)
+        self.actor.train(train)
+
+    def ini_critic(self,train=True,wait=True):
+        self.critic = initialize_model(self.critic(), self.module_key+'_critic',wait=wait)
+        self.critic.train(train)
+
+    def ini_models(self,train=True):
+        self.ini_actor(train)
+        self.ini_critic(train)
+
+    def export_models(self,file_index=None):
+        export_model_state(self.actor, self.module_key+'_actor')
+        export_model_state(self.critic,  self.module_key+'_critic')
+
+    '''optimizer operations'''
+    def critic_adam_optimizer(self,learning_rate=None,beta1=0.9):
+        if learning_rate is not None: self.learning_rate=learning_rate
+
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.learning_rate, betas=(beta1, 0.999), eps=1e-8,
+                                     weight_decay=weight_decay)
+        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
+
+    def actor_adam_optimizer(self,param_group=None,learning_rate=None,beta1=0.9):
+        if learning_rate is not None: self.learning_rate=learning_rate
+        if param_group is None:
+            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=self.learning_rate, betas=(beta1, 0.999), eps=1e-8,
+                                         weight_decay=weight_decay)
+        else:
+            self.actor_optimizer = torch.optim.Adam(param_group,
+                                                        betas=(beta1, 0.999), eps=1e-8,
+                                                        weight_decay=weight_decay)
+        self.actor_optimizer = load_opt(self.actor_optimizer, self.module_key+'_actor_optimizer')
+
+    def critic_sgd_optimizer(self, learning_rate=None):
+        if learning_rate is not None: self.learning_rate = learning_rate
+
+        self.critic_optimizer = torch.optim.SGD(self.critic.parameters(), lr=self.learning_rate,
+                                                 weight_decay=weight_decay)
+        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
+
+    def critic_rmsprop_optimizer(self, learning_rate=None):
+        if learning_rate is not None: self.learning_rate = learning_rate
+
+        self.critic_optimizer = torch.optim.RMSprop(self.critic.parameters(), lr=self.learning_rate,
+                                                 weight_decay=weight_decay)
+        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
+
+    def actor_sgd_optimizer(self, learning_rate=None):
+        if learning_rate is not None: self.learning_rate = learning_rate
+
+        self.actor_optimizer = torch.optim.SGD(self.actor.parameters(), lr=self.learning_rate,
+                                                    weight_decay=weight_decay)
+        self.actor_optimizer = load_opt(self.actor_optimizer, self.module_key + '_actor_optimizer')
+
+    def model_time_stamp(self):
+        return get_model_time_stamp(self.actor_model_name)
+
+    def export_optimizers(self):
+        export_optm(self.actor_optimizer, self.module_key + '_actor_optimizer')
+        export_optm(self.critic_optimizer, self.module_key + '_critic_optimizer')
+
 
 
 

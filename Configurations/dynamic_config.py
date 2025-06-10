@@ -1,3 +1,5 @@
+import configparser
+from collections import OrderedDict
 from configparser import ConfigParser
 
 # from filelock import FileLock
@@ -34,9 +36,13 @@ def get_value(key,section='main',config_file=config_file_path):
     return config.get(section, key)
 
 def get_float(key,section='main',config_file=config_file_path,default='0'):
-    config.read(config_file)
-    check(section,key,config_file,default=default)
-    return config.getfloat(section, key)
+    try:
+        config.read(config_file)
+        check(section,key,config_file,default=default)
+        return config.getfloat(section, key)
+    except Exception as e:
+        print(str(e))
+        remove_duplicates_config(config_file,config_file)
 
 def get_int(key,section='main',config_file=config_file_path):
     config.read(config_file)
@@ -52,6 +58,37 @@ def add_to_value(key,delta,section='main',lock_other_process=True):
         with lock:
             add_to_value_(key,delta,section)
     else: add_to_value_(key,delta,section)
+
+def remove_duplicates_config(input_file, output_file):
+    config = configparser.ConfigParser(strict=False)
+    config._sections = OrderedDict()  # Preserve order
+
+    # Read raw lines to remove duplicates manually
+    seen = {}
+    output_lines = []
+    current_section = None
+
+    with open(input_file, 'r') as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith('[') and stripped.endswith(']'):
+                current_section = stripped
+                seen[current_section] = set()
+                output_lines.append(line)
+            elif '=' in line and current_section:
+                key = line.split('=')[0].strip()
+                if key not in seen[current_section]:
+                    seen[current_section].add(key)
+                    output_lines.append(line)
+                else:
+                    # Duplicate detected — skip this line
+                    pass
+            else:
+                output_lines.append(line)
+
+    # Write cleaned config
+    with open(output_file, 'w') as f:
+        f.writelines(output_lines)
 
 if __name__ == "__main__":
     save_key("collision_times", 0.0, section='Grasp_GAN')

@@ -27,7 +27,7 @@ class VanillaDecoder(nn.Module):
     def forward(self, features ):
         return self.decoder(features)
 
-class ShiftPolicyNet(nn.Module):
+class ShiftPolicyActorNet(nn.Module):
     def __init__(self):
         super().__init__()
         '''Total of 11 input channels'''
@@ -37,7 +37,6 @@ class ShiftPolicyNet(nn.Module):
         self.pre_IN=nn.InstanceNorm2d(5).to('cuda')
 
         '''clear policy'''
-        self.critic=VanillaDecoder(relu_slope=0.1).to('cuda')
         self.actor=VanillaDecoder(relu_slope=0.0).to('cuda')
 
 
@@ -69,14 +68,11 @@ class ShiftPolicyNet(nn.Module):
         rgb_features = self.rgb_back_bone(input_channels)
         rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
 
-        '''q value'''
-        q_values=self.critic(rgb_features)
 
         '''policy probabilities'''
         action_logits=self.actor(rgb_features)
 
         '''reshape'''
-        q_values = reshape_for_layer_norm(q_values, camera=camera, reverse=True)
         action_logits = reshape_for_layer_norm(action_logits, camera=camera, reverse=True)
 
 
@@ -89,5 +85,35 @@ class ShiftPolicyNet(nn.Module):
 
         action_probs=action_logits.view(-1,1,480,712)
 
-        return q_values,action_probs
+        return action_probs
 
+class ShiftPolicyCriticNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        '''Total of 11 input channels'''
+        # 3 RGB
+        # 1 target object/s mask
+        self.rgb_back_bone = res_unet(in_c=5, Batch_norm=use_bn, Instance_norm=use_in,relu_negative_slope=0.1).to('cuda')
+        self.pre_IN=nn.InstanceNorm2d(5).to('cuda')
+
+        '''clear policy'''
+        self.critic=VanillaDecoder(relu_slope=0.1).to('cuda')
+
+
+    def forward(self, rgb,depth,target_mask):
+        '''modalities preprocessing'''
+        depth = standardize_depth(depth)
+
+        '''concatenate and decode'''
+        input_channels=torch.cat([rgb,depth,target_mask],dim=1)
+        input_channels=self.pre_IN(input_channels)
+        rgb_features = self.rgb_back_bone(input_channels)
+        rgb_features=reshape_for_layer_norm(rgb_features, camera=camera, reverse=False)
+
+        '''q value'''
+        q_values=self.critic(rgb_features)
+
+        '''reshape'''
+        q_values = reshape_for_layer_norm(q_values, camera=camera, reverse=True)
+
+        return q_values

@@ -26,7 +26,7 @@ from Configurations.run_config import simulation_mode, \
     zero_out_distance_when_collision, handover_quality_bias, suction_grasp_bias, gripper_grasp_bias, \
     sample_action_with_argmax, quality_exponent, activate_shift_from_beneath_objects
 from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
-from check_points.check_point_conventions import GANWrapper, ModelWrapper
+from check_points.check_point_conventions import GANWrapper, ModelWrapper, ActorCriticWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
 from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
@@ -36,8 +36,10 @@ from lib.image_utils import check_image_similarity, view_image
 from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
+from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_handover_policy_module_key
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
+from models.shift_policy_net import shift_policy_module_key, ShiftPolicyCriticNet, ShiftPolicyActorNet
 from pose_object import vectors_to_ratio_metrics
 from process_perception import get_side_bins_images, trigger_new_perception
 from records.training_satatistics import MovingRate
@@ -105,9 +107,14 @@ class GraspAgent():
         '''models'''
         self.args=None
         self.action_net = None
-        self.policy_net = None
+        self.grasp_handover_policy_net=None
+        self.shift_policy_actor=None
+        self.shift_policy_critic=None
         self.suction_arm_reachability_net = None
         self.gripper_arm_reachability_net = None
+
+        self.shift_model_time_stamp=None
+        self.grasp_handover_model_time_stamp=None
 
         '''
         handover_state_
@@ -151,7 +158,8 @@ class GraspAgent():
         self.run_sequence=0
 
         self.forward_counter=-1
-        self.actions_sequence=[1,0]
+        # self.actions_sequence=[1,0]
+        self.actions_sequence=[]
 
         self.remove_seg_file()
 
@@ -239,35 +247,52 @@ class GraspAgent():
                 else:
                     wait.step(0.5)
 
+    def ini_shift_policy(self):
+        shift_model_wrapper = ActorCriticWrapper(module_key=shift_policy_module_key,actor=ShiftPolicyActorNet,critic=ShiftPolicyCriticNet)
+        new_time_stamp = shift_model_wrapper.model_time_stamp()
+        if self.shift_model_time_stamp is not None or new_time_stamp != self.shift_model_time_stamp:
+            shift_model_wrapper.ini_models(train=False)
+            self.shift_policy_actor=shift_model_wrapper.actor
+            self.shift_policy_critic=shift_model_wrapper.critic
+            self.shift_model_time_stamp=shift_model_wrapper.model_time_stamp()
+
+    def ini_grasp_handover_policy(self):
+        grasp_handover_model_wrapper = ModelWrapper(model=GraspHandoverPolicyNet(),
+                                                    module_key=grasp_handover_policy_module_key)
+        new_time_stamp = grasp_handover_model_wrapper.model_time_stamp()
+        if self.grasp_handover_model_time_stamp is not None or new_time_stamp != self.grasp_handover_model_time_stamp:
+            grasp_handover_model_wrapper.ini_model(train=False)
+            self.grasp_handover_policy_net = grasp_handover_model_wrapper.model
+            self.grasp_handover_model_time_stamp = grasp_handover_model_wrapper.model_time_stamp()
+
     def initialize_check_points(self):
-        pi = progress_indicator('Loading check points  ', max_limit=5)
+        pi = progress_indicator('Loading check points  ', max_limit=6)
 
         pi.step(1)
 
-        action_net = GANWrapper(action_module_key, ActionNet)
-        action_net.ini_generator(train=False)
-        self.action_net = action_net.generator
+        actions_net = ModelWrapper(model=ActionNet(), module_key=action_module_key)
+        actions_net.ini_model(train=False)
+        self.action_net = actions_net.model
 
         pi.step(2)
-
-        policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
-        policy_net.ini_model(train=False)
-        self.model_time_stamp=policy_net.model_time_stamp()
-        self.policy_net = policy_net.model
+        self.ini_shift_policy()
 
         pi.step(3)
+        self.ini_grasp_handover_policy()
+
+        pi.step(4)
 
         gripper_scope = ModelWrapper(model=scope_net_vanilla(in_size=6), module_key=gripper_scope_module_key)
         gripper_scope.ini_model(train=False)
         self.gripper_arm_reachability_net = gripper_scope.model
 
-        pi.step(4)
+        pi.step(5)
 
         suction_scope = ModelWrapper(model=scope_net_vanilla(in_size=6), module_key=suction_scope_module_key)
         suction_scope.ini_model(train=False)
         self.suction_arm_reachability_net=suction_scope.model
 
-        pi.step(5)
+        pi.step(6)
 
         pi.end()
 
@@ -275,14 +300,16 @@ class GraspAgent():
 
     def models_report(self):
         action_model_size=number_of_parameters(self.action_net)
-        policy_model_size=number_of_parameters(self.policy_net)
-        gripper_arm_reachability_model_size=number_of_parameters(self.policy_net)
+        grasp_handover_policy_model_size=number_of_parameters(self.grasp_handover_policy_net)
+        shift_policy_model_size=number_of_parameters(self.shift_policy_actor)
+
         # suction_arm_reachability_model_size=number_of_parameters(self.suction_arm_reachability_net)
         print(f'Models initiated:')
         print(f'Number of parameters:')
         pr.step_f(f'action net : {action_model_size}')
-        pr.print(f'policy net : {policy_model_size}')
-        pr.print(f'reachability nets : {gripper_arm_reachability_model_size} * 2')
+        pr.print(f'Shift policy net : {shift_policy_model_size}*2')
+        pr.print(f'grasp_handover policy net : {grasp_handover_policy_model_size}')
+
         pr.step_b()
 
 
@@ -428,18 +455,19 @@ class GraspAgent():
         shift_mask_[0, 0][~mask] *= False
 
         '''policy net output'''
-        griper_grasp_score, suction_grasp_score, \
-        q_value, clear_policy, handover_scores= \
-            self.policy_net(rgb_torch, depth_torch, gripper_pose, suction_direction, self.target_object_mask.float(),shift_mask_)
+        clear_policy_props= self.shift_policy_actor(rgb_torch, depth_torch.clone(), self.target_object_mask.float(),shift_mask=shift_mask_)
+        q_value= self.shift_policy_critic(rgb_torch, depth_torch.clone(), self.target_object_mask.float())
+        griper_grasp_score, suction_grasp_score, handover_scores = \
+            self.grasp_handover_policy_net(rgb_torch, depth_torch.clone(), gripper_pose, suction_direction)
 
         '''alter policy dim'''
         q_value=q_value.repeat(1,4,1,1)
         q_value[:,0:2,...]*=q_value.min()
-        clear_policy=clear_policy.repeat(1,4,1,1)
-        clear_policy[:,0:2,...]*=0.
+        clear_policy_props=clear_policy_props.repeat(1,4,1,1)
+        clear_policy_props[:,0:2,...]*=0.
 
         return griper_grasp_score, suction_grasp_score, \
-        q_value, clear_policy, handover_scores,\
+        q_value, clear_policy_props, handover_scores,\
             griper_collision_classifier,suction_seal_classifier,\
             background_class,shift_appealing,mask,voxel_pc_tensor
 
@@ -1046,14 +1074,12 @@ class GraspAgent():
                     self.data_tracker_modify_alert=False
                     print('save data tracker')
             elif counter == 3:
-                policy_net = ModelWrapper(model=PolicyNet(), module_key=policy_module_key)
-                new_time_stamp=policy_net.model_time_stamp()
-                if new_time_stamp != self.model_time_stamp:
-                    policy_net.ini_model(train=False)
-                    self.model_time_stamp=new_time_stamp
-                    print('Update policy')
-
-            elif counter==4:
+                self.ini_shift_policy()
+                print('Update shift policy')
+            elif counter == 4:
+                self.ini_grasp_handover_policy()
+                print('Update grasp and handover policy')
+            elif counter==5:
                 self.gripper_usage_rate.save()
                 self.suction_usage_rate.save()
                 self.double_grasp_rate.save()
