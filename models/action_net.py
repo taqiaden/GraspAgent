@@ -18,7 +18,7 @@ from registration import camera, standardize_depth
 from visualiztion import view_features, plt_features
 
 # activation=LGRelu(slope=0.01)
-activation=None
+activation=nn.SiLU()
 
 action_module_key = 'action_net'
 
@@ -30,10 +30,10 @@ class SuctionPartSampler(nn.Module):
             #nn.LayerNorm([64]),
             nn.Linear(64, 32, bias=False),
             nn.LayerNorm([32]),
-            nn.ReLU(),
+            activation,
             nn.Linear(32, 16, bias=False),
             nn.LayerNorm([16]),
-            nn.ReLU(),
+            activation,
             nn.Linear(16, 3),
         ).to('cuda')
 
@@ -53,10 +53,9 @@ class ActionNet(nn.Module):
                                   relu_negative_slope=0.,activation=activation).to('cuda')
 
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
-
         self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
-        self.gripper_sampler1 = GripperGraspSampler(use_sig=False)
+        self.gripper_sampler1 = GripperGraspSampler()
         # self.gripper_sampler2 = GripperGraspSampler(activation,use_sig=False)
 
         self.suction_sampler = SuctionPartSampler()
@@ -97,6 +96,21 @@ class ActionNet(nn.Module):
 
         return gripper_pose,griper_collision_classifier
 
+    def get_best_approach(self,depth_):
+        depth = standardize_depth(depth_)
+        features = self.back_bone(depth)
+
+        features = reshape_for_layer_norm(features, camera=camera, reverse=False)
+        depth = reshape_for_layer_norm(depth, camera=camera, reverse=False)
+
+        predicted_normal = self.suction_sampler(features)
+
+
+        gripper_pose,griper_collision_classifier=self.gripper_sampling_and_quality_inference( features, depth,predicted_normal.detach() )
+
+
+        return gripper_pose,griper_collision_classifier
+
     def collision_prediction(self,depth,gripper_pose):
         depth = standardize_depth(depth)
 
@@ -119,8 +133,8 @@ class ActionNet(nn.Module):
 
         return griper_collision_classifier
 
-    def gripper_sampling_and_quality_inference(self,features, depth,normal_direction,approach1,approach2):
-        if self.training:
+    def gripper_sampling_and_quality_inference(self,features, depth,normal_direction=None,approach1=None,approach2=None):
+        if (approach1 is not None) and (approach2 is not None):
 
             approach1 = reshape_for_layer_norm(approach1, camera=camera, reverse=False)
             approach2 = reshape_for_layer_norm(approach2, camera=camera, reverse=False)
@@ -177,6 +191,8 @@ class ActionNet(nn.Module):
         '''input standardization'''
         depth = standardize_depth(depth)
 
+        batch_size=depth.shape[0]
+
         '''backbone'''
         if detach_backbone:
             with torch.no_grad():
@@ -188,20 +204,9 @@ class ActionNet(nn.Module):
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
         depth = reshape_for_layer_norm(depth, camera=camera, reverse=False)
 
-        # if detach_backbone: features=features.detach()
-        # view_features(features)
-
-        # print(features[0])
-        # exit()
-        # '''check exploded values'''
-        # if self.training:
-        #     max_ = features.max()
-        #     if max_ > 100:
-        #         print(Fore.RED, f'Warning: Res U net outputs high values up to {max_}', Fore.RESET)
-
         '''Spatial data'''
         if self.spatial_encoding.shape[0] != depth.shape[0]:
-            self.spatial_encoding = depth_xy_spatial_data(batch_size=depth.shape[0])
+            self.spatial_encoding = depth_xy_spatial_data(batch_size=batch_size)
             self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
 

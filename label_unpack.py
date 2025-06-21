@@ -63,7 +63,7 @@ class LabelObj():
             pose_7=np.array([0.0]*7)
         return pose_7
 
-    def get_pixel_index(self):
+    def get_pixel_index_(self):
         pixel_index=get_pixel_index( camera, self.target_point)
         return pixel_index
 
@@ -81,7 +81,7 @@ class LabelObj():
         target_pose = self.get_gripper_pose_7()
         T_d, width, distance = pose_7_to_transformation(torch.from_numpy(target_pose), target_point)
 
-        collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
+        collision_intensity ,low_quality_grasp= grasp_collision_detection(T_d, width, pc, visualize=visualize)
 
         return collision_intensity>0
 
@@ -131,7 +131,7 @@ class GripperParameters:
             pose_7 = encode_gripper_pose_npy(self.distance, self.width, R)
             return pose_7
         else:
-            return np.array([0]*7)
+            return np.array([0.0]*7,dtype=float)
 
     def pixel_index(self):
         if self.used:
@@ -150,7 +150,7 @@ class GripperParameters:
         target_pose = self.pose_7()
         T_d, width, distance = pose_7_to_transformation(torch.from_numpy(target_pose), target_point)
 
-        collision_intensity = grasp_collision_detection(T_d, width, pc, visualize=visualize)
+        collision_intensity ,low_quality_grasp= grasp_collision_detection(T_d, width, pc, visualize=visualize)
 
         return collision_intensity>0
 
@@ -177,7 +177,7 @@ class SuctionParameters:
         if self.used:
             return -self.approach
         else:
-            return np.array([0]*3)
+            return np.array([0.]*3,dtype=float)
 
     def pixel_index(self):
         if self.used:

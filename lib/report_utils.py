@@ -4,6 +4,8 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from colorama import Fore
+
 from lib.IO_utils import custom_print
 
 
@@ -24,7 +26,7 @@ class progress_indicator():
         self.progress_percentage = 00
         self.max_limit=max_limit
         self.ended=False
-        print(msg,' ', self.progress_percentage , '%',end='')
+        print(Fore.LIGHTMAGENTA_EX,msg,' ', self.progress_percentage , '%',Fore.RESET,end='')
     def step(self,i):
         if not self.ended:
             if i>=self.max_limit:

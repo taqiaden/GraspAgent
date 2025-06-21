@@ -160,7 +160,8 @@ class Action():
 
     def check_collision(self,point_cloud):
         if self.is_valid and self.is_grasp and self.use_gripper_arm:
-            return grasp_collision_detection(self.transformation, self.width, point_cloud, visualize=False) > 0
+            has_collision,low_quality_grasp =grasp_collision_detection(self.transformation, self.width, point_cloud, visualize=False) > 0
+            return has_collision
         else:
             return None
 
@@ -259,21 +260,21 @@ class Action():
             scene_list.append(pcd)
             o3d.visualization.draw_geometries(scene_list)
 
-    def print(self):
+    def print_(self):
         if  self.is_valid:
-            pr.print('Action details:')
+            pr.print_('Action details:')
             pr.step_f()
-            pr.print(f'{self.action_name} using {self.arm_name} arm')
+            pr.print_(f'{self.action_name} using {self.arm_name} arm')
             if self.target_point is not None:
-                pr.print(f'target point {self.target_point}')
+                pr.print_(f'target point {self.target_point}')
 
             if self.robot_feedback is not None:
-                pr.print(f'Robot feedback message : {self.robot_feedback}')
+                pr.print_(f'Robot feedback message : {self.robot_feedback}')
 
             if self.grasp_result is not None:
-                pr.print(f'Grasp result : {self.grasp_result}')
+                pr.print_(f'Grasp result : {self.grasp_result}')
 
             if self.shift_result is not None:
-                pr.print(f'Shift result : {self.shift_result}')
+                pr.print_(f'Shift result : {self.shift_result}')
 
             pr.step_b()

@@ -123,6 +123,17 @@ def view_npy_open3d(pc,normals=None,color=None, view_coordinate=True,geometries_
     pcd = numpy_to_o3d(pc,normals=normals,color=color)
     view_o3d(pcd,view_coordinate,geometries_list)
 
+def custom_normal_open3d_view(pc,normals=None,normal_mask=None,color=None, view_coordinate=True,geometries_list=None):
+    pcd_with_normals= numpy_to_o3d(pc[normal_mask],normals=normals[normal_mask],color=color[normal_mask])
+    pcd_without_normals= numpy_to_o3d(pc[~normal_mask],color=color[~normal_mask])
+
+    o = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0]) if view_coordinate else o3d.geometry.PointCloud()
+    list=[] if geometries_list is None else geometries_list
+    list.append(pcd_with_normals)
+    list.append(pcd_without_normals)
+    list.append(o)
+    o3d.visualization.draw_geometries(list)
+
 def get_random_color():
     r=random.randint(0,255)
     g=random.randint(0,255)
@@ -232,13 +243,16 @@ def vis_scene(T_d_stack,width_stack, npy=None):
         width_stack = np.array([[width_stack]])
 
     for i in range(T_d_stack.shape[0]):
-        has_collision = grasp_collision_detection(T_d_stack[i], width_stack[i], npy, visualize=False)>0
+        has_collision ,low_quality_grasp= grasp_collision_detection(T_d_stack[i], width_stack[i], npy, visualize=False)
 
         mesh=construct_gripper_mesh_2(width_stack[i], T_d_stack[i])
         if has_collision:
             mesh.paint_uniform_color([0.9, 0.5, 0.5])
+        elif low_quality_grasp:
+            mesh.paint_uniform_color([0.9, 0.9, 0.5])
         else:
             mesh.paint_uniform_color([0.5,0.9, 0.5])
+        # mesh.paint_uniform_color([0.,0., 0.])
 
         scene_list.append(mesh)
 

@@ -79,6 +79,14 @@ class BiasedTanh(nn.Module):
         if self.k is not None: x= self.k*x
         return x
 
+class SwiGLU(nn.Module):
+    def __init__(self, input_dim, hidden_dim,bias=True):
+        super().__init__()
+        self.linear1 = nn.Linear(input_dim, hidden_dim * 2)
+
+    def forward(self, x):
+        x1, x2 = self.linear1(x).chunk(2, dim=-1)
+        return x1 * F.silu(x2)
 
 class ReLUForwardLeakyReLUBackward(Function):
     # last_output=None

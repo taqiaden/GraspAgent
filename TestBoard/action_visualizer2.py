@@ -15,7 +15,7 @@ from lib.math_utils import seeds
 from lib.report_utils import progress_indicator
 from models.action_net import ActionNet,  action_module_key
 from registration import camera
-from visualiztion import dense_grasps_visualization
+from visualiztion import dense_grasps_visualization, view_npy_open3d, custom_normal_open3d_view, view_score
 from visualiztion import view_score2
 
 detach_backbone=False
@@ -27,10 +27,25 @@ training_buffer.main_modality=training_buffer.depth
 
 print=custom_print
 
+def masked_color(voxel_pc, score, pivot=0.5):
+    mask_=score.cpu().numpy()>pivot if torch.is_tensor(score) else score>pivot
+    colors = np.zeros_like(voxel_pc)
+
+    colors[~mask_]+= [0.66, 0.66, 0.66]
+    colors[mask_] += [0.52, 0.8, 0.92]
+    return colors
+
+def view_mask(pc, score, pivot=0.5):
+    # means_=pc.mean(axis=0)
+    # voxel_pc_t=pc-means_
+    # voxel_pc_t[:,1]*=-1
+    colors=masked_color(pc, score, pivot=pivot)
+    view_npy_open3d(pc, color=colors,view_coordinate=False)
+
 def view_scores(pc,scores,threshold=0.5):
     view_scores = scores.detach().cpu().numpy()
     view_scores[view_scores < threshold] *= 0.0
-    view_score2(pc, view_scores)
+    view_score(pc, view_scores)
 
 class TrainActionNet:
     def __init__(self,n_samples=None,epochs=1,learning_rate=5e-5):
@@ -62,7 +77,7 @@ class TrainActionNet:
         actions_net.ini_model(train=False)
         return actions_net
 
-    def simulate_elevation_variations(self,original_depth,seed,max_elevation=0.2,exponent=2.0):
+    def simulate_elevation_variations(self,original_depth,max_elevation=0.2,exponent=2.0):
         with torch.no_grad():
             _, _, _, _, _, background_class_3= self.actions_net.model(
                 original_depth.clone())
@@ -85,19 +100,25 @@ class TrainActionNet:
             depth = depth.cuda().float()  # [b,1,480.712]
             pi.step(i)
 
-            seed=np.random.randint(0,5000)
             '''Elevation-based augmentation'''
-            depth=self.simulate_elevation_variations(depth,seed,exponent=5.0)
+            # depth=self.simulate_elevation_variations(depth,exponent=5.0)
 
             '''get parameters'''
             pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
             pc = transform_to_camera_frame(pc, reverse=True)
 
-            latent_vector=torch.randn(size=(depth.numel(),8),device=depth.device)
+            # downsampling_mask=np.random.random(pc.shape[0])>0.5
+
+            elevation_mask = (pc[:, -1] < 0.15) #& downsampling_mask
+            mask[mask]= ( mask[mask]) & elevation_mask
+            pc=pc[elevation_mask]
+
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier,background_class= self.actions_net.model(
                 depth.clone(),detach_backbone=detach_backbone)
+
+
 
             # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
             # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
@@ -110,13 +131,19 @@ class TrainActionNet:
             #                                 file_index=file_ids[0], cache_name='bin_planes2')
 
             suction_head_predictions=suction_quality_classifier[0, 0][mask]
-            shift_head_predictions = shift_affordance_classifier[0, 0][mask]
+            shift_head_predictions = shift_affordance_classifier[0, 0][mask].cpu().numpy()
             background_class_predictions = background_class.permute(0, 2, 3, 1)[0, :, :, 0][mask]
             objects_mask = background_class_predictions.detach().cpu().numpy() <= .5
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask]#.cpu().numpy()
             collision_with_objects_predictions=griper_collision_classifier[0, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
-            gripper_sampling_mask=(collision_with_objects_predictions<.7) & (collision_with_bin_predictions<.7)
+            gripper_sampling_mask=(collision_with_objects_predictions<.5) & (collision_with_bin_predictions<.5)
+
+            # normal_view_mask=objects_mask& (suction_head_predictions.cpu().numpy()>0.5)
+            # normals=suction_direction[0].permute(1,2,0)[mask].cpu().numpy()
+
+            # colors=np.ones_like(pc)*[0.52, 0.8, 0.92]
+            # custom_normal_open3d_view(pc=pc, normals=normals,normal_mask=normal_view_mask,color=colors,view_coordinate=False)
 
             # print(pc[objects_mask].min())
             # print(pc[~objects_mask].min())
@@ -126,22 +153,24 @@ class TrainActionNet:
             # view_image(depth[0,0].cpu().numpy().astype(np.float64))
 
             # view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
-            sampling_p=1.-torch.sqrt(collision_with_objects_predictions*collision_with_bin_predictions)
+            # sampling_p=1.-torch.sqrt(collision_with_objects_predictions*collision_with_bin_predictions)
+            sampling_p=1.-collision_with_objects_predictions**2.0
 
-            dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),sampling_p=sampling_p,view_all=False)
+            dense_grasps_visualization(pc, gripper_poses, view_mask=(gripper_sampling_mask&torch.from_numpy(objects_mask).cuda()),sampling_p=sampling_p,view_all=False)
 
             # gripper_poses[:,3:5]*=-1
             # dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),sampling_p=sampling_p,view_all=False)
 
             suction_head_predictions[~torch.from_numpy(objects_mask).cuda()]*=0.
 
-            # view_scores(pc, background_class_predictions, threshold=0.5)
-            # view_scores(pc, suction_head_predictions, threshold=0.5)
-            # view_scores(pc, shift_head_predictions, threshold=0.5)
-
+            # view_mask(pc, background_class_predictions, pivot=0.5)
+            # view_mask(pc, suction_head_predictions, pivot=0.5)
+            # view_mask(pc, shift_head_predictions, pivot=0.5)
+            # view_mask(pc, collision_with_objects_predictions, pivot=0.5)
+            # view_mask(pc, collision_with_bin_predictions, pivot=0.5)
 
 if __name__ == "__main__":
-    seeds(1)
+    seeds(11)
 
     with torch.no_grad():
         lr = 1e-6

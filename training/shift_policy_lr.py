@@ -104,7 +104,7 @@ class TrainPolicyNet:
 
     def analytical_bin_mask(self, pc, file_ids):
         try:
-            bin_mask = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
+            bin_mask ,floor_elevation= bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
                                             file_index=file_ids[0], cache_name='bin_planes2')
         except Exception as error_message:
             print(file_ids[0])

@@ -8,30 +8,27 @@ from filelock import FileLock
 from torch import nn
 from torch.distributions import Categorical
 import torch.nn.functional as F
-from Configurations.config import workers, distance_scope
-from Online_data_audit.data_tracker import sample_positive_buffer, gripper_grasp_tracker, DataTracker
+from Configurations.config import workers
+from Online_data_audit.data_tracker import  gripper_grasp_tracker, DataTracker
 from analytical_suction_sampler import estimate_suction_direction
 from check_points.check_point_conventions import ModelWrapper, GANWrapper
-from dataloaders.action_dl import ActionDataset, ActionDataset2
+from dataloaders.action_dl import  ActionDataset2
 from lib.IO_utils import custom_print, load_pickle, save_pickle
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, cache_dir
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds, point_clouds_to_depth
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
 from lib.image_utils import view_image
-from lib.loss.D_loss import smooth_l1_loss
 from lib.loss.balanced_bce_loss import BalancedBCELoss
-from lib.models_utils import reshape_for_layer_norm, view_grad_val
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
-from models.Grasp_GAN import gripper_sampling_module_key, G, N_gripper_sampling_module_key
+from models.Grasp_GAN import G, N_gripper_sampling_module_key
 from models.action_net import ActionNet, action_module_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key
 from records.training_satatistics import TrainingTracker, MovingRate, truncate
 from registration import camera
 from training.N_Grasp_GAN_training import get_normal_direction
-from training.learning_objectives.gripper_collision import gripper_collision_loss, evaluate_grasps3, \
-    gripper_object_collision_loss, gripper_bin_collision_loss
+from training.learning_objectives.gripper_collision import  gripper_object_collision_loss, gripper_bin_collision_loss
 from training.learning_objectives.shift_affordnace import shift_affordance_loss
 from training.learning_objectives.suction_seal import get_suction_seal_loss
 from visualiztion import view_o3d, view_npy_open3d
@@ -60,7 +57,7 @@ firmness_expo=2.0
 
 import torch
 
-def suction_sampler_loss(pc, target_normal, file_index):
+def suction_sampler_loss(pc, target_normal,objects_mask, file_index):
     file_path = cache_dir + cache_name + '/' + file_index + '.pkl'
     if os.path.exists(file_path):
         labels = load_pickle(file_path)
@@ -72,7 +69,7 @@ def suction_sampler_loss(pc, target_normal, file_index):
 
     labels = torch.from_numpy(labels).to('cuda')
 
-    return ((1 - cos(target_normal, labels.squeeze())) ** 2).mean()
+    return ((1 - cos(target_normal[objects_mask], labels.squeeze()[objects_mask])) ** 2).mean()
 
 def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0):
     with torch.no_grad():
@@ -215,7 +212,6 @@ class TrainActionNet:
         actions_net = ModelWrapper( model=ActionNet(),module_key=action_module_key)
         actions_net.ini_model(train=True)
         actions_net.ini_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
-
         return actions_net
 
     def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.2, exponent=2.0):
@@ -223,21 +219,19 @@ class TrainActionNet:
         shift_entities_mask = objects_mask & (original_depth > 0.0001)
         new_depth = original_depth.clone().detach()
         new_depth[shift_entities_mask] -= max_elevation * (np.random.rand() ** exponent) * camera.scale
-
         return new_depth
 
     def analytical_bin_mask(self, pc, file_ids):
         try:
-            bin_mask = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
+            bin_mask,floor_elevation_ = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
                                             file_index=file_ids[0], cache_name='bin_planes2')
+            return bin_mask, floor_elevation_
         except Exception as error_message:
             print(file_ids[0])
             print(error_message)
-            bin_mask = None
-        return bin_mask
+            return None,None
 
     def begin(self):
-
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
         for i, batch in enumerate(self.data_loader, 0):
             depth, file_ids = batch
@@ -248,7 +242,7 @@ class TrainActionNet:
             pc = transform_to_camera_frame(pc, reverse=True)
 
             '''background detection head'''
-            bin_mask = self.analytical_bin_mask(pc, file_ids)
+            bin_mask,floor_elevation_ = self.analytical_bin_mask(pc, file_ids)
             if bin_mask is None: continue
             objects_mask_numpy = bin_mask <= 0.5
             objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
@@ -297,7 +291,10 @@ class TrainActionNet:
             background_detection_loss = torch.tensor(0.,device=predicted_normal.device)
             suction_sampling_loss = torch.tensor(0.,device=predicted_normal.device)
 
-            suction_sampling_loss += suction_sampler_loss(pc, predicted_normal.permute(0, 2, 3, 1)[0][mask],
+            # '''normal dependency mask'''
+            # normal_dependency_mask=(suction_quality_classifier>0.5) | (shift_affordance_classifier>0.5) | (griper_collision_classifier_tuble[1][0]<0.5)
+
+            suction_sampling_loss += suction_sampler_loss(pc, predicted_normal.permute(0, 2, 3, 1)[0][mask],objects_mask,
                                                           file_index=file_ids[0])
 
             '''gripper sampling loss'''
@@ -320,8 +317,12 @@ class TrainActionNet:
                 good_N_mask=(N_bin_collision<0.5) & (N_objects_collision<0.5)
                 v_is_superior[bad_V_mask&good_N_mask]*=False
 
-                v_weights=(0.001+objects_mask.float())*(1.-V_objects_collision.detach().clone())*(v_is_superior.float()+0.001)
-                N_weights=(0.001+objects_mask.float())*(1.-N_objects_collision.detach().clone())*(1.0-v_is_superior.float()+0.001)
+                def col_weight(x):
+                    y=1.-x
+                    return 4*y*(1-y)
+
+                v_weights=(0.001+objects_mask.float())*col_weight(V_objects_collision.detach().clone())*(v_is_superior.float()+0.001)
+                N_weights=(0.001+objects_mask.float())*col_weight(N_objects_collision.detach().clone())*(1.0-v_is_superior.float()+0.001)
 
                 # v_best_index=torch.argmax(v_weights)
                 # N_best_index=torch.argmax(N_weights)
@@ -369,51 +370,64 @@ class TrainActionNet:
 
             for k in range(batch_size):
                 '''gripper-object collision - 1'''
-                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 0], mask=objects_mask_numpy,
-                                                         exponent=20.0,
-                                                         balance_indicator=self.objects_collision_statistics.label_balance_indicator)
-                gripper_target_point = pc[gripper_target_index]
-                gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
-                gripper_target_pose = gripper_poses1[gripper_target_index]
-                gripper_collision_loss += gripper_object_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                              objects_mask_numpy, gripper_prediction_,
-                                                              self.objects_collision_statistics) / batch_size
+                while True:
+                    gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 0], mask=objects_mask_numpy,
+                                                             exponent=20.0,
+                                                             balance_indicator=self.objects_collision_statistics.label_balance_indicator)
+                    gripper_target_point = pc[gripper_target_index]
+                    gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
+                    gripper_target_pose = gripper_poses1[gripper_target_index]
+                    loss,counted= gripper_object_collision_loss(gripper_target_pose, gripper_target_point, pc,
+                                                                  objects_mask_numpy, gripper_prediction_,
+                                                                  self.objects_collision_statistics)
+                    if counted:break
+                gripper_collision_loss+=loss/ batch_size
                 
             for k in range(batch_size):
                 '''gripper-object collision - 2'''
-                gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 0], mask=objects_mask_numpy,
-                                                         exponent=20.0,
-                                                         balance_indicator=self.objects_collision_statistics.label_balance_indicator)
-                gripper_target_point = pc[gripper_target_index]
-                gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
-                gripper_target_pose = gripper_poses2[gripper_target_index]
-                gripper_collision_loss += gripper_object_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                              objects_mask_numpy, gripper_prediction_,
-                                                              self.objects_collision_statistics) / batch_size
+                while True:
+                    gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 0], mask=objects_mask_numpy,
+                                                             exponent=20.0,
+                                                             balance_indicator=self.objects_collision_statistics.label_balance_indicator)
+                    gripper_target_point = pc[gripper_target_index]
+                    gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
+                    gripper_target_pose = gripper_poses2[gripper_target_index]
+                    loss,counted= gripper_object_collision_loss(gripper_target_pose, gripper_target_point, pc,
+                                                                  objects_mask_numpy, gripper_prediction_,
+                                                                  self.objects_collision_statistics)
+                    if counted:break
+                gripper_collision_loss+=loss/ batch_size
 
             for k in range(batch_size):
                 '''gripper-bin collision - 1'''
-                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 1], mask=objects_mask_numpy,
-                                                         exponent=20.0,
-                                                         balance_indicator=self.bin_collision_statistics.label_balance_indicator)
-                gripper_target_point = pc[gripper_target_index]
-                gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
-                gripper_target_pose = gripper_poses1[gripper_target_index]
-                gripper_collision_loss += gripper_bin_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                           objects_mask_numpy, gripper_prediction_,
-                                                           self.bin_collision_statistics) / batch_size
+                while True:
+                    gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 1], mask=objects_mask_numpy,
+                                                             exponent=20.0,
+                                                             balance_indicator=self.bin_collision_statistics.label_balance_indicator)
+                    gripper_target_point = pc[gripper_target_index]
+                    gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
+                    gripper_target_pose = gripper_poses1[gripper_target_index]
+                    loss,counted = gripper_bin_collision_loss(gripper_target_pose, gripper_target_point, pc,
+                                                               objects_mask_numpy, gripper_prediction_,
+                                                               self.bin_collision_statistics,floor_elevation_)
+
+                    if counted:break
+                gripper_collision_loss+=loss/ batch_size
 
             for k in range(batch_size):
                 '''gripper-bin collision - 2'''
-                gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 1], mask=objects_mask_numpy,
-                                                         exponent=20.0,
-                                                         balance_indicator=self.bin_collision_statistics.label_balance_indicator)
-                gripper_target_point = pc[gripper_target_index]
-                gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
-                gripper_target_pose = gripper_poses2[gripper_target_index]
-                gripper_collision_loss += gripper_bin_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                           objects_mask_numpy, gripper_prediction_,
-                                                           self.bin_collision_statistics) / batch_size
+                while True:
+                    gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 1], mask=objects_mask_numpy,
+                                                             exponent=20.0,
+                                                             balance_indicator=self.bin_collision_statistics.label_balance_indicator)
+                    gripper_target_point = pc[gripper_target_index]
+                    gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
+                    gripper_target_pose = gripper_poses2[gripper_target_index]
+                    loss,counted = gripper_bin_collision_loss(gripper_target_pose, gripper_target_point, pc,
+                                                               objects_mask_numpy, gripper_prediction_,
+                                                               self.bin_collision_statistics,floor_elevation_)
+                    if counted:break
+                gripper_collision_loss+=loss/ batch_size
 
             for k in range(batch_size):
                 '''suction seal head'''
@@ -433,7 +447,7 @@ class TrainActionNet:
                 shift_appealing_loss += shift_affordance_loss(pc, shift_target_point, objects_mask_numpy,
                                                     self.shift_head_statistics, shift_prediction_) / batch_size
 
-            loss=   suction_seal_loss  + gripper_collision_loss  + shift_appealing_loss    +background_detection_loss*10  + suction_sampling_loss*10 +total_gripper_regression_loss*10
+            loss=   suction_seal_loss  + gripper_collision_loss  + shift_appealing_loss    +background_detection_loss*30  + suction_sampling_loss*100 +total_gripper_regression_loss*10
             assert not torch.isnan(loss)
 
             print(f'loss details: seal={suction_seal_loss.item()}, collision={gripper_collision_loss.item()}, shift={shift_appealing_loss.item()}, back_det={background_detection_loss.item()}, suction={suction_sampling_loss.item()}, gripper_samp={total_gripper_regression_loss.item()}')

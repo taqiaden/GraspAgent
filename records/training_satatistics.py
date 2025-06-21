@@ -79,7 +79,7 @@ class MovingRate():
 
         '''load latest'''
         self.upload(initial_val)
-        self.set_decay_rate()
+        # self.set_decay_rate()
 
         self.last_value=None
 
@@ -99,9 +99,9 @@ class MovingRate():
             self.counter+=1
 
 
-    def set_decay_rate(self):
-        x=0.1*(1-0.0045)**self.counter
-        self.decay_rate=max(x,self.min_decay)
+    # def set_decay_rate(self):
+    #     x=0.1*(1-0.0045)**self.counter
+    #     self.decay_rate=max(x,self.min_decay)
 
     def save(self):
         save_key('moving_rate_', self.moving_rate, section=self.name)
@@ -127,7 +127,7 @@ class MovingRate():
         self.momentum=truncate(self.momentum)
         self.convergence=truncate(self.convergence)
 
-        self.set_decay_rate()
+        # self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,end='')
         print(f'{self.name} moving rate = {self.moving_rate}, momentum = {self.momentum}, decay rate = {self.decay_rate}, convergence={self.convergence}',end='')
         print(Fore.RESET)
@@ -148,21 +148,22 @@ class TrainingTracker:
             self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
             self.loss_moving_average_=self.load_loss_moving_average()
+            if self.loss_moving_average_ is None: self.loss_moving_average_=1.0
             self.convergence=self.load_convergence()
             self.momentum=self.load_momentum()
-            self.decay_rate=0.001
+            self.decay_rate=min_decay
             self.min_decay=min_decay
             self.counter=self.load_counter()
             self.last_loss=None
 
-            self.set_decay_rate()
+            # self.set_decay_rate()
             self.tmp_counter=0
         except Exception as e:
             print(str(e))
 
-    def set_decay_rate(self):
-        x=0.1*(1-0.0045)**self.counter
-        self.decay_rate=max(x,self.min_decay)
+    # def set_decay_rate(self):
+    #     x=0.1*(1-0.0045)**self.counter
+    #     self.decay_rate=max(x,self.min_decay)
     @property
     def accuracy(self):
         return self.confession_matrix.accuracy
@@ -223,7 +224,7 @@ class TrainingTracker:
             self.prediction_balance_indicator = (1 - self.decay_rate) * self.prediction_balance_indicator - self.decay_rate
 
     def print(self):
-        self.set_decay_rate()
+        # self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,f'statistics for {self.name}')
         # if self.running_loss_ is not None:
         #     self.running_loss_ = truncate(self.running_loss_, k=100000)

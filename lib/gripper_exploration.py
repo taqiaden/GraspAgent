@@ -51,7 +51,7 @@ def get_noncollisonal_width(T_d,width_, point_data,n_attempts=50):
         if not max_width >= width >= min_width:
             return False,original_width
 
-        collision_intensity=grasp_collision_detection(T_d,width,point_data, visualize=False)
+        collision_intensity,low_quality_grasp=grasp_collision_detection(T_d,width,point_data, visualize=False)
         if collision_intensity==0:
             return True,width
     else:
@@ -68,7 +68,7 @@ def get_noncollisonal_rotation(T_d,distance,width,point_data, n_attempts=20, div
         relative_pose_5=update_orientation(relative_pose_5,update_range=diversity_factor)
         T_d,width,distance=convert_angles_to_transformation_form(relative_pose_5, target_point)
 
-        collision_intensity =grasp_collision_detection(T_d,width, point_data,visualize=False)
+        collision_intensity,low_quality_grasp =grasp_collision_detection(T_d,width, point_data,visualize=False)
         if  collision_intensity==0:
             return True,T_d
     else:
@@ -110,7 +110,7 @@ def local_exploration(T_d, width, distance ,point_data, exploration_attempts=5,e
     for i in range(exploration_attempts):
         if explore:print('- Exploration attempt ', i + 1)
         '''initial collision check'''
-        collision_intensity =grasp_collision_detection(T_d,width ,point_data,visualize=False)
+        collision_intensity ,low_quality_grasp=grasp_collision_detection(T_d,width ,point_data,visualize=False)
         if i==0:evaluation_metric=collision_intensity
         if collision_intensity>0:
             if not explore: break

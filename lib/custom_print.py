@@ -26,6 +26,9 @@ class my_print():
         self.rank=1
     def print(self,msg):
         print(self.rank*'   ',msg)
+
+    def print_(self, msg):
+        print(self.rank * '   ', msg)
     def step_f(self,msg=None):
         self.rank+=1
         self.rank=max(self.rank,0)

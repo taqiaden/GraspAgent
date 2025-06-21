@@ -238,13 +238,15 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge
             save_pickle(file_path, detected_bin_tuple)
 
     '''get bin mask'''
-    if detected_bin_tuple is None: return None
+    if detected_bin_tuple is None: return None,None
     masks_list = []
+    floor_elevation=None
 
     for plane_equ, z_max, direction in detected_bin_tuple:
         dist_ = distance_to_plane(pc,plane_equ)
         if -0.3<plane_equ[0]<.3 and -0.3<plane_equ[1]<0.3 and plane_equ[2] >0.95  :
             t=floor_threshold
+            floor_elevation=-plane_equ[-1]
         else:
             t = sides_threshold
 
@@ -287,7 +289,7 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge
         colors[bin_mask, 0] += 1.
         view_npy_open3d(pc, color=colors)
 
-    return bin_mask
+    return bin_mask,floor_elevation
 
 if __name__ == "__main__":
     points = np.load('pc_tmp_data.npy')

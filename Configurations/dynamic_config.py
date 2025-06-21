@@ -24,12 +24,16 @@ def check(section,key,config_file,default='0'):
         save_key(key,default,section,config_file)
 
 def save_key(key,value,section='main',config_file=config_file_path):
-    if not isinstance(value,str): value=str(value)
-    config.read(config_file)
-    config.set(section, key, value)
+    try:
+        if not isinstance(value,str): value=str(value)
+        config.read(config_file)
+        config.set(section, key, value)
+        with open(config_file, 'w') as f:
+            config.write(f)
+    except Exception as e:
+        print(str(e))
+        remove_duplicates_config(config_file,config_file)
 
-    with open(config_file, 'w') as f:
-        config.write(f)
 def get_value(key,section='main',config_file=config_file_path):
     config.read(config_file)
     check(section,key,config_file)

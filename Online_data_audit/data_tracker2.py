@@ -1,6 +1,7 @@
 import random
 import numpy as np
 from action import Action
+from label_unpack import LabelObj
 from lib.dataset_utils import online_data
 from lib.dataset_utils import online_data2
 
@@ -57,6 +58,24 @@ class DataTracker2():
         else:
             return self.empty_list.copy()
 
+    def old_push(self, label_obj_:LabelObj,file_id_):
+        new_record = self.get_value(file_id_)
+        if label_obj_.is_gripper:
+            '''gripper'''
+            new_record[0] = 1
+            new_record[1] = 0
+            new_record[2] = label_obj_.success
+
+        if label_obj_.is_suction:
+            '''suction'''
+            new_record[4] = 1
+            new_record[5] = 0
+            new_record[6] = label_obj_.success
+
+        self.dict[file_id_]=new_record
+        # print(new_record)
+
+
     def push(self, action_obj:Action):
         new_record=self.get_value(action_obj.file_id)
 
@@ -84,7 +103,7 @@ class DataTracker2():
 
         self.dict[action_obj.file_id]=new_record
 
-    def gripper_grasp_sampling(self,size,balance_indicator):
+    def gripper_grasp_sampling(self,size,balance_indicator,data_pool=None):
         shuffled_keys = list(self.dict.keys())
         random.shuffle(shuffled_keys)
         positive_selection_p=sampling_p2(x=1,balance_indicator=balance_indicator,probability_exponent=10)
@@ -94,6 +113,13 @@ class DataTracker2():
 
         ids = []
         for key in shuffled_keys:
+            if data_pool is not None:
+                if not data_pool.label.exist(key):
+                    print(f'Missing label: {key}')
+                    continue
+                if not data_pool.depth.exist(key):
+                    print(f'Missing depth: {key}')
+                    continue
             record = self.dict[key]
             if len(ids) == size: break
 
@@ -111,13 +137,20 @@ class DataTracker2():
 
         return ids
 
-    def suction_grasp_sampling(self,size,balance_indicator):
+    def suction_grasp_sampling(self,size,balance_indicator,data_pool=None):
         shuffled_keys = list(self.dict.keys())
         random.shuffle(shuffled_keys)
         positive_selection_p=sampling_p2(x=1,balance_indicator=balance_indicator,probability_exponent=10)
         negative_selection_p=sampling_p2(x=0,balance_indicator=balance_indicator,probability_exponent=10)
         ids = []
         for key in shuffled_keys:
+            if data_pool is not None:
+                if not data_pool.label.exist(key):
+                    print(f'Missing label: {key}')
+                    continue
+                if not data_pool.depth.exist(key):
+                    print(f'Missing depth: {key}')
+                    continue
             record = self.dict[key]
             if len(ids) == size: break
 
@@ -253,4 +286,51 @@ def sample_random_buffer(dict_name,size=None,list_size=10,load_test_samples=1):
     return buffer_list
 
 if __name__ == '__main__':
-    pass
+    # online_data.main_modality=online_data.depth
+    file_ids=online_data.get_indexes()
+    print('Total number of files = ',len(online_data))
+    old_action_data_tracker_path = r'old_online_data_dict.pkl'
+    data_tracker=DataTracker2(name=old_action_data_tracker_path, list_size=10)
+    c=0
+    s_g=0
+    f_g=0
+    s_s=0
+    f_s=0
+    n=0
+    for file_id in file_ids:
+        c+=1
+        # print(c)
+
+        label = online_data.label.load_as_numpy(file_id)
+        label_obj = LabelObj(label=label)
+        data_tracker.old_push(label_obj, file_id)
+        v=data_tracker.get_value( file_id)
+        print(v)
+        if v[0]==1:
+            if v[2]==1:s_g+=1
+            elif v[2]==0:f_g+=1
+            else:
+                print('-------------------------------------')
+                n+=1
+        elif v[4]==1:
+            if v[6]==1:s_s+=1
+            elif v[6]==0:f_s+=1
+            else:
+                print('-------------------------------------')
+                n+=1
+        else:
+            print('-------------------------------------')
+
+            n+=1
+    print(s_g)
+    print(f_g)
+    print(s_s)
+    print(f_s)
+    print(n)
+
+    data_tracker.save()
+
+
+
+
+
