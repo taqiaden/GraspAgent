@@ -130,7 +130,6 @@ def get_suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial
     transformed_pc=transform_point_to_normal_in_plane(target_normal, shifted_pc)
     transformed_target_point=transformed_pc[target_index]
 
-
     '''mask suction region'''
     xyz_dist_ = np.linalg.norm(transformed_target_point[np.newaxis] - transformed_pc, axis=-1)
 

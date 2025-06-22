@@ -164,7 +164,7 @@ class TrainActionNet:
             suction_head_predictions[~torch.from_numpy(objects_mask).cuda()]*=0.
 
             # view_mask(pc, background_class_predictions, pivot=0.5)
-            # view_mask(pc, suction_head_predictions, pivot=0.5)
+            view_mask(pc, suction_head_predictions, pivot=0.5)
             # view_mask(pc, shift_head_predictions, pivot=0.5)
             # view_mask(pc, collision_with_objects_predictions, pivot=0.5)
             # view_mask(pc, collision_with_bin_predictions, pivot=0.5)

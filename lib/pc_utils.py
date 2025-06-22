@@ -150,7 +150,6 @@ def circle_points(r, n,x_center,y_center,z_center):
         y = r * np.sin(t)+y_center
         z=np.zeros_like(x)+z_center
         if z_center is not None:
-
             circles.append(np.c_[x, y,z])
         else:
             circles.append(np.c_[x, y,0])

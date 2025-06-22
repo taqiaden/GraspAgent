@@ -35,8 +35,8 @@ lock = FileLock("file.lock")
 max_samples_per_image=5
 
 max_n = 100
-min_batch_size = 2
-max_batch_size = 4
+batch_size = 2
+# max_batch_size = 2
 
 
 training_buffer = online_data2()
@@ -52,7 +52,7 @@ cache_name = 'normals'
 discrepancy_distance = 1.0
 
 collision_expo=1.0
-firmness_expo=1.0
+firmness_expo=2.0
 
 import torch
 
@@ -82,16 +82,15 @@ def firmness_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction_
               Fore.RESET)
         loss_terms_counters[0] += 1
         return curc_, True, loss_terms_counters,True
-    if (loss_terms_counters[3]+loss_terms_counters[4]) >= max_batch_size:
-        return 0.0, False, loss_terms_counters,False
+
     if sum(s_) == 0 and sum(c_) == 0 :
         '''improve firmness'''
         # print(f'f____{sum(c_)} , {sum(s_) }')
-        if (f_[1] - f_[0] > 0.) and q_[1]>0.5  :
+        if (f_[1] - f_[0] > 0.) and q_[1]>0.5  and loss_terms_counters[3]<batch_size:
             margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
             loss_terms_counters[3] += 1.0
             return (torch.clamp(prediction_ - label_ , 0.) ** firmness_expo) , True, loss_terms_counters,False
-        elif (f_[0]-f_[1] > 0.) and q_[0]>0.5 and loss_terms_counters[4] < loss_terms_counters[3] and prediction_uniqness>np.random.rand() :
+        elif (f_[0]-f_[1] > 0.) and q_[0]>0.5 and loss_terms_counters[4] < batch_size and prediction_uniqness>np.random.rand() :
             margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
             loss_terms_counters[4] += 1.0
             return (torch.clamp(label_-prediction_  , 0.) ** firmness_expo) , True, loss_terms_counters,False
@@ -106,10 +105,9 @@ def collision_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction
         print(Fore.RED,f'Warning: discriminate surpass the generator: label{label_.item()}, pred{prediction_.item()}, c_loss={curc_.item()}',Fore.RESET)
         loss_terms_counters[0] += 1
         return curc_,True, loss_terms_counters,True
-    if  (loss_terms_counters[0]+loss_terms_counters[1]+loss_terms_counters[2]) >= max_batch_size:
-        return 0.0, False,loss_terms_counters,False
+
     if  sum(s_) > 0:
-        if  s_[1] == 0 and c_[1]==0 and q_[1]>0.5 and ref_dist>0.1 and ref_width<0.9:
+        if  s_[1] == 0 and c_[1]==0 and q_[1]>0.5 and ref_dist>0.1 and ref_width<0.9 and (loss_terms_counters[0]+loss_terms_counters[1])<batch_size:
             # margin=s_[0]+f_[1]+1
             loss_terms_counters[0]+=1
             return (torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
@@ -120,11 +118,11 @@ def collision_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction
         else:
             return 0.0, False,loss_terms_counters,False
     elif  sum(s_) == 0 and sum(c_)>0:
-        if  c_[1]==0 and f_[1]>0. and q_[1]>0.5:
+        if  c_[1]==0 and f_[1]>0. and q_[1]>0.5 and (loss_terms_counters[0]+loss_terms_counters[1])<batch_size:
             # margin = f_[1]+c_[0]
             loss_terms_counters[1] += 1
             return (torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
-        elif  c_[0]==0 and f_[0]>0. and q_[0]>0.5 and loss_terms_counters[2]< loss_terms_counters[1] and prediction_uniqness>np.random.rand() :
+        elif  c_[0]==0 and f_[0]>0. and q_[0]>0.5 and loss_terms_counters[2]< batch_size and prediction_uniqness>np.random.rand() :
             # margin = f_[1]+c_[0]
             loss_terms_counters[2] += 1
             return (torch.clamp(label_-prediction_  +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
@@ -444,14 +442,14 @@ class TrainGraspGAN:
             elif (s_[1] > 0. or c_[1] > 0.) and s_[0] == 0 and c_[0] == 0:
                 if not is_noise_label: self.superior_A_model_moving_rate.update(1.0)
             counted=False
-            if col_loss_counter<max_batch_size:
+            if col_loss_counter<(batch_size*2):
                 l_c, counted, loss_terms_counters,is_curcl_loss = collision_loss(c_, s_, f_,q_, prediction_,
                                                                    label_, loss_terms_counters,prediction_uniqness,ref_dist,ref_width)
             if counted:
                 l_collision += l_c
                 col_loss_counter+=1
 
-            if not counted and firm_loss_counter<max_batch_size:
+            if not counted and firm_loss_counter<(batch_size*2):
                 '''firmness loss'''
                 l_f, counted, loss_terms_counters,is_curcl_loss = firmness_loss(c_, s_, f_,q_, prediction_,
                                                                   label_, loss_terms_counters,prediction_uniqness)
@@ -497,18 +495,18 @@ class TrainGraspGAN:
                     self.diversity_momentum = self.diversity_momentum * 0.99 + diffrence.item() * 0.01
                     self.sampling_centroid = self.sampling_centroid * 0.99 + target_generated_pose.detach().clone() * 0.01
 
-            if col_loss_counter+firm_loss_counter==2* max_batch_size :
+            if loss_terms_counters[0]+loss_terms_counters[1]+loss_terms_counters[3]==2* batch_size :
                 self.relative_sampling_timing.update((t + 1) / n)
                 break
 
         # curc_loss=torch.clamp(torch.abs(ref_scores_-gen_scores_)-1.,0.).mean()
         # if     curc_loss.item()  >0.: print(f'curclium loss = {curc_loss.item()}')
-        if (col_loss_counter>=min_batch_size) or (firm_loss_counter>=min_batch_size):
+        if (loss_terms_counters[0] + loss_terms_counters[1]==batch_size) :#or (firm_loss_counter>=min_batch_size):
             print(loss_terms_counters)
             loss=torch.tensor(0.,device=l_collision.device)
-            if col_loss_counter>=min_batch_size:
-                loss += l_collision / (loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[2])
-            if firm_loss_counter>=min_batch_size :
+
+            loss += l_collision / (loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[2])
+            if firm_loss_counter>0 :
                 loss += l_firmness / (loss_terms_counters[3]+loss_terms_counters[4])
 
             self.critic_statistics.loss = loss.item()
@@ -520,7 +518,7 @@ class TrainGraspGAN:
             self.gan.critic_optimizer.zero_grad(set_to_none=True)
             return True, tracked_indexes
         else:
-            print('pass, counter/max_Batch_size=', loss_terms_counters, '/', max_batch_size)
+            print('pass, counter/Batch_size=', loss_terms_counters, '/', batch_size)
             return False, tracked_indexes
 
     def soft_entropy_loss(self, values, bins=40, sigma=0.1, min_val=None, max_val=None):
@@ -576,7 +574,7 @@ class TrainGraspGAN:
             if A_is_collision_free is not None:
                 if A_is_collision_free and not is_noise_label:
                     l1_loss = (torch.clamp(pred_.detach().clone() - label, 0.) ** 1)
-                    l1 += 1. * l1_loss + .0 * (l1_loss ** 2.0)
+                    l1 += 0. * l1_loss + 1.0 * (l1_loss ** 2.0)
                     counter[0] += 1.
                     # print('-----------------------------',l)
                 elif not A_is_collision_free:
@@ -589,7 +587,7 @@ class TrainGraspGAN:
                 if A_is_more_firm and not is_noise_label:
                     l1_loss = (torch.clamp(pred_.detach().clone() - label, 0.) ** 1)
 
-                    l3 += 1. * l1_loss + 0.0 * (l1_loss ** 2.0)
+                    l3 += 0. * l1_loss + 1.0 * (l1_loss ** 2.0)
                     counter[2] += 1.
 
                 elif not A_is_more_firm:
@@ -598,10 +596,10 @@ class TrainGraspGAN:
                     l4 += 1.0 * l1_loss + .0 * (l1_loss ** 2.0)
                     counter[3] += 1.
 
-        if counter[0] > 0: gripper_sampling_loss += l1 / (counter[0])
-        if counter[1] > 0: gripper_sampling_loss += l2 / (counter[1])
-        if counter[2] > 0: gripper_sampling_loss += l3 / counter[2]
-        if counter[3] > 0: gripper_sampling_loss += l4 / counter[3]
+        if counter[0] >0: gripper_sampling_loss += l1 / (counter[0])
+        if counter[1] ==batch_size: gripper_sampling_loss += l2 / (counter[1])
+        if counter[2] >0: gripper_sampling_loss += l3 / counter[2]
+        if counter[3] ==batch_size: gripper_sampling_loss += l4 / counter[3]
 
         # print(f'G loss weights: {counter}, gripper_sampling_loss={gripper_sampling_loss.item()}')
 
@@ -641,7 +639,7 @@ class TrainGraspGAN:
             valid_gripper_pose=valid_gripper_pose[0]
             valid_pose_index=None
             pose_7[-2]=pose_7[-2]*(np.random.rand()**2)
-            pose_7[-1]=0.5*pose_7[-1]+0.5*(1-np.random.rand()**2)
+            pose_7[-1]=pose_7[-1]+(1-pose_7[-1])*np.random.rand()
 
             pi.step(i)
             print(' ')
@@ -702,8 +700,8 @@ class TrainGraspGAN:
                     pixels_B=gripper_pixel_index[1]
                     approach[0,:,pixels_A,pixels_B]=pose_7[0:3]
 
-                # gamma_col=1.0 - torch.abs(collision_scores[0, 0][mask]-0.5)*2.0
-                gamma_col=1.0-collision_scores[0, 0][mask]
+                gamma_col=1.0 - torch.abs(collision_scores[0, 0][mask]-0.5)*2.0
+                # gamma_col=1.0-collision_scores[0, 0][mask]
             n_s=max_samples_per_image if valid_gripper_pose else 1
             for k in range(n_s):
                 with torch.no_grad():

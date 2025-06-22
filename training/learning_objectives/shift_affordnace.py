@@ -120,7 +120,6 @@ def shift_affordance_loss(pc,shift_target_point,target_mask,statistics,predictio
     if shift_points == 0:
         label = torch.tensor(0, device=prediction_.device).float()
         statistics.update_confession_matrix(label, prediction_.detach())
-
     else:
         label = torch.tensor(1, device=prediction_.device).float()
         statistics.update_confession_matrix(label, prediction_.detach())

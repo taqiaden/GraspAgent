@@ -318,8 +318,7 @@ class TrainActionNet:
                 v_is_superior[bad_V_mask&good_N_mask]*=False
 
                 def col_weight(x):
-                    y=1.-x
-                    return 4*y*(1-y)
+                    return 4*x*(1-x)
 
                 v_weights=(0.001+objects_mask.float())*col_weight(V_objects_collision.detach().clone())*(v_is_superior.float()+0.001)
                 N_weights=(0.001+objects_mask.float())*col_weight(N_objects_collision.detach().clone())*(1.0-v_is_superior.float()+0.001)
@@ -349,7 +348,7 @@ class TrainActionNet:
             beta_loss += ((1.001 - F.cosine_similarity(prediction_N_pose[:, 3:5],
                                                      label_N_pose[:, 3:5], dim=-1)))*N_weights
 
-            total_gripper_regression_loss=5.*(dist_loss.sum()+width_loss.sum())+beta_loss.sum()
+            total_gripper_regression_loss=dist_loss.sum()+width_loss.sum()*0.4+beta_loss.sum()*5.8
 
             self.gripper_sampler_statistics.loss=total_gripper_regression_loss.item()
 
