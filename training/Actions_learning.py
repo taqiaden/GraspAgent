@@ -37,7 +37,6 @@ detach_backbone = False
 lock = FileLock("file.lock")
 
 view_mode = False
-max_n = 500
 batch_size = 16
 
 training_buffer = online_data2()
@@ -130,10 +129,8 @@ class TrainActionNet:
 
         self.skipped_last_G_training=True
 
-        # self.gripper_model_V=None
         self.gripper_model_N=None
         self.initialize_gripper_sampling_model()
-
 
 
     def initialize(self, n_samples=None):
@@ -371,7 +368,7 @@ class TrainActionNet:
                 '''gripper-object collision - 1'''
                 while True:
                     gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 0], mask=objects_mask_numpy,
-                                                             exponent=20.0,
+                                                             exponent=10.0,
                                                              balance_indicator=self.objects_collision_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
@@ -386,7 +383,7 @@ class TrainActionNet:
                 '''gripper-object collision - 2'''
                 while True:
                     gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 0], mask=objects_mask_numpy,
-                                                             exponent=20.0,
+                                                             exponent=10.0,
                                                              balance_indicator=self.objects_collision_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
@@ -401,7 +398,7 @@ class TrainActionNet:
                 '''gripper-bin collision - 1'''
                 while True:
                     gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 1], mask=objects_mask_numpy,
-                                                             exponent=20.0,
+                                                             exponent=10.0,
                                                              balance_indicator=self.bin_collision_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
@@ -417,7 +414,7 @@ class TrainActionNet:
                 '''gripper-bin collision - 2'''
                 while True:
                     gripper_target_index = balanced_sampling(gripper_head_predictions2[:, 1], mask=objects_mask_numpy,
-                                                             exponent=20.0,
+                                                             exponent=10.0,
                                                              balance_indicator=self.bin_collision_statistics.label_balance_indicator)
                     gripper_target_point = pc[gripper_target_index]
                     gripper_prediction_ = gripper_head_predictions2[gripper_target_index]
@@ -431,7 +428,7 @@ class TrainActionNet:
             for k in range(batch_size):
                 '''suction seal head'''
                 suction_target_index = balanced_sampling(suction_head_predictions, mask=objects_mask_numpy,
-                                                         exponent=20.0,
+                                                         exponent=10.0,
                                                          balance_indicator=self.suction_head_statistics.label_balance_indicator)
                 suction_prediction_ = suction_head_predictions[suction_target_index]
                 suction_seal_loss += get_suction_seal_loss(pc, normals, suction_target_index, suction_prediction_,
@@ -439,7 +436,7 @@ class TrainActionNet:
 
             for k in range(batch_size):
                 '''shift affordance head'''
-                shift_target_index = balanced_sampling(shift_head_predictions, mask=None, exponent=20.0,
+                shift_target_index = balanced_sampling(shift_head_predictions, mask=None, exponent=10.0,
                                                        balance_indicator=self.shift_head_statistics.label_balance_indicator)
                 shift_target_point = pc[shift_target_index]
                 shift_prediction_ = shift_head_predictions[shift_target_index]
@@ -452,19 +449,6 @@ class TrainActionNet:
             print(f'loss details: seal={suction_seal_loss.item()}, collision={gripper_collision_loss.item()}, shift={shift_appealing_loss.item()}, back_det={background_detection_loss.item()}, suction={suction_sampling_loss.item()}, gripper_samp={total_gripper_regression_loss.item()}')
             loss.backward()
 
-            # def log_gradient_norms(model):
-            #     for name, param in model.named_parameters():
-            #         if param.grad is not None:
-            #             grad_norm = param.grad.norm(2).item()  # L2 norm
-            #
-            #             if grad_norm>1:print(f"Layer: {name} | Gradient Norm: {grad_norm:.6f}")
-
-            # log_gradient_norms(self.actions_net.model)
-            # total_norm=torch.nn.utils.clip_grad_norm_(self.actions_net.model.parameters(),max_norm=100)
-            # self.gradient_moving_rate.update(total_norm.item())
-            # assert not torch.isnan(total_norm)
-
-            # print(f'First gradient L2 norm:{total_norm.item()}')
 
             # if    total_norm.item()<max(1.0,self.gradient_moving_rate.val*1.5):
             self.actions_net.optimizer.step()

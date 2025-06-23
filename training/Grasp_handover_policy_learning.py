@@ -233,9 +233,13 @@ class TrainPolicyNet:
             bin_mask = None
         return bin_mask
 
-    def simulate_elevation_variations(self, original_depth, objects_mask, max_elevation=0.2, exponent=2.0):
+    def simulate_elevation_variations(self, original_depth, objects_mask=None, max_elevation=0.2, exponent=2.0):
         '''Elevation-based Augmentation'''
-        shift_entities_mask = objects_mask & (original_depth > 0.0001)
+        if objects_mask is None:
+            shift_entities_mask = (original_depth > 0.0001)
+        else:
+            shift_entities_mask = objects_mask & (original_depth > 0.0001) if np.random.random()>0.5 else (original_depth > 0.0001)
+
         new_depth = original_depth.clone().detach()
         new_depth[shift_entities_mask] -= max_elevation * (np.random.rand() ** exponent) * camera.scale
         return new_depth
@@ -257,13 +261,26 @@ class TrainPolicyNet:
             objects_mask_pixel_form = torch.ones_like(depth[0:1])
             objects_mask_pixel_form[0, 0][masks[k]] = objects_mask_pixel_form[0, 0][masks[k]] * objects_mask
             objects_mask_pixel_form = objects_mask_pixel_form > 0.5
-            if np.random.rand() > 0.7:
+            if np.random.rand() > 0.5:
                 depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1], objects_mask_pixel_form,
                                                                     exponent=5.0)
                 pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0].cpu().numpy(), camera)
                 pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
 
         return depth,pcs, masks,objects_masks
+
+    def old_objects_augmentation(self,depth):
+        pcs, masks = self.get_point_clouds(depth)
+
+        '''Elevation-based augmentation'''
+        for k in range(depth.shape[0]):
+            if np.random.rand() > 0.5:
+                depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1],
+                                                                    exponent=5.0)
+                pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0].cpu().numpy(), camera)
+                pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
+
+        return depth,pcs, masks
 
     def batch_learning_from_demonstartion(self,demonstrations_batch):
         rgb, depth, labels, file_ids = demonstrations_batch
@@ -353,6 +370,8 @@ class TrainPolicyNet:
             b = rgb.shape[0]
             w = rgb.shape[2]
             h = rgb.shape[3]
+
+            depth, pcs, masks=self.old_objects_augmentation(depth)
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()

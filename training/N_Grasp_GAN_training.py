@@ -52,7 +52,7 @@ cache_name = 'normals'
 discrepancy_distance = 1.0
 
 collision_expo=1.0
-firmness_expo=2.0
+firmness_expo=1.0
 
 import torch
 
@@ -341,7 +341,7 @@ class TrainGraspGAN:
 
     def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.2, exponent=2.0):
         '''Elevation-based Augmentation'''
-        shift_entities_mask = objects_mask & (original_depth > 0.0001)
+        shift_entities_mask = objects_mask & (original_depth > 0.0001) if np.random.random()>0.5 else (original_depth > 0.0001)
         new_depth = original_depth.clone().detach()
         new_depth[shift_entities_mask] -= max_elevation * (np.random.rand() ** exponent) * camera.scale
 
@@ -507,7 +507,7 @@ class TrainGraspGAN:
 
             loss += l_collision / (loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[2])
             if firm_loss_counter>0 :
-                loss += l_firmness / (loss_terms_counters[3]+loss_terms_counters[4])
+                loss += (l_firmness / (loss_terms_counters[3]+loss_terms_counters[4]))
 
             self.critic_statistics.loss = loss.item()
             # loss=loss+curc_loss
@@ -665,7 +665,7 @@ class TrainGraspGAN:
             # view_features(reshape_for_layer_norm(objects_mask_pixel_form, camera=camera, reverse=False))
 
             '''Elevation-based augmentation'''
-            if np.random.rand()>0.7:
+            if np.random.rand()>0.5:
                 depth=self.simulate_elevation_variations(depth,objects_mask_pixel_form,exponent=5.0)
                 pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
                 pc = transform_to_camera_frame(pc, reverse=True)
@@ -772,6 +772,7 @@ class TrainGraspGAN:
                 '''zero grad'''
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator.zero_grad(set_to_none=True)
+                self.gan.critic.eval()
 
                 '''generated grasps'''
                 gripper_pose= self.gan.generator( depth.clone(),approach, detach_backbone=detach_backbone)
@@ -803,6 +804,9 @@ class TrainGraspGAN:
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator_optimizer.zero_grad(set_to_none=True)
                 self.gan.critic_optimizer.zero_grad(set_to_none=True)
+
+                self.gan.critic.train()
+
 
 
 
@@ -871,7 +875,7 @@ class TrainGraspGAN:
         self.gripper_sampler_statistics.clear()
         self.critic_statistics.clear()
 def train_N_grasp_GAN(n=1):
-    lr = 5e-4
+    lr = 1e-4
     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
     torch.cuda.empty_cache()
     # torch.autograd.set_detect_anomaly(True)

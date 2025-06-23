@@ -16,14 +16,7 @@ import torch.nn.functional as F
 use_bn=False
 use_in=True
 
-# critic_backbone_relu_slope = 0.1
-# critic_branch_relu_slope = 0.1
-# activation=LGRelu(slope=0.01)
-# gelu=nn.GELU()
 silu=nn.SiLU()
-
-# generator_backbone_relu_slope = 0.0
-# gripper_sampler_relu_slope = 0.0
 
 gripper_sampling_module_key = 'gripper_sampling_net'
 N_gripper_sampling_module_key = 'N_gripper_sampling_net'
@@ -85,9 +78,6 @@ class G(nn.Module):
         else:
             features = self.back_bone(depth)
 
-        # cuda_memory_report()
-
-
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
         approach= reshape_for_layer_norm(approach, camera=camera, reverse=False)
         '''check exploded values'''
@@ -101,8 +91,6 @@ class G(nn.Module):
 
         '''reshape'''
         gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
-
-        # cuda_memory_report()
 
         return gripper_pose
 
@@ -121,21 +109,15 @@ class D(nn.Module):
         self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0.,activation=silu).to('cuda')
         self.att_block_ = att_res_mlp_LN_sparse(in_c1=64, in_c2=7 , out_c=1,
-                                           relu_negative_slope=0.,activation=silu,drop_out_ratio=0.).to(
+                                           relu_negative_slope=0.,activation=silu,drop_out_ratio=0.1).to(
             'cuda')
-
-        # self.att_block_2 = att_res_mlp_LN_sparse(in_c1=64, in_c2=7 , out_c=1,
-        #                                    relu_negative_slope=0.1,use_sigmoid=False,activation=silu).to(
-        #     'cuda')
-        # self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        # self.scale2 = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.drop_out=nn.Dropout(0.1)
 
         add_spectral_norm_selective(self)
 
     def forward(self, depth, pose, detach_backbone=False):
         '''input standardization'''
         depth = standardize_depth(depth)
-        # cuda_memory_report()
 
         '''backbone'''
         if detach_backbone:
@@ -143,15 +125,12 @@ class D(nn.Module):
                 features = self.back_bone(depth)
         else:
             features = self.back_bone(depth)
-        # cuda_memory_report()
 
         features = reshape_for_layer_norm(features, camera=camera, reverse=False)
         pose = reshape_for_layer_norm(pose, camera=camera, reverse=False)
 
-        # if self.training:
-        #     max_ = features.max()
-        #     if max_ > 100:
-        #         print(Fore.RED, f'Warning: Critic ----- Res U net outputs high values up to {max_}', Fore.RESET)
+        features=self.drop_out(features)
+
 
         '''decode'''
         output= self.att_block_(features,pose)
@@ -159,7 +138,6 @@ class D(nn.Module):
         # output=self.scale*output+output2*self.scale2
 
         output = reshape_for_layer_norm(output, camera=camera, reverse=True)
-        # cuda_memory_report()
 
         return output
 

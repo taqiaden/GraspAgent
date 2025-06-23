@@ -22,7 +22,7 @@ from Configurations.run_config import simulation_mode, \
     suction_factor, gripper_factor, report_result, \
     enhance_gripper_firmness, single_arm_operation_mode, \
     enable_gripper_grasp, enable_gripper_shift, enable_suction_grasp, enable_suction_shift, \
-    activate_segmentation_queries, activate_handover, only_handover, highest_elevation_to_grasp, \
+    activate_segmentation_queries, activate_handover, only_handover, \
     report_for_handover, report_for_shift, report_for_grasp, \
     zero_out_distance_when_collision, handover_quality_bias, suction_grasp_bias, gripper_grasp_bias, \
     sample_action_with_argmax, quality_exponent, activate_shift_from_beneath_objects, bin_collision_threshold, \
@@ -396,21 +396,21 @@ class GraspAgent():
         return background_class
 
     def gripper_arm_mask_during_handover(self):
-        cylindrical_mask=np.linalg.norm(self.voxel_pc[:,[0,2]]-np.array([0.45,0.25-0.03])[np.newaxis],axis=-1)<0.03
-        arm_rectangular_mask=(np.abs( self.voxel_pc[:,0]-0.45)<0.08) & (np.abs(self.voxel_pc[:,2]-0.25)<0.08) & (self.voxel_pc[:, 1] < -0.09)
+        elevation=0.3
+        cylindrical_mask=np.linalg.norm(self.voxel_pc[:,[0,2]]-np.array([0.45,elevation-0.03])[np.newaxis],axis=-1)<0.03
+        arm_rectangular_mask=(np.abs( self.voxel_pc[:,0]-0.45)<0.08) & (np.abs(self.voxel_pc[:,2]-elevation)<0.08) & (self.voxel_pc[:, 1] < -0.09)
         cylindrical_mask=cylindrical_mask & (self.voxel_pc[:, 1] < -0.03)
-        object_rectangular_mask=(self.voxel_pc[:, 2] < 0.3) &(self.voxel_pc[:, 2] > 0.1)
+        object_rectangular_mask=(self.voxel_pc[:, 2] < (elevation+0.05)) &(self.voxel_pc[:, 2] > (elevation-0.15))
         object_rectangular_mask=object_rectangular_mask & (self.voxel_pc[:, 1] > -0.03) & (self.voxel_pc[:,1]<0.12)
         object_rectangular_mask=object_rectangular_mask & (self.voxel_pc[:, 0] > 0.3) & (self.voxel_pc[:,0]<0.6)
 
         handed_object_mask=  object_rectangular_mask\
                          & (~cylindrical_mask) & (~arm_rectangular_mask)
         # view_mask(self.voxel_pc, object_rectangular_mask)
-        # view_mask(self.voxel_pc, ~arm_rectangular_mask)
         # view_mask(self.voxel_pc, ~cylindrical_mask)
+        # view_mask(self.voxel_pc, ~arm_rectangular_mask)
         # view_mask(self.voxel_pc,handed_object_mask)
-        # view_mask(self.voxel_pc, (self.voxel_pc[:, 1] > -0.17)& (self.voxel_pc[:,1]<0.17))
-        # view_mask(self.voxel_pc, (self.voxel_pc[:, 2] > 0.14))
+
 
         '''detect object'''
         no_object=self.voxel_pc[handed_object_mask].shape[0]<1
@@ -421,14 +421,15 @@ class GraspAgent():
 
     def suction_arm_mask_during_handover(self):
         # suction_ref_point=np.array([0.45,0.01,0.24])
-        cylindrical_mask=np.linalg.norm(self.voxel_pc[:,[0,2]]-np.array([0.45,0.2])[np.newaxis],axis=-1)<0.015
-        handed_object_mask=(self.voxel_pc[:,1]<0.0) & (self.voxel_pc[:,2]>0.2) & (~cylindrical_mask) \
-                          & (self.voxel_pc[:,1]>-0.1)
+        elevation = 0.3
+        cylindrical_mask=np.linalg.norm(self.voxel_pc[:,[0,2]]-np.array([0.45,elevation-0.05])[np.newaxis],axis=-1)<0.015
+        handed_object_mask=(self.voxel_pc[:,1]<0.0) & (self.voxel_pc[:,2]>(elevation-0.1)) & (~cylindrical_mask) \
+                          & (self.voxel_pc[:,1]>-0.2)
 
         # view_mask(self.voxel_pc, ~cylindrical_mask)
         # view_mask(self.voxel_pc, (self.voxel_pc[:,1]<0.0))
-        # view_mask(self.voxel_pc, (self.voxel_pc[:,2]>0.2))
-        # view_mask(self.voxel_pc, (self.voxel_pc[:,1]>-0.1))
+        # view_mask(self.voxel_pc, (self.voxel_pc[:,2]>(elevation-0.1)))
+        # view_mask(self.voxel_pc, (self.voxel_pc[:,1]>-0.2))
         # view_mask(self.voxel_pc, handed_object_mask)
 
 
@@ -442,6 +443,8 @@ class GraspAgent():
     def models_inference(self):
         pr.title('Inference')
         depth_torch = torch.from_numpy(self.depth)[None, None, ...].to('cuda').float()
+        if self.last_handover_action is not None:depth_torch=self.alter_depth_ref(depth_torch)
+
         rgb_torch = torch.from_numpy(self.rgb).permute(2, 0, 1)[None, ...].to('cuda').float()
 
         '''action net output'''
@@ -451,6 +454,15 @@ class GraspAgent():
         '''depth to point clouds'''
         self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
         self.voxel_pc = transform_to_camera_frame(self.voxel_pc, reverse=True)
+
+        # depth2=depth_torch[0,0].cpu().numpy()
+        # pc2, mask = depth_to_point_clouds(depth2, camera)
+        # pc2 = transform_to_camera_frame(pc2, reverse=True)
+        # pc3=self.voxel_pc.copy()
+        # pc3[:,0]*=0.
+        # cat_pc=np.concatenate([pc3,pc2],axis=0)
+        # view_npy_open3d(cat_pc)
+
         voxel_pc_tensor = torch.from_numpy(self.voxel_pc).to('cuda').float()
 
         '''pixel-wise to point-wise sampling'''
@@ -629,7 +641,26 @@ class GraspAgent():
 
         self.suction_grasp_mask = (self.objects_mask * suction_grasp_reachablity_mask
                                    * seal_quality_mask)
+
+
+        # view_mask(self.voxel_pc, (self.suction_grasp_mask> 0.5))
+
         if activate_suction_quality_mask: self.suction_grasp_mask *= suction_quality_mask
+    def alter_depth_ref(self,depth,objects_mask=None):
+        # pc, mask = self.get_point_clouds(depth)
+
+        if objects_mask is None:
+            shift_entities_mask = (depth > 0.0001)
+        else:
+            shift_entities_mask = objects_mask & (depth > 0.0001)
+
+        new_depth = depth.clone().detach()
+        new_depth[shift_entities_mask] += 0.14  * camera.scale
+
+        # pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0].cpu().numpy(), camera)
+        # pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
+
+        return new_depth#,pc, mask
 
     def sample_masked_actions(self):
         self.forward_counter+=1
@@ -713,6 +744,8 @@ class GraspAgent():
             self.process_grasp_masks( gripper_grasp_reachablity_mask, gripper_quality_mask,
                                 suction_grasp_reachablity_mask
                                 , seal_quality_mask, suction_quality_mask)
+
+            # view_mask(self.voxel_pc, (self.suction_grasp_mask > 0.5))
 
             if self.last_handover_action.gripper_at_home_position==False:
                 print('Process handover from gripper to suction')
