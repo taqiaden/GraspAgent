@@ -386,7 +386,7 @@ class GraspAgent():
 
     def background_manual_correction(self,background_class,voxel_pc_tensor):
         min_elevation=voxel_pc_tensor[background_class<0.5,-1].min().item()
-        floor_correction_mask=(self.voxel_pc[:,-1]<min_elevation+0.005) | (self.voxel_pc[:,-1]<0.046)
+        floor_correction_mask=(self.voxel_pc[:,-1]<min_elevation+0.005) | (self.voxel_pc[:,-1]<0.042)
         ceil_mask=self.voxel_pc[:,-1]>0.2
         background_class[floor_correction_mask|ceil_mask]=1.0
         x_correction_mask=(self.voxel_pc[:,0]<0.3) | (self.voxel_pc[:,0]>0.6)
@@ -447,9 +447,16 @@ class GraspAgent():
 
         rgb_torch = torch.from_numpy(self.rgb).permute(2, 0, 1)[None, ...].to('cuda').float()
 
+        if self.last_handover_action is not None and self.last_handover_action.suction_at_home_position==False:
+            approach=torch.zeros_like(depth_torch).repeat(1,3,1,1)
+            approach[:,2,...]+=0.966
+            approach[:,1,...]+=0.2588
+        else:
+            approach=None
+
         '''action net output'''
         gripper_pose, suction_direction, griper_collision_classifier, suction_seal_classifier, shift_appealing \
-            , background_class = self.action_net(depth_torch.clone())
+            , background_class = self.action_net(depth_torch.clone(),approach1=approach)
 
         '''depth to point clouds'''
         self.voxel_pc, mask = depth_to_point_clouds(self.depth, camera)
@@ -709,8 +716,9 @@ class GraspAgent():
         # view_mask(self.voxel_pc, shift_appealing>0.5 )
 
         '''correct background mask'''
-        if self.last_handover_action is None:
-            background_class=self.background_manual_correction(background_class,voxel_pc_tensor)
+        # if self.last_handover_action is None:
+            # view_mask(self.voxel_pc, background_class < 0.5)
+            # background_class=self.background_manual_correction(background_class,voxel_pc_tensor)
             # view_image(self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
 
             # view_mask(self.voxel_pc, background_class < 0.5)

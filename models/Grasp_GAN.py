@@ -27,6 +27,11 @@ class GripperGraspSampler(nn.Module):
     def __init__(self):
         super().__init__()
 
+        self.approach_decoder = att_res_mlp_LN_sparse(in_c1=64, in_c2=3 , out_c=3,
+                                           relu_negative_slope=0.,activation=silu).to(
+            'cuda')
+        self.scale = nn.Parameter(torch.tensor(0.1, dtype=torch.float32, device='cuda'), requires_grad=True)
+
         self.beta_decoder = att_res_mlp_LN_sparse(in_c1=64, in_c2=3 , out_c=2,
                                            relu_negative_slope=0.,activation=silu).to(
             'cuda')
@@ -40,7 +45,13 @@ class GripperGraspSampler(nn.Module):
         self.sig=nn.Sigmoid()
 
     def forward(self, representation_2d,  approach=None  ):
+
+
         approach=F.normalize(approach, dim=1).detach()
+        approach_delta = self.approach_decoder(representation_2d,approach)
+        # print(self.scale)
+        # exit()
+        approach=F.normalize(approach+self.scale*approach_delta, dim=1)
 
         beta = self.beta_decoder(representation_2d,approach)
         beta=F.normalize(beta, dim=1)

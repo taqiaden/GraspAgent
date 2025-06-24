@@ -38,6 +38,11 @@ max_n = 100
 batch_size = 2
 # max_batch_size = 2
 
+freeze_approach=True
+freeze_beta=True
+freeze_distance=True
+freeze_width=False
+
 
 training_buffer = online_data2()
 training_buffer.main_modality = training_buffer.depth
@@ -380,9 +385,9 @@ class TrainGraspGAN:
             gamma_dive = (1.001 - F.cosine_similarity(ref_gripper_pose2.detach().clone(),
                                                self.sampling_centroid[None, :], dim=-1))/2
             gamma_dive *= ((1.001 - F.cosine_similarity(gripper_pose2.detach().clone(),
-                                               self.sampling_centroid[None, :], dim=-1))/2)**2.0
-            # gamma_small_change = 1.006 - ((1.0 - F.cosine_similarity(gripper_pose2[:,3:5].detach().clone(),
-            #                                                         ref_gripper_pose2[:,3:5].detach().clone(), dim=-1)) / 2)
+                                               self.sampling_centroid[None, :], dim=-1))/2)
+            gamma_dive *= ((1.001 - F.cosine_similarity(gripper_pose2.detach().clone(),
+                                                                    ref_gripper_pose2.detach().clone(), dim=-1)) / 2)
             gamma_firmness=torch.clamp(ref_gripper_pose2[:,-2].detach().clone(),0.001,0.99)**0.3
             gamma_rand=torch.rand_like(gamma_dive)
 
@@ -719,6 +724,11 @@ class TrainGraspGAN:
                 is_noise_label, gripper_pose_ref,reg_loss = self.step_ref_generator_training(depth, mask, gripper_pose,
                                                                                              objects_mask  )
 
+                if freeze_approach:gripper_pose_ref[:,0:3]=gripper_pose[:,0:3]
+                if freeze_beta:gripper_pose_ref[:,3:5]=gripper_pose[:,3:5]
+                if freeze_distance:gripper_pose_ref[:,5:6]=gripper_pose[:,5:6]
+                if freeze_width:gripper_pose_ref[:,6:7]=gripper_pose[:,6:7]
+
                 # with torch.no_grad():
                 #     rgb = torch.ones_like(depth) / 2.0
                 #     rgb = rgb.repeat(1, 3, 1, 1)
@@ -768,7 +778,6 @@ class TrainGraspGAN:
                     self.sample_from_latent=not self.sample_from_latent
                     break
 
-
                 '''zero grad'''
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator.zero_grad(set_to_none=True)
@@ -776,6 +785,17 @@ class TrainGraspGAN:
 
                 '''generated grasps'''
                 gripper_pose= self.gan.generator( depth.clone(),approach, detach_backbone=detach_backbone)
+                # approach=gripper_pose_[:,0:3,...]
+                # beta=gripper_pose_[:,3:5,...]
+                # dist=gripper_pose_[:,5:6,...]
+                # width=gripper_pose_[:,6:7,...]
+                #
+                # if freeze_approach:approach=approach.detach()
+                # if freeze_beta:beta=beta.detach()
+                # if freeze_distance:dist=dist.detach()
+                # if freeze_width:width.detach_()
+                #
+                # gripper_pose=torch.cat([approach,beta,dist,width],dim=1)
 
                 gripper_sampling_loss = self.get_generator_loss(
                     depth, mask, gripper_pose, gripper_pose_ref,
@@ -875,7 +895,7 @@ class TrainGraspGAN:
         self.gripper_sampler_statistics.clear()
         self.critic_statistics.clear()
 def train_N_grasp_GAN(n=1):
-    lr = 1e-4
+    lr = 5e-4
     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
     torch.cuda.empty_cache()
     # torch.autograd.set_detect_anomaly(True)

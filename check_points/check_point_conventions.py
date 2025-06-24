@@ -5,7 +5,7 @@ from lib.optimizer import export_optm, load_opt
 import torch.nn.init as init
 
 weight_decay = 1e-5
-
+# model_cache_folder='check_points'
 
 class ModelWrapper():
     def __init__(self,model=None,optimizer=None,module_key=''):

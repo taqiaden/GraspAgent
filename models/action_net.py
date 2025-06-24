@@ -78,7 +78,6 @@ class ActionNet(nn.Module):
 
         self.sigmoid = nn.Sigmoid()
 
-
     def gripper_sample_and_classify_(self,features, depth,approach_direction,sampling_module):
         # cuda_memory_report()
 
@@ -153,6 +152,19 @@ class ActionNet(nn.Module):
                                                                  reverse=True)
 
             return (gripper_pose_1,gripper_pose_2), (griper_collision_classifier_1,griper_collision_classifier_2)
+        elif approach1 is not None:
+
+            approach1 = reshape_for_layer_norm(approach1, camera=camera, reverse=False)
+
+            gripper_pose, griper_collision_classifier = self.gripper_sample_and_classify_(features, depth,
+                                                                                              approach1,
+                                                                                              self.gripper_sampler1)
+
+            gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
+            griper_collision_classifier = reshape_for_layer_norm(griper_collision_classifier, camera=camera,
+                                                                   reverse=True)
+
+            return gripper_pose,griper_collision_classifier
         else:
             vertical_direction = torch.zeros_like(normal_direction)
             vertical_direction[:, 2] = vertical_direction[:, 2] + 1.0
@@ -165,20 +177,20 @@ class ActionNet(nn.Module):
 
             '''rank best approach based on collision avoidance'''
             # collision_with bin
-            selective_mask_1 = (griper_collision_classifier_1[:, 0] < 0.5) & (griper_collision_classifier_1[:, 1] < 0.5)
-            selective_mask_2 = (griper_collision_classifier_2[:, 0] < 0.5) & (griper_collision_classifier_2[:, 1] < 0.5)
+            no_collision_mask_1 = (griper_collision_classifier_1[:, 0] < 0.5) & (griper_collision_classifier_1[:, 1] < 0.5)
+            no_collision_mask_2 = (griper_collision_classifier_2[:, 0] < 0.5) & (griper_collision_classifier_2[:, 1] < 0.5)
 
             # check 1: use vertical direction if it solves collision better than normal
-            bad_normal_approach_mask = selective_mask_2 & (~selective_mask_1)
+            good_approach_mask_2 = no_collision_mask_2 & (~no_collision_mask_1)
 
             # check 2: if both direction are good at avoiding collision, check for better firmness
-            bad_normal_approach_mask = bad_normal_approach_mask | (
-                    selective_mask_2 & selective_mask_1 & (gripper_pose_2[:, -2] > gripper_pose_1[:, -2]))
+            # good_approach_mask_2 = good_approach_mask_2 | (
+            #         no_collision_mask_2 & no_collision_mask_1 & (gripper_pose_2[:, -2] > gripper_pose_1[:, -2]))
 
             '''superiority-rank based sampling of poses and associated collision scores'''
-            griper_collision_classifier=torch.where(bad_normal_approach_mask[:,None],griper_collision_classifier_2,griper_collision_classifier_1)
+            griper_collision_classifier=torch.where(good_approach_mask_2[:,None],griper_collision_classifier_2,griper_collision_classifier_1)
 
-            gripper_pose=torch.where(bad_normal_approach_mask[:,None],gripper_pose_2,gripper_pose_1)
+            gripper_pose=torch.where(good_approach_mask_2[:,None],gripper_pose_2,gripper_pose_1)
 
             '''reshape'''
             gripper_pose = reshape_for_layer_norm(gripper_pose, camera=camera, reverse=True)
