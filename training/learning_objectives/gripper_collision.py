@@ -74,7 +74,11 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,bin_m
         '''check collision'''
         T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
         detect_collision,pred_firmness_val,pred_quality,collision_val = gripper_firmness_check(T_d,width, pc[~bin_mask], with_allowance=True, visualize=visualize,check_floor_collision=False )
-        pred_firmness_val*=pred_quality if pred_quality>0.5 else 0.
+        # print(f'-------------------------{pred_firmness_val},----------{pred_quality}')
+        # pred_firmness_val*=1 if pred_quality>0.5 else 0.
+        pred_firmness_val*=pred_quality
+
+        if distance<0.001:pred_firmness_val*=0
         if not detect_collision:
             detect_collision,_,_,collision_val = gripper_firmness_check(T_d,width, pc[bin_mask], with_allowance=True, visualize=visualize,check_floor_collision=True,floor_elevation_=floor_elevation )
 
@@ -93,8 +97,10 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,bin_m
                                                                                     with_allowance=True,
                                                                                     visualize=visualize,
                                                                                     check_floor_collision=False)
-        ref_firmness_val*=ref_quality if ref_quality>0.5 else 0.
+        # ref_firmness_val*=1 if ref_quality>0.5 else 0.
+        ref_firmness_val*=ref_quality
 
+        if distance_label < 0.001: ref_firmness_val *= 0
         if not ref_detect_collision:
             ref_detect_collision, _,_, ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc[bin_mask], with_allowance=True,
                                                                         visualize=visualize, check_floor_collision=True,

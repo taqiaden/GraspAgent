@@ -277,7 +277,7 @@ class TrainGraspGAN:
 
         return gan
 
-    def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.2, exponent=2.0):
+    def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.15, exponent=2.0):
         '''Elevation-based Augmentation'''
         shift_entities_mask = objects_mask & (original_depth > 0.0001)
         new_depth = original_depth.clone().detach()

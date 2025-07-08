@@ -10,6 +10,8 @@ config = ConfigParser()
 config_file_path='Configurations/config.ini'
 counters_file_path='Configurations/counters.ini'
 
+config_folder='Configurations/'
+
 def creat_section(section,config_file=config_file_path):
     config.read(config_file)
     config.add_section(section)

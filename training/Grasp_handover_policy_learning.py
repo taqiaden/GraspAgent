@@ -233,7 +233,7 @@ class TrainPolicyNet:
             bin_mask = None
         return bin_mask
 
-    def simulate_elevation_variations(self, original_depth, objects_mask=None, max_elevation=0.2, exponent=2.0):
+    def simulate_elevation_variations(self, original_depth, objects_mask=None, max_elevation=0.15, exponent=2.0):
         '''Elevation-based Augmentation'''
         if objects_mask is None:
             shift_entities_mask = (original_depth > 0.0001)
@@ -529,7 +529,7 @@ if __name__ == "__main__":
     train_action_net.initialize_model()
     wait = wi('Begin synchronized trianing')
     while True:
-        try:
+        # try:
             new_buffer, new_data_tracker = train_action_net.synchronize_buffer()
             for i in range(2):
                 train_action_net.train(max_size=10,batch_size=2)
@@ -543,5 +543,5 @@ if __name__ == "__main__":
             train_action_net.view_result()
             train_action_net.clear()
 
-        except Exception as e:
-            print(str(e))
+        # except Exception as e:
+        #     print(str(e))

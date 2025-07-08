@@ -32,17 +32,14 @@ from visualiztion import view_features, plt_features, dense_grasps_visualization
 
 detach_backbone = False
 lock = FileLock("file.lock")
-max_samples_per_image=5
+max_samples_per_image=1
 
 max_n = 100
-batch_size = 2
+batch_size = 4
 # max_batch_size = 2
+G_batch_size=4
 
-freeze_approach=True
-freeze_beta=True
-freeze_distance=True
-freeze_width=False
-
+w2=0
 
 training_buffer = online_data2()
 training_buffer.main_modality = training_buffer.depth
@@ -56,10 +53,17 @@ cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
 cache_name = 'normals'
 discrepancy_distance = 1.0
 
-collision_expo=1.0
-firmness_expo=1.0
+collision_expo=2.0
+firmness_expo=2.0
+generator_expo=1.0
 
 import torch
+
+def log_contrastive_loss(positive_score, negative_score, margin=1.0, tau=1.0):
+    return torch.clamp(negative_score-positive_score+margin,0.)
+    # if positive_score>negative_score+margin: return -torch.log(torch.sigmoid(positive_score/tau-(negative_score+margin)/tau))*0.0
+    # return -torch.log(torch.sigmoid(positive_score/tau-(negative_score+margin)/tau))#+np.log(0.5)
+
 
 def get_normal_direction(pc, file_index):
     file_path = cache_dir + cache_name + '/' + file_index + '.pkl'
@@ -79,63 +83,91 @@ def get_normal_direction(pc, file_index):
     normals = torch.from_numpy(normals).to('cuda')
     return normals
 
-def firmness_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction_uniqness):
-    curc_ = (torch.clamp(label_ - prediction_ - 1., 0.) )
-    if curc_.item() > 0.0:
-        print(Fore.RED,
-              f'Warning: discriminate surpass the generator: label{label_.item()}, pred{prediction_.item()}, c_loss={curc_.item()}',
-              Fore.RESET)
-        loss_terms_counters[0] += 1
-        return curc_, True, loss_terms_counters,True
+def firmness_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction_uniqness,dist_factor):
+    # curc_ = (torch.clamp(label_ - prediction_ - 1., 0.) )
+    # if curc_.item() > 0.0:
+    #     print(Fore.RED,
+    #           f'Warning: discriminate surpass the generator: label{label_.item()}, pred{prediction_.item()}, c_loss={curc_.item()}',
+    #           Fore.RESET)
+    #     loss_terms_counters[0] += 1
+    #     return curc_, True, loss_terms_counters,True
 
-    if sum(s_) == 0 and sum(c_) == 0 :
+    if sum(s_) == 0 and sum(c_) == 0 and f_[0]>0 and f_[1]>0:
         '''improve firmness'''
         # print(f'f____{sum(c_)} , {sum(s_) }')
-        if (f_[1] - f_[0] > 0.) and q_[1]>0.5  and loss_terms_counters[3]<batch_size:
+        if (f_[1] - f_[0] > 0.) and q_[1]>0.5  :
             margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
-            loss_terms_counters[3] += 1.0
-            return (torch.clamp(prediction_ - label_ , 0.) ** firmness_expo) , True, loss_terms_counters,False
-        elif (f_[0]-f_[1] > 0.) and q_[0]>0.5 and loss_terms_counters[4] < batch_size and prediction_uniqness>np.random.rand() :
-            margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
-            loss_terms_counters[4] += 1.0
-            return (torch.clamp(label_-prediction_  , 0.) ** firmness_expo) , True, loss_terms_counters,False
+
+
+            margin=margin*dist_factor*(f_[1]**0.3)
+            print('---------------firm margin=',margin)
+            loss_terms_counters[3] += 1
+            return (log_contrastive_loss(positive_score=label_,negative_score=prediction_,margin=0) ** firmness_expo) , True, loss_terms_counters
+        # elif (f_[0]-f_[1] > 0.) and q_[0]>0.5  and prediction_uniqness>np.random.rand() :
+        #     margin = abs(f_[1] - f_[0])/(f_[1] + f_[0])
+        #     margin=margin*dist_factor*(f_[0]**0.3)
+        #     loss_terms_counters[4] += 1
+        #
+        #     return margin*w2*(log_contrastive_loss(positive_score=prediction_,negative_score=label_,margin=margin) ** firmness_expo) , True, loss_terms_counters
         else:
-            return 0.0, False, loss_terms_counters,False
+            return 0.0, False, loss_terms_counters
     else:
-        return 0.0, False, loss_terms_counters,False
+        return 0.0, False, loss_terms_counters
 
-def collision_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction_uniqness,ref_dist,ref_width):
-    curc_= (torch.clamp( label_-prediction_-1. , 0.) )
-    if curc_.item()>0.0:
-        print(Fore.RED,f'Warning: discriminate surpass the generator: label{label_.item()}, pred{prediction_.item()}, c_loss={curc_.item()}',Fore.RESET)
-        loss_terms_counters[0] += 1
-        return curc_,True, loss_terms_counters,True
+def collision_loss(c_,s_,f_,q_,prediction_,label_,loss_terms_counters,prediction_uniqness,ref_dist,ref_width,dist_factor):
 
-    if  sum(s_) > 0:
-        if  s_[1] == 0 and c_[1]==0 and q_[1]>0.5 and ref_dist>0.1 and ref_width<0.9 and (loss_terms_counters[0]+loss_terms_counters[1])<batch_size:
+    if  sum(s_) > 0 :
+        if  s_[1] == 0 and c_[1]==0 and f_[1]>0 and q_[1]>0.5 :
             # margin=s_[0]+f_[1]+1
+            # print(f'1-------{(torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo)}, {prediction_}, {label_}, {discrepancy_distance}, {collision_expo}')
+
+            margin=dist_factor * (f_[1] ** 0.3)
             loss_terms_counters[0]+=1
-            return (torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
+            print('---------------scope margin=',margin)
+            if label_-prediction_>1:
+                print('*********************************')
+                return (log_contrastive_loss(positive_score=prediction_, negative_score=label_, margin= 1)**collision_expo), True,loss_terms_counters
+            return (log_contrastive_loss(positive_score=label_, negative_score=prediction_,
+                                 margin= 1)**collision_expo), True,loss_terms_counters
+            # return (prediction_ - label_ + discrepancy_distance*2.)**collision_expo, True, loss_terms_counters, False
+
         # elif  s_[0] == 0 and c_[0]==0 and f_[0]>0. and prediction_uniqness>np.random.rand() :
         #     margin=s_[1]+f_[0]+1
         #     loss_terms_counters[0]+=1
         #     return (torch.clamp(label_-prediction_ +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters
         else:
-            return 0.0, False,loss_terms_counters,False
+            return 0.0, False,loss_terms_counters
     elif  sum(s_) == 0 and sum(c_)>0:
-        if  c_[1]==0 and f_[1]>0. and q_[1]>0.5 and (loss_terms_counters[0]+loss_terms_counters[1])<batch_size:
+        if  c_[1]==0 and f_[1]>0. and q_[1]>0.5 :
             # margin = f_[1]+c_[0]
-            loss_terms_counters[1] += 1
-            return (torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
-        elif  c_[0]==0 and f_[0]>0. and q_[0]>0.5 and loss_terms_counters[2]< batch_size and prediction_uniqness>np.random.rand() :
-            # margin = f_[1]+c_[0]
-            loss_terms_counters[2] += 1
-            return (torch.clamp(label_-prediction_  +discrepancy_distance, 0.)**collision_expo), True,loss_terms_counters,False
-        else:
-            return 0.0, False,loss_terms_counters,False
-    else:
-        return 0.0, False, loss_terms_counters,False
+            # print(f'2-------{(torch.clamp(prediction_ - label_ +discrepancy_distance, 0.)**collision_expo)}, {prediction_}, {label_}, {discrepancy_distance}, {collision_expo}')
 
+            # if label_-prediction_>1: return (torch.clamp( label_-prediction_-discrepancy_distance*dist_factor*(f_[1]**0.3) , 0.) )**collision_expo, True,loss_terms_counters
+            margin = dist_factor * (f_[1] ** 0.3)
+            print('---------------col margin=',margin)
+            loss_terms_counters[1] += 1
+
+            if label_-prediction_>1:
+                print('*********************************')
+                return (log_contrastive_loss(positive_score=prediction_, negative_score=label_, margin= 1)**collision_expo), True,loss_terms_counters
+            return (log_contrastive_loss(positive_score=label_, negative_score=prediction_,
+                                 margin= 1)**collision_expo), True,loss_terms_counters
+            # return (prediction_ - label_ + discrepancy_distance)**collision_expo, True, loss_terms_counters, False
+        # elif  c_[0]==0 and f_[0]>0. and q_[0]>0.5 and prediction_uniqness>np.random.rand() :
+        #     # margin = f_[1]+c_[0]
+        #     # print(f'3-------{(torch.clamp(label_-prediction_  +discrepancy_distance, 0.)**collision_expo)}, {prediction_}, {label_}, {discrepancy_distance}, {collision_expo}')
+        #
+        #     # if label_-prediction_>1: return (torch.clamp( label_-prediction_-discrepancy_distance *dist_factor*(f_[0]**0.3), 0.) )**collision_expo, True,loss_terms_counters
+        #     margin = dist_factor * (f_[0] ** 0.3)
+        #     loss_terms_counters[2] += 1
+        #
+        #     return margin*w2*(log_contrastive_loss(positive_score=prediction_, negative_score=label_,
+        #                          margin= margin)**collision_expo), True,loss_terms_counters
+        #     # return w2*(label_-prediction_ + discrepancy_distance)**collision_expo, True, loss_terms_counters, False
+        else:
+            return 0.0, False,loss_terms_counters
+    else:
+        return 0.0, False, loss_terms_counters
 
 class TrainGraspGAN:
     def __init__(self, n_samples=None, epochs=1, learning_rate=5e-5):
@@ -146,7 +178,7 @@ class TrainGraspGAN:
 
         '''model wrapper'''
         self.gan = self.prepare_model_wrapper()
-        self.ref_generator = self.initialize_ref_generator()
+        # self.ref_generator = self.initialize_ref_generator()
         self.data_loader = None
 
         '''Moving rates'''
@@ -173,6 +205,12 @@ class TrainGraspGAN:
         self.load_action_model()
         # self.load_grasp_policy()
 
+        self.freeze_approach = False
+        self.freeze_beta = False
+        self.freeze_distance = False
+        self.freeze_width = False
+
+
     def load_action_model(self):
         try:
             '''load  models'''
@@ -191,13 +229,13 @@ class TrainGraspGAN:
     #     except Exception as e:
     #         print(str(e))
 
-    def initialize_ref_generator(self):
-        model_wrapper = ModelWrapper(model=copy.deepcopy(self.gan.generator), module_key='ref_generator')
-        model_wrapper.optimizer = torch.optim.Adam(model_wrapper.model.parameters(), lr=self.learning_rate,
-                                                   betas=(0.5, 0.999), eps=1e-8)
-        # model_wrapper.optimizer = torch.optim.SGD(model_wrapper.model.parameters(), lr=self.learning_rate,momentum=0.9)
-        model_wrapper.model.train(True)
-        return model_wrapper
+    # def initialize_ref_generator(self):
+    #     model_wrapper = ModelWrapper(model=copy.deepcopy(self.gan.generator), module_key='ref_generator')
+    #     model_wrapper.optimizer = torch.optim.Adam(model_wrapper.model.parameters(), lr=self.learning_rate,
+    #                                                betas=(0.5, 0.999), eps=1e-8)
+    #     # model_wrapper.optimizer = torch.optim.SGD(model_wrapper.model.parameters(), lr=self.learning_rate,momentum=0.9)
+    #     model_wrapper.model.train(True)
+    #     return model_wrapper
 
     def generate_random_beta_dist_widh(self, size):
         sampled_beta = (torch.rand((size, 2), device='cuda') - 0.5) * 2
@@ -205,6 +243,10 @@ class TrainGraspGAN:
 
         sampled_dist = torch.distributions.LogNormal(loc=-1.337, scale=0.791)
         sampled_dist = sampled_dist.sample((size, 1)).cuda()#*(0.1+0.9*(1-self.relative_sampling_timing.val))
+
+        # sampled_dist/=5
+
+        # sampled*=1-self.an
 
         # sampled_dist = torch.rand((size, 1), device='cuda') ** 5
         # sampled_dist[sampled_dist > 0.7] /= 2
@@ -218,68 +260,123 @@ class TrainGraspGAN:
 
         return sampled_pose
 
-    def ref_reg_loss(self,gripper_pose_ref2,objects_mask):
-        width_scope_loss = (torch.clamp(gripper_pose_ref2[:, 6:7][objects_mask] - 1, min=0.) ** 2).mean()
-        dist_scope_loss = (torch.clamp(-gripper_pose_ref2[:, 5:6][objects_mask] + 0.01, min=0.) ** 2).mean()
-        width_scope_loss += (torch.clamp(-gripper_pose_ref2[:, 6:7][objects_mask], min=0.) ** 2).mean()
-        dist_scope_loss += (torch.clamp(gripper_pose_ref2[:, 5:6][objects_mask] - 1, min=0.) ** 2).mean()
+    def generate_random_approach(self, size):
+        sampled_approach = torch.rand((size, 3), device='cuda')
+        sampled_approach[:,2]=1.0-(sampled_approach[:,2]**2.0)
+        sampled_approach[:, 0:2] -=0.5
+        sampled_approach[:, 0:2] *=2.0
+        sampled_approach[:, 0:2] *=torch.abs(sampled_approach[:, 0:2])
+
+        sampled_approach = F.normalize(sampled_approach, dim=1)
 
 
-        random_beta_dist_width=self.generate_random_beta_dist_widh(gripper_pose_ref2.size(0))
-        noise=(torch.abs(gripper_pose_ref2[:,3:][objects_mask]-random_beta_dist_width[objects_mask])**2).mean()
+
+        return sampled_approach
+
+    # def step_ref_generator_training(self, depth, mask, gripper_pose, objects_mask):
+    #     assert objects_mask.sum() > 0
+    #     approach_direction = gripper_pose[:, 0:3, ...].detach().clone()
+    #
+    #     self.ref_generator.model.zero_grad(set_to_none=True)
+    #
+    #     gripper_pose_ref = self.ref_generator.model(
+    #         depth.clone(), approach_direction, detach_backbone=True)
+    #
+    #     gripper_pose_ref2 = gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :][mask]
+    #
+    #     assert not torch.isnan(gripper_pose_ref2).any(),f'{torch.argwhere(torch.isnan(gripper_pose_ref2))},---{torch.argwhere(torch.isnan(gripper_pose))}'
+    #     assert not torch.isnan(gripper_pose).any(),f'pred_pose: {torch.argwhere(torch.isnan(gripper_pose))}'
+    #
+    #     # gripper_pose2 = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask].detach().clone()
+    #
+    #     # models_separation = torch.abs(
+    #     #     gripper_pose_ref2[:, 3:][objects_mask] - gripper_pose2[:, 3:][objects_mask]).mean()
+    #     # print(f'models_separation={models_separation}')
+    #
+    #     # if (self.sample_from_latent and self.moving_out_of_scope.val>0.01):
+    #
+    #     p=max((1-self.moving_anneling_factor.val)**2,self.moving_collision_rate.val,self.moving_out_of_scope.val)
+    #     # p=1-self.moving_anneling_factor.val
+    #     # if p>np.random.rand() or self.sample_from_latent :
+    #     beta_dist_width=self.generate_random_beta_dist_widh(gripper_pose_ref[:, 0, ...].numel())
+    #     beta_dist_width = reshape_for_layer_norm(beta_dist_width, camera=camera, reverse=True)
+    #     approach_delta=self.generate_random_approach(gripper_pose_ref[:, 0, ...].numel())
+    #     approach_delta = reshape_for_layer_norm(approach_delta, camera=camera, reverse=True)
+    #
+    #     # approach_direction=approach_direction+0.1*approach_delta
+    #     # approach_direction=F.normalize(approach_direction, dim=1)
+    #     sampled_pose=torch.cat([approach_direction,beta_dist_width],dim=1)
+    #     print(Fore.CYAN,f'Random label, p={p}',Fore.RESET)
+    #
+    #     # return False, sampled_pose
+    #
+    #     # gripper_pose_ref[:, 3:, ...] = sampled_pose[:, 3:, ...].detach().clone() * p + (1 - p) * gripper_pose_ref[:, 3:, ...]
+    #     # gripper_pose_ref[:, 3:5, ...] = F.normalize(gripper_pose_ref[:, 3:5, ...], dim=1)
+    #     # gripper_pose_ref[:, 5:, ...] = torch.clamp(gripper_pose_ref[:, 5:, ...], 0.05, 0.99)
+    #
+    #     shuffle_mask=(torch.rand_like(gripper_pose_ref[:,0:1,...])<p)
+    #
+    #     sampled_pose=torch.where(shuffle_mask,gripper_pose_ref,shuffle_mask)
+    #     # sampled_pose=sampled_pose*shuffle_mask+(1-shuffle_mask)*gripper_pose_ref#.detach().clone()
+    #     # sampled_pose[:, 3:5, ...]=F.normalize(sampled_pose[:, 3:5, ...], dim=1)
+    #     # sampled_pose[:, 5:, ...]=torch.clamp(sampled_pose[:, 5:, ...],0.05,0.99)
+    #
+    #     return False, sampled_pose
 
 
-        beta_entropy = self.soft_entropy_loss(gripper_pose_ref2[:, 3:4][objects_mask], bins=36, sigma=0.1, min_val=-1,
-                                              max_val=1) ** 2
-        beta_entropy += self.soft_entropy_loss(gripper_pose_ref2[:, 4:5][objects_mask], bins=36, sigma=0.1, min_val=-1,
-                                               max_val=1) ** 2
-
-        beta_entropy = torch.tensor(0., device=gripper_pose_ref2.device) if torch.isnan(beta_entropy) else beta_entropy
-
-
-        loss =  width_scope_loss * 10 + dist_scope_loss * 10  + beta_entropy +noise
-
-        return loss
-
-    def step_ref_generator_training(self, depth, mask, gripper_pose, objects_mask):
-
+    def pose_noisfication(self, gripper_pose, objects_mask,pc,bin_mask,altered_objects_elevation,mask):
         assert objects_mask.sum() > 0
-        approach_direction = gripper_pose[:, 0:3, ...].detach().clone()
 
-        self.ref_generator.model.zero_grad(set_to_none=True)
+        ref_pose=gripper_pose.detach().clone()
+        approach_direction = ref_pose[:, 0:3, ...]
 
-        gripper_pose_ref = self.ref_generator.model(
-            depth.clone(), approach_direction, detach_backbone=True)
+        ref_pose[:, 5:, ...]=torch.clamp(ref_pose[:, 5:, ...],0.1,0.99)
 
-        gripper_pose_ref2 = gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :][mask]
 
-        assert not torch.isnan(gripper_pose_ref2).any(),f'{torch.argwhere(torch.isnan(gripper_pose_ref2))},---{torch.argwhere(torch.isnan(gripper_pose))}'
-        assert not torch.isnan(gripper_pose).any(),f'pred_pose: {torch.argwhere(torch.isnan(gripper_pose))}'
 
-        # gripper_pose2 = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask].detach().clone()
+        # p=max((1-self.moving_anneling_factor.val)**2,self.moving_collision_rate.val,self.moving_out_of_scope.val)
+        p=max(self.moving_collision_rate.val,self.moving_out_of_scope.val,1-self.superior_A_model_moving_rate.val,(1-self.moving_anneling_factor.val)/2)
 
-        # models_separation = torch.abs(
-        #     gripper_pose_ref2[:, 3:][objects_mask] - gripper_pose2[:, 3:][objects_mask]).mean()
-        # print(f'models_separation={models_separation}')
+        if not altered_objects_elevation:
+            ref_pose=ref_pose.permute(0, 2, 3, 1)
+            ref_pose[0,:,:,-2][mask]*=(1-p)+p*(torch.abs(torch.from_numpy(pc[:, -1] - pc[~bin_mask][:, -1].min()).cuda()*10)**0.3)
+            ref_pose=ref_pose.permute(0, 3, 1, 2)
 
-        # if (self.sample_from_latent and self.moving_out_of_scope.val>0.01):
-        reg_loss=self.ref_reg_loss(gripper_pose_ref2, objects_mask)
+        # p=1-self.moving_anneling_factor.val
+        # if p>np.random.rand() or self.sample_from_latent :
+        beta_dist_width=self.generate_random_beta_dist_widh(ref_pose[:, 0, ...].numel())
+        beta_dist_width = reshape_for_layer_norm(beta_dist_width, camera=camera, reverse=True)
+        # approach_delta=self.generate_random_approach(ref_pose[:, 0, ...].numel())
+        # approach_delta = reshape_for_layer_norm(approach_delta, camera=camera, reverse=True)
 
-        p=max((1-self.moving_anneling_factor.val)**2,self.moving_collision_rate.val,self.moving_out_of_scope.val)
-        if p>np.random.rand() or self.sample_from_latent :
-            beta_dist_width=self.generate_random_beta_dist_widh(gripper_pose[:, 0, ...].numel())
-            beta_dist_width = reshape_for_layer_norm(beta_dist_width, camera=camera, reverse=True)
-            sampled_pose=torch.cat([approach_direction,beta_dist_width],dim=1)
-            print(Fore.CYAN,f'Random label, p={p}',Fore.RESET)
+        # approach_direction=approach_direction+0.1*approach_delta
+        # approach_direction=F.normalize(approach_direction, dim=1)
+        sampled_pose=torch.cat([approach_direction,beta_dist_width],dim=1)
+        print(Fore.CYAN,f'noisefication factor p={p}',Fore.RESET)
 
-            # sampled_pose[:,3:,...]=sampled_pose[:,3:,...]*p+(1-p)*gripper_pose[:,3:,...].detach().clone()
-            # sampled_pose[:, 3:5, ...]=F.normalize(sampled_pose[:, 3:5, ...], dim=1)
-            # sampled_pose[:, 5:, ...]=torch.clamp(sampled_pose[:, 5:, ...],0.,1)
-            return True, sampled_pose,reg_loss
+        # return False, sampled_pose
+        # sampled_pose[:, 5:6, ...]*=(1-p*torch.rand_like(sampled_pose[:, 5:6, ...]))
+        # sampled_pose[:, 6:7, ...] = (1 - p)*sampled_pose[:, 6:7, ...]+p
+        sampling_ratios= (2*(1/(1+torch.rand_like(ref_pose[:, 3:, ...]*(1-p))/(torch.rand_like(ref_pose[:, 3:, ...])*p))))**2
 
-        print(Fore.CYAN,f'Second G label, p={p}',Fore.RESET)
+        sampled_pose[:, 3:, ...] = sampled_pose[:, 3:, ...].detach().clone() * sampling_ratios + (1 - sampling_ratios) * ref_pose[:, 3:, ...]
+        # ref_pose[:, 5:, ...] = sampled_pose[:, 5:, ...].detach().clone() * 0.5 + 0.5 * ref_pose[:, 5:, ...]
 
-        return False, gripper_pose_ref,reg_loss
+        # ref_pose[:, 3:5, ...] = F.normalize(ref_pose[:, 3:5, ...], dim=1)
+        # ref_pose[:, 5:, ...] = torch.clamp(ref_pose[:, 5:, ...], 0.01, 0.99)
+        #
+        # shuffle_mask=(torch.rand_like(ref_pose[:,0:1,...])<p)
+        #
+        # sampled_pose[:, 3:5, ...]=torch.where(shuffle_mask,ref_pose[:, 3:5, ...],sampled_pose[:, 3:5, ...])
+        #
+        sampled_pose[:, 3:5, ...]=F.normalize(sampled_pose[:, 3:5, ...], dim=1)
+        sampled_pose[:, 5:, ...]=torch.clamp(sampled_pose[:, 5:, ...],0.1,0.99)
+
+        return sampled_pose
+
+        # print(Fore.CYAN,f'Second G label, p={p}',Fore.RESET)
+        #
+        # return False, gripper_pose_ref
         # else:
         #     beta_dist_width = self.generate_random_beta_dist_widh(gripper_pose[:, 0, ...].numel())
         #     beta_dist_width = reshape_for_layer_norm(beta_dist_width, camera=camera, reverse=True)
@@ -302,7 +399,7 @@ class TrainGraspGAN:
                                                    initial_val=1.)
         self.superior_A_model_moving_rate=MovingRate(N_gripper_sampling_module_key + '_superior_A_model', decay_rate=0.01,
                                                    initial_val=0.)
-        self.moving_anneling_factor = MovingRate(N_gripper_sampling_module_key + '_anneling_factor', decay_rate=0.01,
+        self.moving_anneling_factor = MovingRate(N_gripper_sampling_module_key + '_anneling_factor', decay_rate=0.1,
                                                  initial_val=0.)
 
 
@@ -338,13 +435,13 @@ class TrainGraspGAN:
         gan = GANWrapper(N_gripper_sampling_module_key, G, D)
         gan.ini_models(train=True)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
-        gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
-        gan.critic_adam_optimizer(learning_rate=self.learning_rate,beta1=0.5,weight_decay_=0.0)
-        # gan.generator_adam_optimizer(learning_rate=self.learning_rate*10, beta1=0.5,beta2=0.99)
+        gan.generator_sgd_optimizer(learning_rate=self.learning_rate,momentum=0.0)
+        gan.critic_adam_optimizer(learning_rate=self.learning_rate,beta1=0.9)
+        # gan.generator_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
 
         return gan
 
-    def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.2, exponent=2.0):
+    def simulate_elevation_variations(self, original_depth,objects_mask, max_elevation=0.15, exponent=2.0):
         '''Elevation-based Augmentation'''
         shift_entities_mask = objects_mask & (original_depth > 0.0001) if np.random.random()>0.5 else (original_depth > 0.0001)
         new_depth = original_depth.clone().detach()
@@ -364,7 +461,7 @@ class TrainGraspGAN:
 
 
     def step_discriminator_learning(self, depth, pc, mask, bin_mask, gripper_pose, gripper_pose_ref,
-                                    is_noise_label,altered_objects_elevation,gamma_col,valid_pose_index,floor_elevation):
+                                    altered_objects_elevation,gamma_col,valid_pose_index,floor_elevation):
         '''self supervised critic learning'''
         with torch.no_grad():
             generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
@@ -379,27 +476,49 @@ class TrainGraspGAN:
         gen_scores_ = critic_score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
         ref_scores_ = critic_score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
 
+        selection_mask = torch.from_numpy(~bin_mask).cuda()
+
+        # score_delta_mean=torch.abs(ref_scores_-gen_scores_)[selection_mask].mean().item()
+        # print(f'score_delta_mean={score_delta_mean}')
+
         if self.sampling_centroid is None:
             selection_p = torch.rand_like(ref_gripper_pose2[:,0])
         else:
-            gamma_dive = (1.001 - F.cosine_similarity(ref_gripper_pose2.detach().clone(),
-                                               self.sampling_centroid[None, :], dim=-1))/2
-            gamma_dive *= ((1.001 - F.cosine_similarity(gripper_pose2.detach().clone(),
+            ref_gripper_pose2_=ref_gripper_pose2.detach().clone()
+            ref_gripper_pose2_[:,5:]=torch.clamp(ref_gripper_pose2_[:,5:],0.,1.)
+            gripper_pose2_=gripper_pose2.detach().clone()
+            gripper_pose2_[:,5:]=torch.clamp(gripper_pose2_[:,5:],0.,1.)
+
+            def norm_(gamma,expo_=1.0):
+                gamma = (gamma - gamma.min()) / (
+                            gamma.max() - gamma.min())
+                gamma = gamma ** expo_
+                return gamma
+
+            gamma_dive = norm_((1.001 - F.cosine_similarity(ref_gripper_pose2_,
                                                self.sampling_centroid[None, :], dim=-1))/2)
-            gamma_dive *= ((1.001 - F.cosine_similarity(gripper_pose2.detach().clone(),
-                                                                    ref_gripper_pose2.detach().clone(), dim=-1)) / 2)
-            gamma_firmness=torch.clamp(ref_gripper_pose2[:,-2].detach().clone(),0.001,0.99)**0.3
+
+            # gamma_closest=((1.001 + F.cosine_similarity(gripper_pose2_[:,3:5],
+            #                                                         ref_gripper_pose2_[:,3:5], dim=-1)) / 2)
+            # gamma_dive *= 1-norm_((1.001 - F.cosine_similarity(gripper_pose2_,
+            #                                    self.sampling_centroid[None, :], dim=-1))/2)
+            # gamma_dive *= ((1.001 - F.cosine_similarity(gripper_pose2.detach().clone(),
+            #                                                         ref_gripper_pose2.detach().clone(), dim=-1)) / 2)
+            gamma_firmness=torch.clamp(ref_gripper_pose2_[:,-2].detach().clone(),0.001,0.99)**0.3
             gamma_rand=torch.rand_like(gamma_dive)
 
-            # selection_p=(gamma_dive*gamma_pairwise_dist*gamma_rand*gamma_firmness*gamma_col)**(1/6)
+            gamma_col=norm_(gamma_col)
+            gamma_dive=norm_(gamma_dive)
+            # gamma_closest=norm_(gamma_closest)
+
+            # gamma_scores_var=norm_((F.tanh(ref_scores_-gen_scores_)+1)/2,2.0)
 
             if not altered_objects_elevation:
-                d_gamma=1-torch.abs(torch.from_numpy(pc[:,-1]-pc[~bin_mask][:,-1].min()).cuda())
-                d_gamma=(d_gamma-d_gamma.min())/(d_gamma.max()-d_gamma.min())
-                d_gamma=d_gamma**2
-                selection_p = (gamma_dive *   gamma_rand * d_gamma) ** (1 / 6)
+                d_gamma=norm_(1-torch.abs(torch.from_numpy(pc[:,-1]-pc[~bin_mask][:,-1].min()).cuda()),2.0)
+
+                selection_p = (gamma_dive *   gamma_rand * d_gamma) ** (1 / 5)
             else:
-                selection_p = (gamma_dive *   gamma_rand *gamma_firmness) ** (1 / 5)
+                selection_p = (gamma_dive *   gamma_rand *gamma_firmness) ** (1 / 4)
 
             assert not torch.isnan(selection_p).any(), f'selection_p: {ref_gripper_pose2}'
 
@@ -408,7 +527,6 @@ class TrainGraspGAN:
             #     d_gamma=d_gamma/d_gamma[bin_mask <= 0.5].max()
             #     selection_p*=(d_gamma)
 
-        selection_mask = torch.from_numpy(~bin_mask).cuda()
         n = int(min(max_n, selection_mask.sum()))
 
         loss_terms_counters = [0, 0, 0, 0, 0]
@@ -431,60 +549,73 @@ class TrainGraspGAN:
             prediction_ = gen_scores_[target_index]
             c_, s_, f_,q_ = evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, bin_mask,visualize=False,floor_elevation=floor_elevation)
 
-            if (s_[0] == 0) and (c_[0] == 0 or (s_[1] == 0 and c_[1] == 0) ):
+            if (s_[0] == 0) and ((c_[0] == 0 and f_[0]>0)or (s_[1] == 0 and c_[1] == 0 and f_[1]>0) ):
                 self.moving_collision_rate.update(int(c_[0] > 0))
             if sum(s_) == 0 and sum(c_) == 0:
                 self.moving_firmness.update(int(f_[0] > f_[1]))
-            self.moving_out_of_scope.update(int(s_[0] > 0))
 
-            prediction_uniqness=  ((1 - F.cosine_similarity(target_generated_pose.detach().clone()[None, :],
-                                                                            self.sampling_centroid[None, :], dim=-1)) / 2).item()**0.5    if      self.sampling_centroid is not None else 0.
+            if s_[1] == 0 and c_[1] == 0 and f_[1]>0:
+                self.moving_out_of_scope.update(int(s_[0] > 0))
+
+            # prediction_uniqness=  ((1 - F.cosine_similarity(target_generated_pose.detach().clone()[None, :],
+            #                                                                 self.sampling_centroid[None, :], dim=-1)) / 2).item()**0.5    if      self.sampling_centroid is not None else 0.
+            prediction_uniqness=1.0
+            dist_factor=((1 + F.cosine_similarity(target_generated_pose.detach().clone()[None, 3:5],
+                                                                            target_generated_pose.detach().clone()[None, 3:5], dim=-1)) / 2).item()
+            # dist_factor=0.1+0.9*dist_factor
 
             ref_width=target_ref_pose[-1]
             ref_dist=target_ref_pose[-2]
-            if (s_[0] > 0. or c_[0] > 0.) and s_[1] == 0 and c_[1] == 0:
-                if not is_noise_label: self.superior_A_model_moving_rate.update(0.)
-            elif (s_[1] > 0. or c_[1] > 0.) and s_[0] == 0 and c_[0] == 0:
-                if not is_noise_label: self.superior_A_model_moving_rate.update(1.0)
+            if (s_[0] > 0. or c_[0] > 0. or f_[0]==0) and s_[1] == 0 and c_[1] == 0 and f_[1]>0:
+                self.superior_A_model_moving_rate.update(0.)
+            elif (s_[1] > 0. or c_[1] > 0. or f_[1]==0) and s_[0] == 0 and c_[0] == 0 and f_[0]>0:
+                self.superior_A_model_moving_rate.update(1.0)
             counted=False
-            if col_loss_counter<(batch_size*2):
-                l_c, counted, loss_terms_counters,is_curcl_loss = collision_loss(c_, s_, f_,q_, prediction_,
-                                                                   label_, loss_terms_counters,prediction_uniqness,ref_dist,ref_width)
+            l_c, counted, loss_terms_counters = collision_loss(c_, s_, f_,q_, prediction_,
+                                                               label_, loss_terms_counters,prediction_uniqness,ref_dist,ref_width,dist_factor)
+
+
             if counted:
                 l_collision += l_c
                 col_loss_counter+=1
 
-            if not counted and firm_loss_counter<(batch_size*2):
+                if t == 0 and valid_pose_index is not None:
+                    print(Fore.GREEN)
+
+                print(target_ref_pose.detach().cpu()[3:], '--', target_generated_pose.detach().cpu()[3:], 'c--', c_, 's--', s_,
+                      'f--', f_,'q--',q_)
+
+                if t == 0 and valid_pose_index is not None:
+                    print(Fore.RESET)
+
+                t=1
+
+
+            if not counted:
                 '''firmness loss'''
-                l_f, counted, loss_terms_counters,is_curcl_loss = firmness_loss(c_, s_, f_,q_, prediction_,
-                                                                  label_, loss_terms_counters,prediction_uniqness)
+                l_f, counted, loss_terms_counters = firmness_loss(c_, s_, f_,q_, prediction_,
+                                                                  label_, loss_terms_counters,prediction_uniqness,dist_factor)
                 if counted:
                     # print(target_ref_pose[3:].detach(), '--', target_generated_pose[3:].detach(), 'c--', c_, 's--', s_,
                     #       'f--', f_)
                     l_firmness += l_f#*0.3
                     firm_loss_counter+=1
+                    print(Fore.LIGHTGREEN_EX,target_ref_pose.detach().cpu()[3:], '--', target_generated_pose.detach().cpu()[3:], 'c--', c_,
+                          's--', s_,
+                          'f--', f_, 'q--', q_,Fore.RESET)
+
+                    t=1
 
             if counted:
-                if t==0 and valid_pose_index is not None:
-                    print(Fore.GREEN)
-                    print(target_ref_pose.detach().cpu(), '--', target_generated_pose.detach().cpu(), 'c--', c_, 's--', s_,
-                          'f--', f_,Fore.RESET)
-                else:
-                    print(target_ref_pose.detach().cpu(), '--', target_generated_pose.detach().cpu(), 'c--', c_, 's--', s_,
-                          'f--', f_)
 
                 avoid_collision = (s_[0] > 0. or c_[0] > 0.)
                 A_is_collision_free = None
                 A_is_more_firm = None
-                if is_curcl_loss:
-                    '''curriculum loss'''
-                    A_is_more_firm = False
-                elif (s_[0] > 0. or c_[0] > 0.) and s_[1] == 0 and c_[1] == 0:
+
+                if (s_[0] > 0. or c_[0] > 0.) and s_[1] == 0 and c_[1] == 0:
                     A_is_collision_free = False
-                    # if not is_noise_label: self.superior_A_model_moving_rate.update(0.)
                 elif (s_[1] > 0. or c_[1] > 0.) and s_[0] == 0 and c_[0] == 0:
                     A_is_collision_free = True
-                    # if not is_noise_label: self.superior_A_model_moving_rate.update(1.0)
                 elif sum(c_) == 0 and sum(s_) == 0:
                     if f_[1] > f_[0]:
                         A_is_more_firm = False
@@ -500,31 +631,40 @@ class TrainGraspGAN:
                     self.diversity_momentum = self.diversity_momentum * 0.99 + diffrence.item() * 0.01
                     self.sampling_centroid = self.sampling_centroid * 0.99 + target_generated_pose.detach().clone() * 0.01
 
-            if loss_terms_counters[0]+loss_terms_counters[1]+loss_terms_counters[3]==2* batch_size :
+            # if loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[3]+loss_terms_counters[2]*w2+loss_terms_counters[4]*w2==batch_size:
+            if col_loss_counter+firm_loss_counter==batch_size:
                 self.relative_sampling_timing.update((t + 1) / n)
                 break
 
         # curc_loss=torch.clamp(torch.abs(ref_scores_-gen_scores_)-1.,0.).mean()
         # if     curc_loss.item()  >0.: print(f'curclium loss = {curc_loss.item()}')
-        if (loss_terms_counters[0] + loss_terms_counters[1]==batch_size) :#or (firm_loss_counter>=min_batch_size):
+        # if loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[3]+loss_terms_counters[2]*w2+loss_terms_counters[4]*w2==batch_size:
+        if col_loss_counter + firm_loss_counter ==batch_size :
             print(loss_terms_counters)
-            loss=torch.tensor(0.,device=l_collision.device)
 
-            loss += l_collision / (loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[2])
-            if firm_loss_counter>0 :
-                loss += (l_firmness / (loss_terms_counters[3]+loss_terms_counters[4]))
+            loss=(l_collision+l_firmness)/sum(loss_terms_counters)
+
+            # loss=torch.tensor(0.,device=l_collision.device)
+            # if (loss_terms_counters[0] + loss_terms_counters[1] + loss_terms_counters[2] * w2)>0:
+            #     loss += l_collision / (loss_terms_counters[0] + loss_terms_counters[1]+loss_terms_counters[2]*w2)
+            # if (loss_terms_counters[3] + loss_terms_counters[4] * w2)>0:
+            #     loss += (l_firmness / (loss_terms_counters[3]+loss_terms_counters[4]*w2))
 
             self.critic_statistics.loss = loss.item()
             # loss=loss+curc_loss
             loss.backward()
+            print(Fore.LIGHTYELLOW_EX, f'c_loss={loss.item()}', Fore.RESET)
             # total_norm=torch.nn.utils.clip_grad_norm_(self.gan.critic.parameters(),max_norm=1.0)
             # print(f'discriminator gradient norm={total_norm.item()}')
             self.gan.critic_optimizer.step()
             self.gan.critic_optimizer.zero_grad(set_to_none=True)
+            # if (loss_terms_counters[0] + loss_terms_counters[1] + loss_terms_counters[3] == batch_size) or (loss_terms_counters[2]*w2+loss_terms_counters[4]*w2==batch_size):
             return True, tracked_indexes
+            # else:
+            #     return False, tracked_indexes
         else:
             print('pass, counter/Batch_size=', loss_terms_counters, '/', batch_size)
-            return False, tracked_indexes
+            return True, tracked_indexes
 
     def soft_entropy_loss(self, values, bins=40, sigma=0.1, min_val=None, max_val=None):
         """
@@ -550,9 +690,27 @@ class TrainGraspGAN:
         max_entropy = torch.log(torch.tensor([bins], device=entropy.device).float())
         return (max_entropy - entropy) / max_entropy  # maximize entropy
 
+    def ref_reg_loss(self,gripper_pose_ref2,objects_mask):
+        width_scope_loss = (torch.clamp(gripper_pose_ref2[:, 6:7][objects_mask] - 1, min=0.) ** 2).mean()
+        dist_scope_loss = (torch.clamp(-gripper_pose_ref2[:, 5:6][objects_mask] + 0.01, min=0.) ** 2).mean()
+        width_scope_loss += (torch.clamp(-gripper_pose_ref2[:, 6:7][objects_mask], min=0.) ** 2).mean()
+        dist_scope_loss += (torch.clamp(gripper_pose_ref2[:, 5:6][objects_mask] - 1, min=0.) ** 2).mean()
 
-    def get_generator_loss(self, depth, mask, gripper_pose, gripper_pose_ref, tracked_indexes,is_noise_label,objects_mask):
-        gripper_sampling_loss = torch.tensor(0., device=depth.device)
+
+        # beta_entropy = self.soft_entropy_loss(gripper_pose_ref2[:, 3:4][objects_mask], bins=36, sigma=0.1, min_val=-1,
+        #                                       max_val=1) ** 2
+        # beta_entropy += self.soft_entropy_loss(gripper_pose_ref2[:, 4:5][objects_mask], bins=36, sigma=0.1, min_val=-1,
+        #                                        max_val=1) ** 2
+
+        beta_std=0.5-((gripper_pose_ref2[:, 3:4][objects_mask]+1)/2).std()
+        beta_std+=0.5-((gripper_pose_ref2[:, 4:5][objects_mask]+1)/2).std()
+
+        # beta_entropy = torch.tensor(0., device=gripper_pose_ref2.device) if torch.isnan(beta_entropy) else beta_entropy
+
+        loss =  width_scope_loss * 100 + dist_scope_loss * 100  + (beta_std**2)
+
+        return loss
+    def get_generator_loss(self, depth, mask, gripper_pose, gripper_pose_ref, tracked_indexes,objects_mask):
 
         generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
         depth_cat = depth.repeat(2, 1, 1, 1)
@@ -560,51 +718,75 @@ class TrainGraspGAN:
         pred_scores_=critic_score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
         ref_scores_=critic_score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
 
+        gripper_pose2 = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask]
+
+        gripper_sampling_loss = torch.tensor(0., device=depth.device)*ref_scores_.mean()*0.0
+
+
         # ref_generator_stockhastic_loss=(torch.clamp(pred_scores_.detach().clone()-ref_scores_,0.)[objects_mask]**2).mean()
-        # generator_stockhastic_loss=(torch.clamp(ref_scores_.detach().clone()-pred_scores_,0.)[objects_mask]**2).mean()
+        generator_stockhastic_loss=(torch.clamp(ref_scores_.detach().clone()-pred_scores_,0.)[objects_mask]**generator_expo).mean()
+
 
         counter = [0., 0., 0., 0.]
         for j in range(len(tracked_indexes)):
             target_index = tracked_indexes[j][0]
-            avoid_collision = tracked_indexes[j][1]
+            # avoid_collision = tracked_indexes[j][1]
             A_is_collision_free=tracked_indexes[j][2]
             A_is_more_firm=tracked_indexes[j][3]
             label = ref_scores_[target_index]
             pred_ = pred_scores_[target_index]
+
+            target_pose=gripper_pose2[target_index]
             l1=torch.tensor(0.,device=pred_.device)
             l2=torch.tensor(0.,device=pred_.device)
             l3=torch.tensor(0.,device=pred_.device)
             l4 = torch.tensor(0., device=pred_.device)
 
-            if A_is_collision_free is not None:
-                if A_is_collision_free and not is_noise_label:
-                    l1_loss = (torch.clamp(pred_.detach().clone() - label, 0.) ** 1)
-                    l1 += 0. * l1_loss + 1.0 * (l1_loss ** 2.0)
-                    counter[0] += 1.
-                    # print('-----------------------------',l)
-                elif not A_is_collision_free:
-                    l1_loss = (torch.clamp(label.detach().clone() - pred_, 0.) ** 1)
 
-                    l2 += 1. * l1_loss + .0 * (l1_loss ** 2.0)
+
+            if A_is_collision_free is not None:
+                # if A_is_collision_free and not is_noise_label:
+                #     # l1_loss = (torch.clamp(pred_.detach().clone() - label+1.0, 0.) ** 1)
+                #     l1_loss=log_contrastive_loss(positive_score=label, negative_score=pred_.detach().clone() , margin=0.0, tau=1.0)
+                #     l1 += (l1_loss**generator_expo)#+self.get_scope_loss(target_pose)
+                #     counter[0] += 1.
+                #     # print(f'g_loss={l1_loss.item()}, pred_={pred_.item()}, label={label.item()}')
+                if not A_is_collision_free and counter[1]<G_batch_size:
+                    # l1_loss = (torch.clamp(label.detach().clone() - pred_, 0.) ** 1)
+                    l1_loss=log_contrastive_loss(positive_score=pred_, negative_score=label.detach().clone() , margin=0.0, tau=1.0)
+
+                    l2 += (l1_loss**generator_expo)#+self.get_scope_loss(target_pose)
                     counter[1] += 1.
 
             elif A_is_more_firm is not None:
-                if A_is_more_firm and not is_noise_label:
-                    l1_loss = (torch.clamp(pred_.detach().clone() - label, 0.) ** 1)
+                # if A_is_more_firm and not is_noise_label:
+                #     # l1_loss = (torch.clamp(pred_.detach().clone() - label+0.1, 0.) ** 1)
+                #     l1_loss=log_contrastive_loss(positive_score=label, negative_score=pred_.detach().clone() , margin=0.0, tau=1.0)
+                #
+                #     l3 += (l1_loss**generator_expo)#+self.get_scope_loss(target_pose)
+                #     counter[2] += 1.
 
-                    l3 += 0. * l1_loss + 1.0 * (l1_loss ** 2.0)
-                    counter[2] += 1.
+                if not A_is_more_firm and (counter[3]+counter[1])<G_batch_size:
+                    # l1_loss = (torch.clamp(label.detach().clone() - pred_, 0.) ** 1)
+                    l1_loss=log_contrastive_loss(positive_score=pred_, negative_score=label.detach().clone() , margin=0.0, tau=1.0)
 
-                elif not A_is_more_firm:
-                    l1_loss = (torch.clamp(label.detach().clone() - pred_, 0.) ** 1)
-
-                    l4 += 1.0 * l1_loss + .0 * (l1_loss ** 2.0)
+                    l4 += (l1_loss**generator_expo)#+self.get_scope_loss(target_pose)
                     counter[3] += 1.
 
-        if counter[0] >0: gripper_sampling_loss += l1 / (counter[0])
-        if counter[1] ==batch_size: gripper_sampling_loss += l2 / (counter[1])
-        if counter[2] >0: gripper_sampling_loss += l3 / counter[2]
-        if counter[3] ==batch_size: gripper_sampling_loss += l4 / counter[3]
+        # if counter[0]+counter[2]==batch_size:
+        # if counter[0] >0: gripper_sampling_loss += l1 / (counter[0])
+        # if counter[2] >0: gripper_sampling_loss += l3 / counter[2]
+
+
+        # if counter[1]+counter[3]==batch_size:
+        #     if counter[1] >0:
+        #         gripper_sampling_loss += l2 / (counter[1])
+        #     if counter[3] >0:
+        #         gripper_sampling_loss += l4 / counter[3]
+
+        if counter[1] ==G_batch_size: gripper_sampling_loss += l2 / (counter[1])
+        elif counter[1]+counter[3]==G_batch_size: gripper_sampling_loss += (l2+l4) / (counter[1]+counter[3])
+        elif counter[3] ==G_batch_size: gripper_sampling_loss += l4 / (counter[3])
 
         # print(f'G loss weights: {counter}, gripper_sampling_loss={gripper_sampling_loss.item()}')
 
@@ -613,7 +795,7 @@ class TrainGraspGAN:
             # l=smooth_l1_loss(l,torch.zeros_like(l))
             # gripper_sampling_loss += l / len(tracked_indexes)
 
-        return gripper_sampling_loss
+        return gripper_sampling_loss,generator_stockhastic_loss
 
     def check_termination_criteria(self):
         if self.moving_out_of_scope.val<0.000001:
@@ -632,6 +814,29 @@ class TrainGraspGAN:
         point_index = (tmp == 1).nonzero(as_tuple=False)
         return point_index.item()
 
+    def pick_trainable_grasp_parameters(self):
+        if np.random.random()>0.5:
+            v_ = np.random.random()
+            self.freeze_approach = False if v_ < 0.35 else True
+            self.freeze_beta = False if 0.75 > v_ > 0.35 else True
+            self.freeze_width = False if v_ > 0.75 else True
+        else:
+            self.freeze_approach = False
+            self.freeze_beta = False
+            self.freeze_width = False
+
+        print(Fore.CYAN,
+              f'freeze_approach={self.freeze_approach}, freeze_beta={self.freeze_beta}, freeze_width={self.freeze_width}',
+              Fore.RESET)
+
+    def get_scope_loss(self,pose):
+        dist_scope_loss = (torch.clamp(pose[-2]- 0.99, min=0.) ** 2)
+        width_scope_loss = (torch.clamp(pose[-1] - 0.99, min=0.) ** 2)
+        dist_scope_loss += (torch.clamp(-pose[-2] + 0.01, min=0.) ** 2)
+        width_scope_loss += (torch.clamp(-pose[-1] + 0.01, min=0.) ** 2)
+
+        return width_scope_loss+dist_scope_loss
+
     def begin(self):
 
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
@@ -643,8 +848,9 @@ class TrainGraspGAN:
             gripper_pixel_index=gripper_pixel_index[0]
             valid_gripper_pose=valid_gripper_pose[0]
             valid_pose_index=None
+            valid_pose_index=None
             pose_7[-2]=pose_7[-2]*(np.random.rand()**2)
-            pose_7[-1]=pose_7[-1]+(1-pose_7[-1])*np.random.rand()
+            # pose_7[-1]=pose_7[-1]+(1-pose_7[-1])*np.random.rand()
 
             pi.step(i)
             print(' ')
@@ -670,7 +876,7 @@ class TrainGraspGAN:
             # view_features(reshape_for_layer_norm(objects_mask_pixel_form, camera=camera, reverse=False))
 
             '''Elevation-based augmentation'''
-            if np.random.rand()>0.5:
+            if np.random.rand()>0.85:
                 depth=self.simulate_elevation_variations(depth,objects_mask_pixel_form,exponent=5.0)
                 pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
                 pc = transform_to_camera_frame(pc, reverse=True)
@@ -689,13 +895,14 @@ class TrainGraspGAN:
 
             random_approach[0][mask] = random_approach[0][mask] +approach_pointwise_form
             random_approach=random_approach.permute(0,3,1,2)
+
             with torch.no_grad():
-                recommended_pose,collision_scores = self.action_net.get_best_approach(depth.clone())
-                approach=recommended_pose[:,0:3,...]
+                recommended_pose,collision_scores ,best_raw_approach= self.action_net.get_best_approach(depth.clone())
+                approach=best_raw_approach
                 approach=approach.permute(2,3,0,1)
                 random_approach=random_approach.permute(2,3,0,1)
 
-                random_mask = torch.rand_like(approach[:,:,0,0]) > 0.7
+                random_mask = torch.rand_like(approach[:,:,0,0]) > 0.5
                 approach[random_mask]=random_approach[random_mask]
                 approach=approach.permute(2,3,0,1)
 
@@ -706,6 +913,7 @@ class TrainGraspGAN:
                     approach[0,:,pixels_A,pixels_B]=pose_7[0:3]
 
                 gamma_col=1.0 - torch.abs(collision_scores[0, 0][mask]-0.5)*2.0
+                # gamma_col=None
                 # gamma_col=1.0-collision_scores[0, 0][mask]
             n_s=max_samples_per_image if valid_gripper_pose else 1
             for k in range(n_s):
@@ -721,13 +929,21 @@ class TrainGraspGAN:
                 #                                sampling_p=gamma_col**2, view_all=False)
                 #     break
 
-                is_noise_label, gripper_pose_ref,reg_loss = self.step_ref_generator_training(depth, mask, gripper_pose,
-                                                                                             objects_mask  )
+                gripper_pose_ref = self.pose_noisfication(gripper_pose, objects_mask,pc,bin_mask,altered_objects_elevation,mask)
 
-                if freeze_approach:gripper_pose_ref[:,0:3]=gripper_pose[:,0:3]
-                if freeze_beta:gripper_pose_ref[:,3:5]=gripper_pose[:,3:5]
-                if freeze_distance:gripper_pose_ref[:,5:6]=gripper_pose[:,5:6]
-                if freeze_width:gripper_pose_ref[:,6:7]=gripper_pose[:,6:7]
+                # print(gripper_pose_ref[:,0:3],gripper_pose[:,0:3])
+                # exit()
+                if self.freeze_approach:gripper_pose_ref[:,0:3]=gripper_pose[:,0:3]
+                if self.freeze_beta:gripper_pose_ref[:,3:5]=gripper_pose[:,3:5]
+                if self.freeze_distance:
+                    gripper_pose_ref[:,5:6]=gripper_pose[:,5:6]
+                if self.freeze_width:
+                    gripper_pose_ref[:,6:7]=gripper_pose[:,6:7]
+
+
+                # print(Fore.CYAN,
+                #       f'freeze_approach={self.freeze_approach}, freeze_beta={self.freeze_beta}, freeze_width={self.freeze_width}',
+                #       Fore.RESET)
 
                 # with torch.no_grad():
                 #     rgb = torch.ones_like(depth) / 2.0
@@ -740,7 +956,11 @@ class TrainGraspGAN:
                 if valid_gripper_pose:
                     pixels_A=gripper_pixel_index[0]
                     pixels_B=gripper_pixel_index[1]
-                    gripper_pose_ref[0,:,pixels_A,pixels_B]=pose_7
+                    if not self.freeze_approach:gripper_pose_ref[0,0:3,pixels_A,pixels_B]=pose_7[0:3]
+                    if not self.freeze_beta:gripper_pose_ref[0,3:5,pixels_A,pixels_B]=pose_7[3:5]
+                    if not self.freeze_distance:gripper_pose_ref[0,5:6,pixels_A,pixels_B]=pose_7[5:6]
+                    if not self.freeze_width:gripper_pose_ref[0,6:7,pixels_A,pixels_B]=pose_7[6:7]
+
                     print(Fore.GREEN,'inject label pose',Fore.RESET)
 
                 if i % 10 == 0 and i != 0 and k==0:
@@ -765,13 +985,16 @@ class TrainGraspGAN:
                     print(f'Mean separation for distance : {torch.cdist(dist_values, dist_values, p=1).mean()}')
                     self.moving_anneling_factor.update(beta_diversity)
 
+                    # self.pick_trainable_grasp_parameters()
+
+
                 '''zero grad'''
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator.zero_grad(set_to_none=True)
 
                 train_generator, tracked_indexes = self.step_discriminator_learning(depth, pc, mask, bin_mask, gripper_pose,
                                                                                     gripper_pose_ref.detach().clone(),
-                                                                                    is_noise_label,altered_objects_elevation,gamma_col,valid_pose_index,floor_elevation)
+                                                                                    altered_objects_elevation,gamma_col,valid_pose_index,floor_elevation)
 
                 self.sample_from_latent = False
                 if not train_generator:
@@ -785,41 +1008,70 @@ class TrainGraspGAN:
 
                 '''generated grasps'''
                 gripper_pose= self.gan.generator( depth.clone(),approach, detach_backbone=detach_backbone)
+
+                # gripper_pose2 = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask][objects_mask]
+                #
+                # subindexes = torch.randperm(gripper_pose2.size(0))
+                # beta_diversity_loss=torch.tensor(0.,device=gripper_pose2.device)
+                #
+                # if subindexes.shape[0] > 100:
+                #     subindexes = subindexes[:100]
+                #     all_values = gripper_pose2[subindexes].detach()
+                #     beta_values = (all_values[:, 3:5]).clone()
+                #     beta_diversity = (1.001 - F.cosine_similarity(beta_values[None, ...], beta_values[:, None, :],
+                #                                                   dim=-1)).mean() / 2
+                #     beta_diversity_loss=1.0-beta_diversity
+
+                # width_scope_loss = (torch.clamp(gripper_pose2[:, 6:7][objects_mask] - 0.99, min=0.) ** 2).mean()
+                # dist_scope_loss = (torch.clamp(-gripper_pose2[:, 5:6][objects_mask] + 0.01, min=0.) ** 2).mean()
+                # width_scope_loss += (torch.clamp(-gripper_pose2[:, 6:7][objects_mask]+ 0.01, min=0.) ** 2).mean()
+                # dist_scope_loss += (torch.clamp(gripper_pose2[:, 5:6][objects_mask] - 0.99, min=0.) ** 2).mean()
+
+                # scope_loss=width_scope_loss+dist_scope_loss
+
+                # gripper_pose_ref2=gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :][mask]
+                # ref_auxelary_loss=self.ref_reg_loss(gripper_pose_ref2,objects_mask)
                 # approach=gripper_pose_[:,0:3,...]
                 # beta=gripper_pose_[:,3:5,...]
                 # dist=gripper_pose_[:,5:6,...]
                 # width=gripper_pose_[:,6:7,...]
-                #
+
                 # if freeze_approach:approach=approach.detach()
                 # if freeze_beta:beta=beta.detach()
                 # if freeze_distance:dist=dist.detach()
                 # if freeze_width:width.detach_()
-                #
+
                 # gripper_pose=torch.cat([approach,beta,dist,width],dim=1)
 
-                gripper_sampling_loss = self.get_generator_loss(
+                gripper_sampling_loss,generator_stockhastic_loss = self.get_generator_loss(
                     depth, mask, gripper_pose, gripper_pose_ref,
-                    tracked_indexes, is_noise_label, objects_mask)
-
-                if k==0:print(
-                    f'generator loss= {gripper_sampling_loss.item()}')
+                    tracked_indexes, objects_mask)
 
                 assert not torch.isnan(gripper_sampling_loss).any()
 
                 # gripper_sampling_loss-=weight*pred_/m
-                self.gripper_sampler_statistics.loss = gripper_sampling_loss.item()
+
+                print(Fore.LIGHTYELLOW_EX, f'g_loss={gripper_sampling_loss.item()}, generator_stockhastic_loss={generator_stockhastic_loss.item()}', Fore.RESET)
+
+                loss =gripper_sampling_loss#+beta_diversity_loss/100   #+ref_auxelary_loss
+                # loss = generator_stockhastic_loss
 
                 with torch.no_grad():
                     self.gripper_sampler_statistics.loss = gripper_sampling_loss.item()
-
-                loss =  gripper_sampling_loss      +(reg_loss) * 1e-1
+                # if abs(loss.item())>0.0:
+                # try:
                 loss.backward()
-
                 self.gan.generator_optimizer.step()
-                self.ref_generator.optimizer.step()
+                # self.ref_generator.optimizer.step()
+                # except Exception as e:
+                #     print(str(e))
+                #     print(loss)
+                # else:
+                #     loss.detach_()
+                #     del loss
 
-                self.ref_generator.model.zero_grad(set_to_none=True)
-                self.ref_generator.optimizer.zero_grad(set_to_none=True)
+                # self.ref_generator.model.zero_grad(set_to_none=True)
+                # self.ref_generator.optimizer.zero_grad(set_to_none=True)
                 self.gan.generator.zero_grad(set_to_none=True)
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator_optimizer.zero_grad(set_to_none=True)
@@ -880,7 +1132,6 @@ class TrainGraspGAN:
         self.moving_anneling_factor.save()
         self.superior_A_model_moving_rate.save()
 
-
         self.critic_statistics.save()
         self.gripper_sampler_statistics.save()
 
@@ -891,11 +1142,11 @@ class TrainGraspGAN:
         self.gan.export_optimizers()
 
     def clear(self):
-
         self.gripper_sampler_statistics.clear()
         self.critic_statistics.clear()
+
 def train_N_grasp_GAN(n=1):
-    lr = 5e-4
+    lr = 5e-5
     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
     torch.cuda.empty_cache()
     # torch.autograd.set_detect_anomaly(True)

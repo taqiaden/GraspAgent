@@ -185,7 +185,8 @@ def fast_singularity_check(width, T, points,check_floor_collision=True,floor_ele
                 # scene = trimesh.Scene()
                 # scene.add_geometry([trimesh.PointCloud(points), mesh])
                 # scene.show()
-                return 1,None
+                # set quality to zero if collision with unseen floor is detected
+                return 0,0
 
         firmness_points = collision_points[val_small]
 
@@ -331,7 +332,8 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
                 # scene = trimesh.Scene()
                 # scene.add_geometry([trimesh.PointCloud(points), mesh])
                 # scene.show()
-                return 1,0,0,1
+                # set quality to zero if collision with unseen floor is detected
+                return 0,0,0,0
         return 0, 0,0,0
 
     x = collision_points[:, 0]
@@ -344,6 +346,7 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
     dist_ = x_max - x
     firmness_points_dist=dist_[val_small]
     firmness_weight = firmness_points_dist.mean() if firmness_points_dist.size>0 else 0
+    firmness_weight /= config.distance_scope
 
     # print('points in gripper cavity=',points_in_cavity)
 
@@ -351,6 +354,7 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
         collision_points = dist_[~val_small]
         collision_weight = collision_points.mean() if collision_points.size > 0 else 0
         # print(collision_points[~val_small])
+
         return 1, firmness_weight,0,collision_weight
     else:
         if check_floor_collision:
@@ -386,6 +390,5 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
         v_m=(v1+v2)/2.
         v_ref=np.array([0.,1.])
         alignment=vector_alignment(v_m, v_ref)
-
 
         return 0, firmness_weight,quality*alignment, 0

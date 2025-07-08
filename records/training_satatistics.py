@@ -104,10 +104,10 @@ class MovingRate():
     #     self.decay_rate=max(x,self.min_decay)
 
     def save(self):
-        save_key('moving_rate_', self.moving_rate, section=self.name)
-        save_key('counter_', self.counter, section=self.name)
-        save_key('momentum_', self.momentum, section=self.name)
-        save_key('convergence_', self.convergence, section=self.name)
+        save_key('moving_rate_', self.moving_rate, config_file=self.name)
+        save_key('counter_', self.counter, config_file=self.name)
+        save_key('momentum_', self.momentum, config_file=self.name)
+        save_key('convergence_', self.convergence, config_file=self.name)
 
         '''append to history records'''
         save_new_data_point(self.moving_rate, self.name + '_moving_rate.txt')
@@ -117,10 +117,10 @@ class MovingRate():
 
 
     def upload(self,initial_val):
-        self.moving_rate=get_float('moving_rate_',section=self.name,default=initial_val)
-        self.counter = get_float('counter_', section=self.name)
-        self.momentum = get_float('momentum_', section=self.name)
-        self.convergence = get_float('convergence_', section=self.name)
+        self.moving_rate=get_float('moving_rate_',config_file=self.name,default=initial_val)
+        self.counter = get_float('counter_', config_file=self.name)
+        self.momentum = get_float('momentum_', config_file=self.name)
+        self.convergence = get_float('convergence_', config_file=self.name)
 
     def view(self):
         self.moving_rate=truncate(self.moving_rate)
@@ -194,22 +194,22 @@ class TrainingTracker:
             return TP_mask,FP_mask,FN_mask,TN_mask
 
     def load_label_balance_indicator(self):
-        return get_float('label_balance_indicator',section=self.name)
+        return get_float('label_balance_indicator',config_file=self.name)
 
     def load_prediction_balance_indicator(self):
-        return get_float('prediction_balance_indicator',section=self.name)
+        return get_float('prediction_balance_indicator',config_file=self.name)
 
     def load_loss_moving_average(self):
-        return get_float('loss_moving_average',section=self.name)
+        return get_float('loss_moving_average',config_file=self.name)
 
     def load_convergence(self):
-        return get_float('convergence',section=self.name)
+        return get_float('convergence',config_file=self.name)
 
     def load_momentum(self):
-        return get_float('momentum',section=self.name)
+        return get_float('momentum',config_file=self.name)
 
     def load_counter(self):
-        return get_float('counter',section=self.name)
+        return get_float('counter',config_file=self.name)
 
     def update_label_balance_indicator(self,label,pivot_value=0.5):
         if label>pivot_value:
@@ -249,12 +249,12 @@ class TrainingTracker:
         print(Fore.RESET,'-------------------------------------------------------------------------')
 
     def save(self):
-        save_key('label_balance_indicator', self.label_balance_indicator, section=self.name)
-        save_key('prediction_balance_indicator', self.prediction_balance_indicator, section=self.name)
-        save_key('loss_moving_average', self.loss_moving_average_, section=self.name)
-        save_key('convergence', self.convergence, section=self.name)
-        save_key('momentum', self.momentum, section=self.name)
-        save_key('counter', self.counter, section=self.name)
+        save_key('label_balance_indicator', self.label_balance_indicator, config_file=self.name)
+        save_key('prediction_balance_indicator', self.prediction_balance_indicator, config_file=self.name)
+        save_key('loss_moving_average', self.loss_moving_average_, config_file=self.name)
+        save_key('convergence', self.convergence, config_file=self.name)
+        save_key('momentum', self.momentum, config_file=self.name)
+        save_key('counter', self.counter, config_file=self.name)
 
         '''append to history records'''
         save_new_data_point(self.label_balance_indicator, self.name+'_label_balance_indicator.txt')

@@ -77,7 +77,7 @@ class TrainActionNet:
         actions_net.ini_model(train=False)
         return actions_net
 
-    def simulate_elevation_variations(self,original_depth,max_elevation=0.2,exponent=2.0):
+    def simulate_elevation_variations(self,original_depth,max_elevation=0.15,exponent=2.0):
         with torch.no_grad():
             _, _, _, _, _, background_class_3= self.actions_net.model(
                 original_depth.clone())
@@ -137,7 +137,7 @@ class TrainActionNet:
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask]#.cpu().numpy()
             collision_with_objects_predictions=griper_collision_classifier[0, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
-            gripper_sampling_mask=(collision_with_objects_predictions<.5) & (collision_with_bin_predictions<.5)
+            gripper_sampling_mask=(collision_with_objects_predictions<.5 ) & (collision_with_bin_predictions<.5)
 
             # normal_view_mask=objects_mask& (suction_head_predictions.cpu().numpy()>0.5)
             # normals=suction_direction[0].permute(1,2,0)[mask].cpu().numpy()
@@ -164,13 +164,13 @@ class TrainActionNet:
             suction_head_predictions[~torch.from_numpy(objects_mask).cuda()]*=0.
 
             # view_mask(pc, background_class_predictions, pivot=0.5)
-            view_mask(pc, suction_head_predictions, pivot=0.5)
+            # view_mask(pc, suction_head_predictions, pivot=0.5)
             # view_mask(pc, shift_head_predictions, pivot=0.5)
             # view_mask(pc, collision_with_objects_predictions, pivot=0.5)
             # view_mask(pc, collision_with_bin_predictions, pivot=0.5)
 
 if __name__ == "__main__":
-    seeds(11)
+    seeds(1)
 
     with torch.no_grad():
         lr = 1e-6
