@@ -79,6 +79,7 @@ class MovingRate():
 
         '''load latest'''
         self.upload(initial_val)
+        # print('tes------------------',self.moving_rate)
         # self.set_decay_rate()
 
         self.last_value=None
@@ -133,10 +134,9 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker:
-    def __init__(self,name='',iterations_per_epoch=None,track_label_balance=False,track_prediction_balance=False,min_decay=0.01):
+    def __init__(self,name='',track_label_balance=False,track_prediction_balance=False,min_decay=0.01):
         try:
             self.name=name
-            self.iterations_per_epoch=iterations_per_epoch
 
             self.running_loss_ = None
 

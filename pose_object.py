@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-
+from lib.grasp_utils import shift_a_distance
 from Configurations import config
-from lib.bbox import rotation_matrix_to_angles, convert_angles_to_transformation_form
+from lib.bbox import rotation_matrix_to_angles, angles_to_rotation_matrix, \
+    construct_transformation
 from lib.one_hot_utiles import unit_regression_to_one_hot, clean_one_hot, one_hot_to_unit_regression, \
     unit_regression_to_indexes, one_hot_to_indexes
 
@@ -18,9 +19,37 @@ def pose_7_to_pose_5(pose_7):
     pose_5 = output_processing(target_pose[None, :, None]).squeeze(-1)
     return pose_5
 
-def pose_7_to_transformation(pose_7,target_point):
-    relative_pose_5 = pose_7_to_pose_5(pose_7)
-    T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
+
+
+def pose_7_to_transformation(pose_7,target_point,clip=True):
+
+    # relative_pose_5 = pose_7_to_pose_5(pose_7)
+    # T_d, width, distance = convert_angles_to_transformation_form(pose_7, target_point,approach=pose_7[0:3])
+    pose_7=pose_7.squeeze()
+    beta= angle_ratio_from_sin_cos(pose_7[ 3:4], pose_7[ 4:5])*config.beta_scope
+
+    if clip:
+        distance=torch.clip(pose_7[ 5:6 ],0,1)*config.distance_scope
+        width=torch.clip(pose_7[6:7],0,1)*config.width_scope
+    else:
+        distance = pose_7[ 5:6 ]*config.distance_scope
+        width = pose_7[6:7]*config.width_scope
+
+    approach=pose_7[0:3]
+
+
+    '''angles to rotation matrix'''
+    rotation_matrix=angles_to_rotation_matrix(approach,beta.squeeze())
+
+    '''transformation matrix'''
+    T_0=construct_transformation(target_point, rotation_matrix)
+
+    '''adjust the penetration distance for the transformation'''
+    # print(distance)
+    # print(T_0)
+    T_d = shift_a_distance(T_0, distance)
+    assert T_d[0:3, 3].shape == target_point.shape,f'{T_d[0:3, 3].shape},  {target_point.shape}'
+    assert T_d[0:3, 0:3].shape == rotation_matrix.shape
     return T_d, width, distance
 
 def label_to_transformation(label):
@@ -122,6 +151,7 @@ def angle_ratio_from_sin_cos(_sin,_cos):
 def output_processing(output):
     theta = output[:, 0:1, :]
     phi_ratio = angle_ratio_from_sin_cos(output[:, 1:2, :], output[:, 2:3, :])
+
     beta_ratio = angle_ratio_from_sin_cos(output[:, 3:4, :], output[:, 4:5, :])
     dist = output[:, 5:6, :]
     width = output[:, 6:7, :]

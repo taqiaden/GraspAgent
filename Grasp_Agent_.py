@@ -41,7 +41,7 @@ from lib.pc_utils import numpy_to_o3d
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
 from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_handover_policy_module_key
-from models.action_net import ActionNet, action_module_key
+from models.action_net import ActionNet, action_module_with_GAN_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.shift_policy_net import shift_policy_module_key, ShiftPolicyCriticNet, ShiftPolicyActorNet
 from pose_object import vectors_to_ratio_metrics
@@ -275,9 +275,10 @@ class GraspAgent():
 
         pi.step(1)
 
-        actions_net = ModelWrapper(model=ActionNet(), module_key=action_module_key)
-        actions_net.ini_model(train=False)
-        self.action_net = actions_net.model
+        actions_net = GANWrapper(action_module_with_GAN_key, ActionNet)
+        actions_net.ini_generator(train=False)
+
+        self.action_net = actions_net.generator
 
         pi.step(2)
         self.ini_shift_policy()
@@ -669,7 +670,7 @@ class GraspAgent():
 
         return new_depth#,pc, mask
 
-    def sample_masked_actions(self):
+    def  sample_masked_actions(self):
         self.forward_counter+=1
         '''Action and Policy network inference'''
         griper_grasp_score, suction_grasp_score, \
@@ -791,8 +792,6 @@ class GraspAgent():
             # proceede with normal inference
             self.main_dense_processing(shift_appealing_mask,gripper_shift_reachablity_mask,suction_shift_reachablity_mask,
                                 griper_grasp_score,suction_grasp_score,handover_scores)
-
-
 
     def handover_processing(self,handover_scores):
         self.handover_mask=handover_scores>(0.5** quality_exponent)

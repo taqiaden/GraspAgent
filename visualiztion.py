@@ -67,7 +67,7 @@ def visualize_vox(npy):
                 if npy[i, j, k] == 1: points_list.append((i, j, k))
     points_list = np.asarray(points_list)
     view_npy_open3d(points_list)
-def dense_grasps_visualization(pc, generated_pose_7,view_mask,sampling_p=None,view_all=False):
+def dense_grasps_visualization(pc, generated_pose_7,view_mask,sampling_p=None,view_all=False,exclude_collision=False):
     T_d_list = []
     width_list = []
     total_size=view_mask.sum()
@@ -82,27 +82,34 @@ def dense_grasps_visualization(pc, generated_pose_7,view_mask,sampling_p=None,vi
     # from torchrl.modules import MaskedCategorical
 
     for i in range(sampled_size):
-        # random_index = np.random.randint(0, pc.shape[0])
-        dist = MaskedCategorical(probs=selection_p, mask=view_mask)
+        if view_all:
+            picked_index=i
+        else:
+            # random_index = np.random.randint(0, pc.shape[0])
+            dist = MaskedCategorical(probs=selection_p, mask=view_mask)
 
-        picked_index = dist.sample()
-        view_mask[picked_index]=False
-        # if not view_mask[ random_index] : continue
-        # next_=i if view_all else int(i+(i**2)/10)
-        # if total_size<=next_:break
-        # picked_index=sampled_indexes[next_]
+            picked_index = dist.sample()
+            view_mask[picked_index]=False
+            # if not view_mask[ random_index] : continue
+            # next_=i if view_all else int(i+(i**2)/10)
+            # if total_size<=next_:break
+            # picked_index=sampled_indexes[next_]
 
         target_pose_7 = generated_pose_7[ picked_index]
 
+
         target_point = pc[picked_index]
+
+
         T_d, width, distance = pose_7_to_transformation(target_pose_7, target_point)
+        # print(distance)
         T_d_list.append(T_d)
         width_list.append(width)
     if len(width_list) == 0: return
-    T_d = np.stack(T_d_list, axis=0)
-    width = np.stack(width_list, axis=0)
+    T_d = torch.stack(T_d_list, dim=0)
+    width = torch.stack(width_list, dim=0)
     print(f'The sampled size of gripper grasp equals to {len(T_d_list)} out of total {total_size} ')
-    vis_scene(T_d, width, npy=pc)
+    vis_scene(T_d, width, npy=pc,exclude_collision=exclude_collision)
 
 
 def view_o3d(pcd,view_coordinate=True,geometries_list=None):
@@ -235,7 +242,7 @@ def highlight_background(npy):
     pcd = numpy_to_o3d(pc=npy,color=colors)
     return pcd
 
-def vis_scene(T_d_stack,width_stack, npy=None):
+def vis_scene(T_d_stack,width_stack, npy=None,exclude_collision=False):
     '''prepare mesh for each grasp'''
     scene_list = []
     if T_d_stack.ndim==2:
@@ -245,16 +252,24 @@ def vis_scene(T_d_stack,width_stack, npy=None):
     for i in range(T_d_stack.shape[0]):
         has_collision ,low_quality_grasp= grasp_collision_detection(T_d_stack[i], width_stack[i], npy, visualize=False)
 
-        mesh=construct_gripper_mesh_2(width_stack[i], T_d_stack[i])
-        if has_collision:
-            mesh.paint_uniform_color([0.9, 0.5, 0.5])
+        T_d=T_d_stack[i].cpu().numpy()
+        width=width_stack[i].cpu().numpy()[0]
+
+        mesh=construct_gripper_mesh_2(width, T_d)
+        if has_collision :
+            if not exclude_collision:
+                mesh.paint_uniform_color([0.9, 0.5, 0.5])
+                scene_list.append(mesh)
         elif low_quality_grasp:
             mesh.paint_uniform_color([0.9, 0.9, 0.5])
+            scene_list.append(mesh)
         else:
             mesh.paint_uniform_color([0.5,0.9, 0.5])
+            scene_list.append(mesh)
         # mesh.paint_uniform_color([0.,0., 0.])
 
-        scene_list.append(mesh)
+
+    npy=npy.cpu().numpy()
 
     '''add point cloud'''
     masked_colors = np.ones_like(npy) * [0.52, 0.8, 0.92]

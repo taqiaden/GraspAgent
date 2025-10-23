@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from lib.models_utils import reshape_for_layer_norm
-from models.decoders import   att_res_mlp_LN
 from models.resunet import res_unet
 from registration import camera, standardize_depth
 from visualiztion import view_features
@@ -38,7 +37,6 @@ class ShiftPolicyActorNet(nn.Module):
 
         '''clear policy'''
         self.actor=VanillaDecoder(relu_slope=0.0).to('cuda')
-
 
     def dilated_mask(self,mask,kernel_size=57):
         kernel=torch.ones((kernel_size,kernel_size),dtype=torch.float32,device=mask.device)

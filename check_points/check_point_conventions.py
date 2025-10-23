@@ -87,10 +87,10 @@ class GANWrapper():
         export_model_state(self.critic,  self.module_key+'_critic')
 
     '''optimizer operations'''
-    def critic_adam_optimizer(self,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
+    def critic_adam_optimizer(self,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,eps=1e-8):
         if learning_rate is not None: self.learning_rate=learning_rate
 
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=eps,
                                      weight_decay=weight_decay_)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
 
@@ -105,11 +105,13 @@ class GANWrapper():
                                                         weight_decay=weight_decay_)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
 
-    def critic_sgd_optimizer(self, learning_rate=None,weight_decay_=weight_decay,momentum=0.0):
+    def load_G_optimizer(self):
+        self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key + '_generator_optimizer')
+    def critic_sgd_optimizer(self, learning_rate=None,weight_decay_=weight_decay,momentum=0.0,nesterov=False):
         if learning_rate is not None: self.learning_rate = learning_rate
 
         self.critic_optimizer = torch.optim.SGD(self.critic.parameters(), lr=self.learning_rate,
-                                                 weight_decay=weight_decay_,momentum=momentum)
+                                                 weight_decay=weight_decay_,momentum=momentum,nesterov=nesterov)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
 
     def critic_rmsprop_optimizer(self, learning_rate=None):

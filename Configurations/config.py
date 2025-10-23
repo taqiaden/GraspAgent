@@ -17,7 +17,17 @@ untested_model_stamp= 'untested'
 
 check_points_extension='.pth.tar'
 
-check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
+if where_am_i=='chaoyun-server': # server
+    check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
+
+elif where_am_i=='yumi': #edge unit
+    check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
+
+
+else:
+    check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
+
+# check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
 # check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/GraspAgent/check_points/'
 

@@ -3,6 +3,7 @@ import random
 import time
 
 import numpy as np
+import torch
 
 from lib.IO_utils import save_pickle, load_pickle
 from lib.Multible_planes_detection.utils import *
@@ -197,7 +198,7 @@ def get_bin_planes_equations(pc,view=False):
 def distance_to_plane(pc,plane_equ):
     plane_normal=plane_equ[0:3]
     p_ = pc[:] * plane_normal
-    p_ = np.sum(p_, axis=-1)
+    p_ = torch.sum(p_, dim=-1) if torch.is_tensor(pc) else np.sum(p_, axis=-1)
     p_ += plane_equ[3]
     return p_
 
@@ -219,8 +220,43 @@ def get_edge_mask(pc,mask_,edge_threshold,disregarded_dimension=0):
     edge_mask_ = dist < edge_threshold
     return edge_mask_
 
-def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge_threshold=0.005,view=False,file_index=None,cache_name='bin_planes'):
+def get_edge_mask_torch(pc: torch.Tensor, mask_: torch.Tensor, edge_threshold: float, disregarded_dimension: int = 0):
+    """
+    pc: [N, 3] torch tensor (point cloud)
+    mask_: [N] boolean tensor (which points to consider)
+    edge_threshold: float, distance threshold
+    disregarded_dimension: which axis to ignore (0=x, 1=y, 2=z)
+    returns: boolean mask [N]
+    """
+    # Apply mask to get subset of points
+    masked_pc = pc[mask_]
 
+    # Index of point with maximum z
+    max_elevated_point_arg = torch.argmax(masked_pc[:, 2])
+    max_elevated_point = masked_pc[max_elevated_point_arg]  # [3]
+
+    # Select 2D projection depending on disregarded dimension
+    if disregarded_dimension == 0:
+        two2_pc = pc[:, [1, 2]]
+        ref_point = max_elevated_point[[1, 2]]
+    elif disregarded_dimension == 1:
+        two2_pc = pc[:, [0, 2]]
+        ref_point = max_elevated_point[[0, 2]]
+    elif disregarded_dimension == 2:
+        two2_pc = pc[:, [0, 1]]
+        ref_point = max_elevated_point[[0, 1]]
+    else:
+        raise ValueError("disregarded_dimension must be 0, 1, or 2")
+
+    # Compute distances
+    dist = torch.norm(two2_pc - ref_point.unsqueeze(0), dim=-1)
+
+    # Edge mask
+    edge_mask_ = dist < edge_threshold
+    return edge_mask_
+
+def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge_threshold=0.005,view=False,file_index=None,cache_name='bin_planes'):
+    # print(pc)
     if file_index is not None:
         file_path = cache_dir+cache_name+'/' + file_index + '.pkl'
         if os.path.exists(file_path):
@@ -243,13 +279,14 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge
     floor_elevation=None
 
     for plane_equ, z_max, direction in detected_bin_tuple:
+        if torch.is_tensor(pc): plane_equ=torch.from_numpy(plane_equ).cuda()
         dist_ = distance_to_plane(pc,plane_equ)
         if -0.3<plane_equ[0]<.3 and -0.3<plane_equ[1]<0.3 and plane_equ[2] >0.95  :
             t=floor_threshold
             floor_elevation=-plane_equ[-1]
         else:
             t = sides_threshold
-
+        # print(pc)
         if direction > 0:
             mask_=(dist_ > -t) & (pc[:, 2] <= z_max+t)
         else:
@@ -263,11 +300,11 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge
             '''mask upper edges'''
             if -0.3<plane_equ[0]<0.3:
                 '''sides along  y'''
-                edge_mask = get_edge_mask(pc, mask_, edge_threshold, disregarded_dimension=0)
+                edge_mask = get_edge_mask_torch(pc, mask_, edge_threshold, disregarded_dimension=0)
                 mask_ = mask_ | edge_mask
             else:
                 '''sides along  x'''
-                edge_mask = get_edge_mask(pc, mask_, edge_threshold, disregarded_dimension=1)
+                edge_mask = get_edge_mask_torch(pc, mask_, edge_threshold, disregarded_dimension=1)
                 mask_ = mask_ | edge_mask
 
             if view:

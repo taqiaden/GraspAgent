@@ -90,7 +90,7 @@ def statistical_info_(npy,array_name):
     max_=np.max(npy)
     min_=np.min(npy)
     print(f'{array_name} statistical: ave={ave},std={std},max={max_},min={min_}')
-def rotation_matrix_from_vectors(source_vec, destination_vec):
+def  rotation_matrix_from_vectors(source_vec, destination_vec):
     """ Find the rotation matrix that aligns vec1 to vec2
     :param vec1: A 3d "source" vector
     :param vec2: A 3d "destination" vector

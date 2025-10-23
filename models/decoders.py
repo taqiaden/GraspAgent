@@ -8,6 +8,7 @@ from lib.models_utils import reshape_for_layer_norm
 from models.resunet import batch_norm_relu
 from registration import camera
 from visualiztion import view_features
+from torch.nn.utils import spectral_norm
 
 
 class res_block(nn.Module):
@@ -284,7 +285,7 @@ class att_linear_res(nn.Module):
         # cuda_memory_report()
 
         '''key value from input1'''
-        key = self.key(normalized_key_value)
+        # key = self.key(normalized_key_value)
         value = self.value(normalized_key_value)
         '''Query from input2'''
         # query = reshape_for_layer_norm(query_input, camera=camera, reverse=True)
@@ -295,7 +296,7 @@ class att_linear_res(nn.Module):
         # cuda_memory_report()
 
         '''attention score'''
-        att_map = key * query
+        att_map =  query #*key
         # att_map=att_map/(32.**0.5)
         if self.use_sig:
             att_map = self.sig(att_map)
@@ -494,9 +495,9 @@ class att_res_mlp_LN_SwiGLUBBlock_sparse(nn.Module):
         return output
 
 class LayerNorm2D(nn.Module):
-    def __init__(self,channels):
+    def __init__(self,channels,elementwise_affine=True):
         super().__init__()
-        self.norm=nn.LayerNorm([channels])
+        self.norm=nn.LayerNorm([channels],elementwise_affine=elementwise_affine)
 
     def forward(self,x):
         x=x.permute(0,2,3,1)
@@ -504,35 +505,59 @@ class LayerNorm2D(nn.Module):
         x=x.permute(0,3,1,2)
         return x
 
+class sine(nn.Module):
+    def __init__(self, w0=1.0):
+        super().__init__()
+        self.w0 = nn.Parameter(torch.tensor(w0, dtype=torch.float32, device='cuda'), requires_grad=True)
+
+    def forward(self,x):
+        # print(x)
+        print('scale=',self.w0)
+        x=torch.sin(x*self.w0)
+        # print(x)
+        return x
 class att_res_conv_normalized(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
-                 activation=None):
+                 activation=None,use_sigmoid=False,bottle_neck_factor=2,normalization=None):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
                 negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
         else:
             activation_function = activation
+        self.use_sigmoid=use_sigmoid
 
         # self.activation=activation
-
         self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
-        self.LN = LayerNorm2D(in_c1).to('cuda')
+        # self.LN = LayerNorm2D(in_c1).to('cuda')
+        # self.LN = nn.Sequential(
+        #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
+        #     LayerNorm2D(64),
+        #     activation_function,
+        # ).to('cuda')
+        # # self.routing=nn.Sequential(
+        # #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        # #     LayerNorm2D(in_c1),
+        # #     nn.ReLU()
+        # # ).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
 
-        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 32, kernel_size=1),
+            nn.Conv2d(in_c2, in_c1 // (bottle_neck_factor*2), kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(in_c1 // (bottle_neck_factor*2), in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
 
         self.att = nn.Sequential(
-            LayerNorm2D(32),
+            nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
+            LayerNorm2D(in_c1 // bottle_neck_factor),
             activation_function,
         ).to('cuda')
 
@@ -547,7 +572,7 @@ class att_res_conv_normalized(nn.Module):
 
 
         self.d = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            nn.Conv2d(32+(in_c1 // bottle_neck_factor), 32, kernel_size=1,bias=False),
             LayerNorm2D(32),
             activation_function,
             nn.Conv2d(32, 16, kernel_size=1,bias=False),
@@ -557,25 +582,43 @@ class att_res_conv_normalized(nn.Module):
             nn.Conv2d(16, out_c, kernel_size=1),
         ).to('cuda')
 
+        self.in_c1=in_c1
+
     def forward(self, key_value_input, query_input):
-        normalized_key_value = self.LN(key_value_input)
+        # key_value_input = self.LN(key_value_input)
         # normalized_key_value=self.activation(normalized_key_value)
         # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+
         '''residual'''
         inputs = torch.cat([key_value_input, query_input], dim=1)
         res = self.res(inputs)
 
 
         '''key value from input1'''
-        key = self.key(normalized_key_value)
-        value = self.value(normalized_key_value)
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
 
         query = self.query(query_input)
 
 
-        '''attention score'''
-        att_map = key * query
-        att_map = self.sig(att_map*self.scale)
+        key = self.key(key_value_input)
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        if self.use_sigmoid:
+            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.sigmoid(att_map*self.scale)
+        else:
+            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.softmax(att_map,dim=1)
+        # att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
 
         x = (att_map * value)
         x = self.att(x)
@@ -585,7 +628,400 @@ class att_res_conv_normalized(nn.Module):
         output = self.d(x)
         return output
 
-class att_res_conv_norma_free(nn.Module):
+class att_res_conv_normalized2(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 32, kernel_size=1),
+        ).to('cuda')
+
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 32, kernel_size=1),
+        ).to('cuda')
+
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 32, kernel_size=1),
+        ).to('cuda')
+
+        self.att = nn.Sequential(
+            nn.Conv2d(32, 32, kernel_size=1, bias=False),
+            LayerNorm2D(32),
+            activation_function,
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            LayerNorm2D(16),
+            activation_function,
+        ).to('cuda')
+
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(48, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+
+        '''residual'''
+        inputs = torch.cat([key_value_input, query_input], dim=1)
+        res = self.res(inputs)
+
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+
+        key = self.key(key_value_input)
+        att_map = query * key
+
+        att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map = F.softmax(att_map,dim=1)
+        att_map = F.sigmoid(att_map*self.scale)
+
+        att_map=att_map.flatten(1,2)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)
+        x = self.att(x)
+
+        x = torch.cat([x, res], dim=1)
+
+        output = self.d(x)
+        return output
+
+class att_conv_normalized2(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sin=False,normalization=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.key = nn.Sequential(
+            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            # LayerNorm2D(64),
+            # activation_function,
+            nn.Conv2d(64, 64, kernel_size=1,bias=False),
+        ).to('cuda')
+
+        normalization=normalization if normalization is not None else LayerNorm2D
+        # self.gate = nn.Sequential(
+        #     nn.Conv2d(64, 64, kernel_size=1),
+        #     nn.Sigmoid()
+        # ).to('cuda')
+
+        self.ln = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
+            normalization(64),
+            activation_function,
+        ).to('cuda')
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            # LayerNorm2D(64),
+            # activation_function,
+            nn.Conv2d(64, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
+            # LayerNorm2D(32,elementwise_affine=False),
+            # activation_function,
+            nn.Conv2d(in_c2, 64, kernel_size=1,bias=False),
+        ).to('cuda')
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=1,bias=False),
+            nn.Dropout2d(0) if use_sin else normalization(64),
+            sine(10) if use_sin else activation_function,
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            nn.Dropout2d(0) if use_sin else normalization(32),
+            sine(5) if use_sin else activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+        # key_value_input=self.ln(key_value_input)
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+
+        key = self.key(key_value_input)
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+        att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)
+
+
+        output = self.d(x)
+        return output
+class att_conv_normalized_free2(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.key = nn.Sequential(
+            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            # LayerNorm2D(64),
+            # activation_function,
+            nn.Conv2d(64, 64, kernel_size=1),
+        ).to('cuda')
+
+
+        # self.gate = nn.Sequential(
+        #     nn.Conv2d(64, 64, kernel_size=1),
+        #     nn.Sigmoid()
+        # ).to('cuda')
+
+        # self.ln = nn.Sequential(
+        #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
+        #     # LayerNorm2D(64),
+        #     activation_function,
+        # ).to('cuda')
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            # LayerNorm2D(64),
+            # activation_function,
+            nn.Conv2d(64, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.query = nn.Sequential(
+            # LayerNorm2D(in_c2, elementwise_affine=False),
+            nn.Conv2d(in_c2, 64, kernel_size=1),
+        ).to('cuda')
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=1),
+            # LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 32, kernel_size=1),
+            # LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+        # key_value_input=self.ln(key_value_input)
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+
+        key = self.key(key_value_input)
+
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map=F.sigmoid(att_map)
+        att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)
+
+
+        output = self.d(x)
+        return output
+
+
+class att_res_conv_normalized_free(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sigmoid=False,bottle_neck_factor=2):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+        self.use_sigmoid=use_sigmoid
+        # self.activation=activation
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+        # self.LN = LayerNorm2D(in_c1).to('cuda')
+        # self.LN = nn.Sequential(
+        #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
+        #     LayerNorm2D(64),
+        #     activation_function,
+        # ).to('cuda')
+        # # self.routing=nn.Sequential(
+        # #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        # #     LayerNorm2D(in_c1),
+        # #     nn.ReLU()
+        # # ).to('cuda')
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+
+        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, in_c1 // (bottle_neck_factor*2), kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(in_c1 // (bottle_neck_factor*2), in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+
+        self.att = nn.Sequential(
+            nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
+            # LayerNorm2D(in_c1 // bottle_neck_factor),
+            activation_function,
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
+            # LayerNorm2D(32),
+            activation_function,
+        ).to('cuda')
+
+
+        self.sig = nn.Sigmoid()
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(32+(in_c1 // bottle_neck_factor), 32, kernel_size=1,bias=False),
+            # LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            # LayerNorm2D(16),
+            nn.Dropout2d(drop_out_ratio),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+
+        '''residual'''
+        inputs = torch.cat([key_value_input, query_input], dim=1)
+        res = self.res(inputs)
+
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+
+        key = self.key(key_value_input)
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        if self.use_sigmoid:
+            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.sigmoid(att_map*self.scale)
+        else:
+            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.softmax(att_map,dim=1)
+        # att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)
+        x = self.att(x)
+
+        x = torch.cat([x, res], dim=1)
+
+        output = self.d(x)
+        return output
+class vinala(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
                  activation=None):
         super().__init__()
@@ -598,64 +1034,50 @@ class att_res_conv_norma_free(nn.Module):
         # self.activation=activation
 
         self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
         ).to('cuda')
+        self.LN = LayerNorm2D(in_c1).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
         ).to('cuda')
 
-        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 32, kernel_size=1),
-        ).to('cuda')
-
-        self.att = nn.Sequential(
-            activation_function,
-        ).to('cuda')
-
-        self.res = nn.Sequential(
-            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
-            activation_function,
+            LayerNorm2D(in_c2),
+            nn.Conv2d(in_c2, in_c1, kernel_size=1,bias=False),
         ).to('cuda')
 
 
         self.sig = nn.Sigmoid()
 
+        self.in_c1=in_c1
+
 
         self.d = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            nn.Conv2d(in_c1+in_c2, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64),
             activation_function,
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
             nn.Dropout2d(drop_out_ratio),
             activation_function,
-            nn.Conv2d(16, out_c, kernel_size=1),
+            nn.Conv2d(32, out_c, kernel_size=1),
         ).to('cuda')
 
     def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
         # normalized_key_value=self.activation(normalized_key_value)
+
         # normalzied_query_input=self.Q_LN(query_input)
         '''residual'''
-        inputs = torch.cat([key_value_input, query_input], dim=1)
-        res = self.res(inputs)
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
 
-
+        # query_input=self.Q_LN(query_input)
         '''key value from input1'''
-        key = self.key(key_value_input)
-        value = self.value(key_value_input)
 
-        query = self.query(query_input)
-
-
-        '''attention score'''
-        att_map = key * query
-        att_map = self.sig(att_map*self.scale)
-
-        x = (att_map * value)
-        x = self.att(x)
-
-        x = torch.cat([x, res], dim=1)
+        x=torch.cat([key_value_input, query_input],dim=1)
 
         output = self.d(x)
         return output
@@ -673,26 +1095,884 @@ class att_conv_normalized(nn.Module):
         # self.activation=activation
 
         self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+            # LayerNorm2D(in_c1),
+            # activation_function,
+            # nn.Conv2d(in_c1, in_c1, kernel_size=1),
         ).to('cuda')
         self.LN = LayerNorm2D(in_c1).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+            # LayerNorm2D(in_c1),
+            # activation_function,
+            # nn.Conv2d(in_c1, in_c1, kernel_size=1),
+            ).to('cuda')
+
+        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, in_c1, kernel_size=1),
+            nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.sig = nn.Sigmoid()
+
+        self.in_c1=in_c1
+
+        self.d = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            nn.Dropout2d(drop_out_ratio),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+
+        key_value_input=self.LN(key_value_input)
+
+        value = self.value(key_value_input)
+        query = self.query(query_input)
+        key = self.key(key_value_input)
+
+        # print(value[0,:,0,0:10])
+        # print(query[0,:,0,0:10])
+        # print(key[0,:,0,0:10])
+        # print('-----------------')
+
+        att_map =  query * key
+
+        att_map=att_map.unflatten(1,(8,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map = F.softmax(att_map,dim=1)
+        att_map = F.sigmoid(att_map*self.scale)
+
+        att_map=att_map.flatten(1,2)
+
+
+        x = (att_map * value)
+
+        output = self.d(x)
+        return output
+class att_conv_normalized128(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 128, kernel_size=1),
+        ).to('cuda')
+
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 128, kernel_size=1),
+        ).to('cuda')
+
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 128, kernel_size=1),
+        ).to('cuda')
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(128, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+
+        key = self.key(key_value_input)
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)
+
+
+        output = self.d(x)
+        return output
+
+class PixelNorm(nn.Module):
+    def __init__(self, eps=1e-8):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x):
+        return x / (x.pow(2).mean(dim=1, keepdim=True) + self.eps).sqrt()
+class film_conv_normalized(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        # self.activation=activation
+
+        # self.key = nn.Sequential(
+        #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        # ).to('cuda')
+        # self.LN = LayerNorm2D(in_c1).to('cuda')
+
+        # self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+
+
+        self.scale = nn.Sequential(
+            # LayerNorm2D(in_c2),
+
+            nn.Conv2d(in_c2, in_c1, kernel_size=1,bias=False),
+        ).to('cuda')
+        self.shift = nn.Sequential(
+            # LayerNorm2D(in_c2),
+
+            nn.Conv2d(in_c2, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.sig = nn.Sigmoid()
+
+        self.d = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
+            LayerNorm2D(64,elementwise_affine=True),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32,elementwise_affine=True),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+
+        # normalzied_query_input=self.Q_LN(query_input)
+        '''residual'''
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
+
+
+        '''key value from input1'''
+
+        value = self.value(key_value_input)
+
+        # query_input=self.scale_invarience(query_input)
+        scale = self.scale(query_input)
+        shift = self.shift(query_input)
+
+
+        # scale=scale.unflatten(1,(2,-1))
+        # scale = F.softmax(scale, dim=1)
+        # scale=scale.flatten(1,2)
+
+        #
+        modulation =  value * (1+scale)#+shift
+
+        # att_map = self.sig(att_map)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(modulation)
+        return output
+class film_conv_normalized_128(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        # self.activation=activation
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        ).to('cuda')
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1*2, kernel_size=1),
         ).to('cuda')
 
         # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
+            LayerNorm2D(in_c2),
+            nn.Conv2d(in_c2, in_c1*2, kernel_size=1),
+        ).to('cuda')
+
+        self.sig = nn.Sigmoid()
+
+        self.d = nn.Sequential(
+            nn.Conv2d(in_c1*2, in_c1, kernel_size=1),
+            LayerNorm2D(in_c1),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            LayerNorm2D(32),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+
+        # normalzied_query_input=self.Q_LN(query_input)
+        '''residual'''
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
+
+
+        '''key value from input1'''
+
+        value = self.value(key_value_input)
+        # key = self.key(key_value_input)
+
+        scale = self.query(query_input)
+        # scale = F.softmax(scale, dim=1)
+
+        modulation =  value * scale#+shift
+
+        # att_map = self.sig(att_map)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(modulation)
+        return output
+
+class att_conv_normalized_free(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0., drop_out_ratio=0.0,
+                 activation=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        # self.activation=activation
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        ).to('cuda')
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, in_c1, kernel_size=1),
+
+            # nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
+            # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(32, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.sig = nn.Sigmoid()
+
+        self.in_c1 = in_c1
+
+        self.d = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
+            # LayerNorm2D(64),
+            activation_function,
+            nn.Conv2d(64, 32, kernel_size=1, bias=False),
+            # LayerNorm2D(32),
+            nn.Dropout2d(drop_out_ratio),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1),
+        ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+
+        value = self.value(key_value_input)
+        query = self.query(query_input)
+        key = self.key(key_value_input)
+
+        # print(value[0,:,0,0:10])
+        # print(query[0,:,0,0:10])
+        # print(key[0,:,0,0:10])
+        # print('-----------------')
+
+        att_map = query * key
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        att_map = F.softmax(att_map, dim=1)
+        x = (att_map * value)
+
+        output = self.d(x)
+        return output
+
+def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
+    for name, layer in model.named_children():
+        if isinstance(layer, layer_types):
+            setattr(model, name, spectral_norm(layer))
+        else:
+            add_spectral_norm_selective(layer, layer_types)
+    return model
+
+class att_conv_LN(nn.Module):
+    def  __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,shallow=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.activation=activation_function
+        s=int(in_c2*8)
+
+        self.scale = nn.Parameter(torch.tensor(torch.ones(1,in_c2,1,1,1), dtype=torch.float32, device='cuda'), requires_grad=True)
+
+        # self.neck = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(in_c1, 32, kernel_size=1),
+        #     activation_function,
+        #     # nn.Conv2d(32, 48, kernel_size=1)
+        # ).to('cuda')
+
+        self.s=s
+        self.in_c2=in_c2
+
+        self.key = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        # self.res = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(in_c1, 16, kernel_size=1),
+        #     activation_function,
+        # ).to('cuda')
+
+        # self.att = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(48, 32, kernel_size=1),
+        #     activation_function,
+        # ).to('cuda')
+        # self.LN = LayerNorm2D(in_c1).to('cuda')
+
+        # self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        # self.value = nn.Sequential(
+        #     nn.Conv2d(in_c1, 32, kernel_size=1),
+        # ).to('cuda')
+
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2,in_c2*32, kernel_size=1,groups=in_c2),
+            # # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(in_c2*4, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2 * 32, in_c2 * 12, kernel_size=1, groups=in_c2,bias=False),
+            LayerNorm2D( in_c2 * 12),
+            # nn.InstanceNorm2d(in_c2 * 12),
+            activation_function,
+            nn.Conv2d(in_c2 * 12, 16, kernel_size=1,bias=False),
+            LayerNorm2D( 16),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+        # self.sig = nn.Sigmoid()
+
+        # self.d =nn.Sequential(
+        #     nn.Conv2d(64, 16, kernel_size=1),
+        #     activation_function,
+        #     nn.Conv2d(16, out_c, kernel_size=1),
+        # ).to('cuda') if shallow  else nn.Sequential(
+        #     nn.Conv2d(64, 32, kernel_size=1),
+        #     activation_function,
+        #     nn.Conv2d(32, 16, kernel_size=1),
+        #     nn.Dropout2d(drop_out_ratio),
+        #     activation_function,
+        #     nn.Conv2d(16, out_c, kernel_size=1),
+        # ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+        key_value_input = self.LN(key_value_input)
+        # key_value_input=self.activation(key_value_input)
+
+        # normalzied_query_input=self.Q_LN(query_input)
+        '''residual'''
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
+
+        # key_value_input = self.neck(key_value_input)
+
+        '''key value from input1'''
+        key = self.key(key_value_input)
+        value = self.value(key_value_input)
+        query = self.query(query_input)
+
+        # key=key.unflatten(1,(self.in_c2,8))
+        # value=value.unflatten(1,(self.in_c2,8))
+        key=key[:,None,...]
+        value=value[:,None,...]
+
+        query=query.unflatten(1,(self.in_c2,32))
+
+        att_map = key * query
+
+        # att_map=att_map.unflatten(1,(8,8))
+        att_map=att_map*self.scale # B, c,8,h,w
+        # att_map = att_map.unflatten(2, (4, 8))
+        att_map=F.softmax(att_map,dim=2)
+        # att_map = att_map.flatten(2, 3)
+
+        '''attention score'''
+        att_scores = value * att_map
+
+        att_scores=att_scores.flatten(1,2)
+        # att_map = self.sig(att_map*self.scale)
+        # x=self.att(x)
+
+        # x = torch.cat([x, res], dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(att_scores)
+        return output
+class att_conv_LN2(nn.Module):
+    def  __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,shallow=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.activation=activation_function
+        s=int(in_c2*8)
+
+        self.s=s
+        self.in_c2=in_c2
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 64, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2,64, kernel_size=1),
+            # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(32, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d( 64, 32, kernel_size=1, bias=False),
+            LayerNorm2D( 32),
+            # nn.InstanceNorm2d(in_c2 * 12),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            LayerNorm2D( 16),
+            # nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+
+    def forward(self, key_value_input, query_input):
+        key_value_input = self.LN(key_value_input)
+
+
+        '''key value from input1'''
+        key = self.key(key_value_input)
+        res = self.res(key_value_input)
+        query = self.query(query_input)
+
+        query=F.softmax(query,dim=1)
+
+
+        att_scores = key * query
+
+        # att_map=att_map.unflatten(1,(8,8))
+        # att_map=att_map*self.scale # B, c,8,h,w
+        # att_map = att_map.unflatten(2, (4, 8))
+        # att_map=F.softmax(att_map,dim=2)
+        # att_map = att_map.flatten(2, 3)
+
+        '''attention score'''
+        # att_scores = value + att_map
+
+        # att_scores=att_scores.flatten(1,2)
+        # att_map = self.sig(att_map*self.scale)
+        # x=self.att(x)
+
+        # x = torch.cat([x, res], dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(att_scores)
+        return output
+class att_conv_LN3(nn.Module):
+    def  __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,shallow=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.activation=activation_function
+        s=int(in_c2*8)
+
+        self.s=s
+        self.in_c2=in_c2
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 64, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2,64, kernel_size=1),
+            # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(32, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.shift = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2,64, kernel_size=1),
+            # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(32, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d( 64, 32, kernel_size=1, bias=False),
+            LayerNorm2D( 32),
+            # nn.InstanceNorm2d(32),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            LayerNorm2D( 16),
+            # nn.InstanceNorm2d(16),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+
+    def forward(self, key_value_input, query_input):
+        key_value_input = self.LN(key_value_input)
+        # key_value_input = F.normalize(key_value_input, p=2, dim=1)
+
+
+        '''key value from input1'''
+        key = self.key(key_value_input)
+        shift = self.shift(query_input)
+        scale = self.query(query_input)
+
+        scale=scale.unflatten(1,(2,-1))
+        scale=F.softmax(scale,dim=1)
+        scale = scale.flatten(1, 2)
+
+        # scale=1+0.5*torch.tanh(scale)
+        att_scores = key * scale
+
+        # att_map=att_map*self.scale # B, c,8,h,w
+        # att_map = att_map.unflatten(2, (4, 8))
+        # att_map=F.softmax(att_map,dim=2)
+        # att_map = att_map.flatten(2, 3)
+
+        '''attention score'''
+        # att_scores = value + att_map
+
+        # att_scores=att_scores.flatten(1,2)
+        # att_map = self.sig(att_map*self.scale)
+        # x=self.att(x)
+
+        # x = torch.cat([x, res], dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(att_scores)
+        return output
+
+class att_conv_norm_free(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0., drop_out_ratio=0.0,
+                 activation=None, shallow=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.activation = activation_function
+        s = int(in_c2 * 8)
+
+        self.scale = nn.Parameter(torch.tensor(torch.ones(1, in_c2, 1, 1, 1), dtype=torch.float32, device='cuda'),
+                                  requires_grad=True)
+
+        # self.neck = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(in_c1, 32, kernel_size=1),
+        #     activation_function,
+        #     # nn.Conv2d(32, 48, kernel_size=1)
+        # ).to('cuda')
+
+        self.s = s
+        self.in_c2 = in_c2
+
+        self.key = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, in_c1//2, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, in_c1//2, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        # self.res = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(in_c1, 16, kernel_size=1),
+        #     activation_function,
+        # ).to('cuda')
+
+        # self.att = nn.Sequential(
+        #     # LayerNorm2D(in_c1),
+        #     nn.Conv2d(48, 32, kernel_size=1),
+        #     activation_function,
+        # ).to('cuda')
+        # self.LN = LayerNorm2D(in_c1).to('cuda')
+
+        # self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        # self.value = nn.Sequential(
+        #     nn.Conv2d(in_c1, 32, kernel_size=1),
+        # ).to('cuda')
+
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+        self.query = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2, in_c2 * (in_c1//2), kernel_size=1, groups=in_c2),
+            # # LayerNorm2D(32),
+            # activation_function,
+            # nn.Conv2d(in_c2*4, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.d = nn.Sequential(
+            # nn.Conv2d(in_c2, s, kernel_size=1, groups=in_c2),
+            nn.Conv2d(in_c2 * (in_c1//2), in_c2 * 12, kernel_size=1, groups=in_c2),
+            nn.Dropout2d(0.),
+            activation_function,
+            nn.Conv2d(in_c2 * 12, 16, kernel_size=1),
+            nn.Dropout2d(drop_out_ratio),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+        # self.sig = nn.Sigmoid()
+
+        # self.d =nn.Sequential(
+        #     nn.Conv2d(64, 16, kernel_size=1),
+        #     activation_function,
+        #     nn.Conv2d(16, out_c, kernel_size=1),
+        # ).to('cuda') if shallow  else nn.Sequential(
+        #     nn.Conv2d(64, 32, kernel_size=1),
+        #     activation_function,
+        #     nn.Conv2d(32, 16, kernel_size=1),
+        #     nn.Dropout2d(drop_out_ratio),
+        #     activation_function,
+        #     nn.Conv2d(16, out_c, kernel_size=1),
+        # ).to('cuda')
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # key_value_input=self.activation(key_value_input)
+
+        # normalzied_query_input=self.Q_LN(query_input)
+        '''residual'''
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
+
+        # key_value_input = self.neck(key_value_input)
+
+        '''key value from input1'''
+        key = self.key(key_value_input)
+        value = self.value(key_value_input)
+        query = self.query(query_input)
+
+        # key=key.unflatten(1,(self.in_c2,8))
+        # value=value.unflatten(1,(self.in_c2,8))
+        key = key[:, None, ...]
+        value = value[:, None, ...]
+
+        query = query.unflatten(1, (self.in_c2, 32))
+
+        att_map = key * query
+
+        # att_map=att_map.unflatten(1,(8,8))
+        att_map = att_map * self.scale  # B, c,8,h,w
+        att_map = att_map.unflatten(2, (2, 16))
+        att_map = F.softmax(att_map, dim=2)
+        att_map = att_map.flatten(2, 3)
+
+        '''attention score'''
+        att_scores = value * att_map
+
+        att_scores = att_scores.flatten(1, 2)
+        # att_map = self.sig(att_map*self.scale)
+        # x=self.att(x)
+
+        # x = torch.cat([x, res], dim=1)
+
+        # x = (att_map * value)
+
+        output = self.d(att_scores)
+        return output
+
+
+class att_conv_LN_normalize(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,shallow=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        self.activation=activation_function
+        self.scale = nn.Parameter(torch.tensor(torch.ones(1,1,16,1,1), dtype=torch.float32, device='cuda'), requires_grad=True)
+
+        self.key = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+
+        self.LN = LayerNorm2D(in_c1).to('cuda')
+        self.query = nn.Sequential(
             nn.Conv2d(in_c2, 32, kernel_size=1),
+
         ).to('cuda')
 
 
 
-        self.sig = nn.Sigmoid()
+        # self.sig = nn.Sigmoid()
 
 
-        self.d = nn.Sequential(
+        self.d =nn.Sequential(
+            nn.Conv2d(16, 16, kernel_size=1,bias=False),
+            LayerNorm2D(16),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda') if shallow  else nn.Sequential(
             nn.Conv2d(32, 16, kernel_size=1,bias=False),
             LayerNorm2D(16),
             activation_function,
@@ -704,31 +1984,42 @@ class att_conv_normalized(nn.Module):
         ).to('cuda')
 
     def forward(self, key_value_input, query_input):
-        normalized_key_value = self.LN(key_value_input)
-        # normalized_key_value=self.activation(normalized_key_value)
+        key_value_input = self.LN(key_value_input)
+        # key_value_input=self.activation(key_value_input)
 
         # normalzied_query_input=self.Q_LN(query_input)
         '''residual'''
         # inputs = torch.cat([key_value_input, query_input], dim=1)
 
+        # res = self.res(key_value_input)
 
         '''key value from input1'''
-        key = self.key(normalized_key_value)
-        value = self.value(normalized_key_value)
+        key = self.key(key_value_input)
+        value = self.value(key_value_input)
 
         query = self.query(query_input)
 
+        att_map = key * query
+
+        att_map=att_map.unflatten(1,(2,16))
+        att_map=att_map*self.scale
+        att_map=F.softmax(att_map,dim=1)
+        att_map=att_map.flatten(1,2)
+
 
         '''attention score'''
-        att_map = key * query
-        att_map = self.sig(att_map*self.scale)
+        att_scores = value * att_map
+        # att_map = self.sig(att_map*self.scale)
+        # x=self.att(x)
 
-        x = (att_map * value)
+        # x = torch.cat([x, res], dim=1)
 
-        output = self.d(x)
+        # x = (att_map * value)
+
+        output = self.d(att_scores)
         return output
 
-class att_conv_normalize_free(nn.Module):
+class att_conv_LN_normalize_res(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
                  activation=None,shallow=False):
         super().__init__()
@@ -738,52 +2029,80 @@ class att_conv_normalize_free(nn.Module):
         else:
             activation_function = activation
 
-        # self.activation=activation
+        self.activation=activation_function
+        # self.scale = nn.Parameter(torch.tensor(torch.ones(1,1,16,1,1), dtype=torch.float32, device='cuda'), requires_grad=True)
 
         self.key = nn.Sequential(
+            # LayerNorm2D(in_c1),
             nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        self.value = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1),
+            # activation_function,
+            # nn.Conv2d(32, 48, kernel_size=1)
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            nn.Conv2d(in_c1, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
+        ).to('cuda')
+
+        self.att = nn.Sequential(
+            # LayerNorm2D(in_c1),
+            # nn.Conv2d(32, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
+            activation_function,
         ).to('cuda')
         # self.LN = LayerNorm2D(in_c1).to('cuda')
 
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
-        ).to('cuda')
+        # self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        # self.value = nn.Sequential(
+        #     nn.Conv2d(in_c1, 32, kernel_size=1),
+        # ).to('cuda')
 
-        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.LN = LayerNorm2D(in_c1).to('cuda')
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, 32, kernel_size=1),
+            # LayerNorm2D(16),
+            # activation_function,
+            # nn.Conv2d(16, 32, kernel_size=1),
         ).to('cuda')
 
-
-
-        self.sig = nn.Sigmoid()
 
 
         self.d =nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
-            # LayerNorm2D(16),
+            nn.Conv2d(64, 32, kernel_size=1),
+            LayerNorm2D(32),
             activation_function,
             nn.Conv2d(16, out_c, kernel_size=1),
         ).to('cuda') if shallow  else nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
-            # LayerNorm2D(16),
+            nn.Conv2d(64, 32, kernel_size=1,bias=False),
+            LayerNorm2D(32),
             activation_function,
-            nn.Conv2d(16, 8, kernel_size=1,bias=False),
-            # LayerNorm2D(8),
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            LayerNorm2D(16),
             nn.Dropout2d(drop_out_ratio),
             activation_function,
-            nn.Conv2d(8, out_c, kernel_size=1),
+            nn.Conv2d(16, out_c, kernel_size=1),
         ).to('cuda')
 
+        self.sig=nn.Sigmoid()
+
     def forward(self, key_value_input, query_input):
-        # normalized_key_value = self.LN(key_value_input)
-        # normalized_key_value=self.activation(normalized_key_value)
+        key_value_input = self.LN(key_value_input)
+        # key_value_input=self.activation(key_value_input)
 
         # normalzied_query_input=self.Q_LN(query_input)
         '''residual'''
         # inputs = torch.cat([key_value_input, query_input], dim=1)
 
+        res = self.res(key_value_input)
 
         '''key value from input1'''
         key = self.key(key_value_input)
@@ -791,85 +2110,23 @@ class att_conv_normalize_free(nn.Module):
 
         query = self.query(query_input)
 
+        att_map = key * query
+
+        # att_map=att_map.unflatten(1,(2,16))
+        # att_map=att_map*self.scale
+        att_map=self.sig(att_map)
+        # att_map=att_map.flatten(1,2)
+
 
         '''attention score'''
-        att_map = key * query
-        att_map = self.sig(att_map*self.scale)
+        att_scores = value * att_map
+        # att_map = self.sig(att_map*self.scale)
+        x=self.att(att_scores)
 
-        x = (att_map * value)
+        x = torch.cat([x, res], dim=1)
+
+        # x = (att_map * value)
 
         output = self.d(x)
         return output
 
-class att_conv_I_N(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
-                 activation=None,shallow=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-
-        # self.activation=activation
-
-        self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
-        ).to('cuda')
-        self.LN = nn.InstanceNorm2d(in_c1).to('cuda')
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 32, kernel_size=1),
-        ).to('cuda')
-
-        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 32, kernel_size=1),
-        ).to('cuda')
-
-
-
-        self.sig = nn.Sigmoid()
-
-
-        self.d =nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
-            nn.InstanceNorm2d(16),
-            activation_function,
-            nn.Conv2d(16, out_c, kernel_size=1),
-        ).to('cuda') if shallow  else nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
-            nn.InstanceNorm2d(16),
-            activation_function,
-            nn.Conv2d(16, 8, kernel_size=1,bias=False),
-            nn.InstanceNorm2d(8),
-            nn.Dropout2d(drop_out_ratio),
-            activation_function,
-            nn.Conv2d(8, out_c, kernel_size=1),
-        ).to('cuda')
-
-    def forward(self, key_value_input, query_input):
-        # normalized_key_value = self.LN(key_value_input)
-        # normalized_key_value=self.activation(normalized_key_value)
-
-        # normalzied_query_input=self.Q_LN(query_input)
-        '''residual'''
-        # inputs = torch.cat([key_value_input, query_input], dim=1)
-
-
-        '''key value from input1'''
-        key = self.key(key_value_input)
-        value = self.value(key_value_input)
-
-        query = self.query(query_input)
-
-
-        '''attention score'''
-        att_map = key * query
-        att_map = self.sig(att_map*self.scale)
-
-        x = (att_map * value)
-
-        output = self.d(x)
-        return output

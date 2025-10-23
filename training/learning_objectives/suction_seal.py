@@ -153,4 +153,5 @@ def get_suction_seal_loss(pc,normals,target_index,prediction_,statistics,spatial
         view_suction_area(pc, spherical_mask, target_point, target_normal, spatial_mask)
 
     statistics.update_confession_matrix(label, prediction_.detach())
+
     return bce_loss(prediction_, label)

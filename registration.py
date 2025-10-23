@@ -25,6 +25,7 @@ def crop_scene_image(rgb_full):
     return heap_rgb
 
 def standardize_depth(depth):
+    depth=depth.clone()
     depth[depth < 0.0001] = depth_lower_bound
     depth=(depth-depth_mean)/depth_std
     return depth

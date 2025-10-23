@@ -2,6 +2,7 @@ import copy
 import math
 
 import numpy as np
+import torch
 import trimesh
 from matplotlib import pyplot as plt
 from sklearn.cluster import DBSCAN
@@ -14,33 +15,35 @@ from lib.grasp_utils import shift_a_distance
 from lib.mesh_utils import construct_gripper_mesh
 
 
-def grasp_collision_detection(T_d_,width,point_data, visualize=False,with_allowance=True,allowance=dist_allowance,check_floor_collision=True,floor_elevation_=None):
-    T_d=np.copy(T_d_)
-    assert np.any(np.isnan(T_d))==False,f'{T_d}'
+def grasp_collision_detection(T_d_,width,point_data, visualize=False,with_allowance=True,allowance=dist_allowance,floor_elevation_=None):
+    T_d=T_d_.clone()
+    assert torch.any(torch.isnan(T_d))==False,f'{T_d}'
     #########################################################
     '''Push the gripper to the maximum inference allowance'''
     if with_allowance:
         T_d=shift_a_distance(T_d, -allowance)
 
-    point_data =copy.deepcopy(point_data)
+    point_data =point_data.clone()
 
     assert point_data.shape[0]>0,f'{point_data.shape}'
 
-    has_collision,grasp_quality = fast_singularity_check(width, T_d, point_data,check_floor_collision=check_floor_collision,floor_elevation_=floor_elevation_)
+    has_collision,grasp_quality = fast_singularity_check(width, T_d, point_data,floor_elevation_=floor_elevation_)
 
     if  visualize:
         mesh = construct_gripper_mesh(width, T_d)
         scene = trimesh.Scene()
+
         scene.add_geometry([trimesh.PointCloud(point_data), mesh])
+
         scene.show()
 
     return has_collision,(grasp_quality<0.5 if grasp_quality is not None else False)
 
-def gripper_firmness_check(T_d_,width,point_data, visualize=False,with_allowance=True,check_floor_collision=True,floor_elevation_=None):
-    T_d=np.copy(T_d_)
-    assert np.any(np.isnan(T_d))==False,f'{T_d}'
-    assert np.any(np.isnan(width))==False,f'{width}'
-    assert np.any(np.isnan(point_data))==False,f'{point_data}'
+def gripper_firmness_check(T_d_,width,point_data, visualize=False,with_allowance=True,floor_elevation_=None):
+    T_d=T_d_.clone()
+    assert torch.any(torch.isnan(T_d))==False,f'{T_d}'
+    assert torch.any(torch.isnan(width))==False,f'{width}'
+    assert torch.any(torch.isnan(point_data))==False,f'{point_data}'
 
     #########################################################
     '''Push the gripper to the maximum inference allowance'''
@@ -51,13 +54,15 @@ def gripper_firmness_check(T_d_,width,point_data, visualize=False,with_allowance
 
     assert point_data.shape[0]>0,f'{point_data.shape}'
 
-    has_collision,firmness_val,quality,collision_val = fast_singularity_check_with_firmness_evaluation(width, T_d, point_data,check_floor_collision=check_floor_collision,floor_elevation_=floor_elevation_)
+    has_collision,firmness_val,quality,collision_val = fast_singularity_check_with_firmness_evaluation(width.squeeze().detach(), T_d.detach(), point_data,floor_elevation_=floor_elevation_)
 
     if  visualize:
-        mesh = construct_gripper_mesh(width, T_d)
+        mesh = construct_gripper_mesh(width.squeeze().detach().cpu().numpy(), T_d.detach().cpu().numpy())
         scene = trimesh.Scene()
-        scene.add_geometry([trimesh.PointCloud(point_data), mesh])
+        scene.add_geometry([trimesh.PointCloud(point_data.detach().cpu().numpy()), mesh])
         scene.show()
+        # from visualiztion import view_npy_open3d
+        # view_npy_open3d(point_data.detach().cpu().numpy())
 
     return has_collision,firmness_val,quality,collision_val
 
@@ -98,31 +103,31 @@ def clip_width(T_d,width_, width_step,point_data,min_width=0.005):
     return new_width
 
 def transform_points(points,T,inverse=False):
+    # object_points: shape [N, 3]
+    ones_p = torch.ones((points.shape[0], 1), dtype=points.dtype, device=points.device)
+    points_h  = torch.cat([points, ones_p], dim=-1)  # [N, 4]
+
     if inverse:
-        # object_points: shape [N, 3]
-        ones_p = np.ones([points.shape[0], 1], dtype=points.dtype)
-        object_points_ = np.concatenate([points, ones_p], axis=-1)  # [N, 4]
-
         # Apply original transformation T (NOT inverse)
-        points_ = np.matmul(T, object_points_.T).T  # [N, 4]
-
-        # Extract original 3D points
-        return points_[:, :3]
+        points_ = (T @ points_h.T).T  # [N, 4]
     else:
-        ones_p = np.ones([points.shape[0], 1], dtype=points.dtype)
-        points_ = np.concatenate([points, ones_p], axis=-1)
-        inverse_trans = np.linalg.inv(T)
-        points_ = np.matmul(inverse_trans, points_.T).T
-        object_points = points_[:, :3]
-        return object_points
+        inverse_trans = torch.inverse(T)
+        points_ = (inverse_trans @ points_h.T).T  # [N, 4]
+    return points_[:, :3]
 
-def fast_singularity_check(width, T, points,check_floor_collision=True,floor_elevation_=None):
+def fast_singularity_check(width, T, points,floor_elevation_=None):
     '''
     width: Gripper total width（m）： float
     T： The position of the gripper in the scene ： numpy_array (4*4)
     points: Object points in the scene ： numpy_array (n*3)
     '''
     if floor_elevation_ is None:floor_elevation_=floor_elevation
+    # if not check_floor_collision:
+    # points_shift_1=np.copy(points)
+    # points_shift_1[:,-1]-=0.015
+    # points_shift_2=np.copy(points)
+    # points_shift_2[:,-1]-=0.03
+    # points=np.concatenate([points,points_shift_1,points_shift_2],axis=0)
     # 1、Multiply the point cloud by the inv of T
     object_points = transform_points(points,T,inverse=False)
 
@@ -147,19 +152,19 @@ def fast_singularity_check(width, T, points,check_floor_collision=True,floor_ele
     val_large = val_x_large & val_y_large & val_z_large
     collision_points = object_points[val_large]
 
-    lower_extreme_points=np.array([[x_max,y_large_max,z_max],[x_max,y_large_max,z_min],[x_max,y_large_min,z_max],[x_max,y_large_min,z_min]])
+    # lower_extreme_points=np.array([[x_max,y_large_max,z_max],[x_max,y_large_max,z_min],[x_max,y_large_min,z_max],[x_max,y_large_min,z_min]])
 
     if collision_points.size == 0:
-        if check_floor_collision:
-            original_lower_extremes = transform_points(lower_extreme_points, T, inverse=True)
-            collision_mask = original_lower_extremes[:, -1] < floor_elevation_-dist_allowance
-            if collision_mask.any():
-                # print(original_lower_extremes)
-                # mesh = construct_gripper_mesh(width, T)
-                # scene = trimesh.Scene()
-                # scene.add_geometry([trimesh.PointCloud(points), mesh])
-                # scene.show()
-                return 1,None
+        # if check_floor_collision:
+        #     original_lower_extremes = transform_points(lower_extreme_points, T, inverse=True)
+        #     collision_mask = original_lower_extremes[:, -1] < floor_elevation_-dist_allowance
+        #     if collision_mask.any():
+        #         # print(original_lower_extremes)
+        #         # mesh = construct_gripper_mesh(width, T)
+        #         # scene = trimesh.Scene()
+        #         # scene.add_geometry([trimesh.PointCloud(points), mesh])
+        #         # scene.show()
+        #         return 1,None
         return 0,0
 
     x = collision_points[:, 0]
@@ -172,54 +177,49 @@ def fast_singularity_check(width, T, points,check_floor_collision=True,floor_ele
 
     # print('points in gripper cavity=',points_in_cavity)
 
-    if np.any(~val_small):
+    if torch.any(~val_small):
         # print(collision_points[~val_small])
         return 1,None
     else:
-        if check_floor_collision:
-            original_lower_extremes = transform_points(lower_extreme_points, T, inverse=True)
-            collision_mask = original_lower_extremes[:, -1] < floor_elevation_-dist_allowance
-            if collision_mask.any():
-                # print(original_lower_extremes)
-                # mesh = construct_gripper_mesh(width, T)
-                # scene = trimesh.Scene()
-                # scene.add_geometry([trimesh.PointCloud(points), mesh])
-                # scene.show()
-                # set quality to zero if collision with unseen floor is detected
-                return 0,0
+        # if check_floor_collision:
+        #     original_lower_extremes = transform_points(lower_extreme_points, T, inverse=True)
+        #     collision_mask = original_lower_extremes[:, -1] < floor_elevation_-dist_allowance
+        #     if collision_mask.any():
+        #         # print(original_lower_extremes)
+        #         # mesh = construct_gripper_mesh(width, T)
+        #         # scene = trimesh.Scene()
+        #         # scene.add_geometry([trimesh.PointCloud(points), mesh])
+        #         # scene.show()
+        #         # set quality to zero if collision with unseen floor is detected
+        #         return 0,0
 
         firmness_points = collision_points[val_small]
 
-        tight_y_min=firmness_points[:,1].min()
-        tight_y_max=firmness_points[:,1].max()
+        if firmness_points.numel() > 0:
 
-        def nearest_point(points,target):
-            distances = np.sum((points - target) ** 2, axis=1)
-            min_index = np.argmin(distances)
-            nearest_point = points[min_index]
-            return nearest_point
+            tight_y_min=firmness_points[:,1].min()
+            tight_y_max=firmness_points[:,1].max()
 
-        p1=nearest_point(firmness_points[:,1:],np.array([[tight_y_min,z_min]]))
-        p2=nearest_point(firmness_points[:,1:],np.array([[tight_y_min,z_max]]))
-        v1=p2-p1
-        p3=nearest_point(firmness_points[:,1:],np.array([[tight_y_max,z_min]]))
-        p4=nearest_point(firmness_points[:,1:],np.array([[tight_y_max,z_max]]))
-        v2=p4-p3
+            def nearest_point(points,target):
+                distances = torch.sum((points - target) ** 2, dim=1)
+                min_index = torch.argmin(distances)
+                nearest_point = points[min_index]
+                return nearest_point
 
-        quality=vector_alignment(v1, v2)
-        v_m=(v1+v2)/2.
-        v_ref=np.array([0.,1.])
-        alignment=vector_alignment(v_m, v_ref)
+            p1=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_min,z_min]],device=firmness_points.device))
+            p2=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_min,z_max]],device=firmness_points.device))
+            v1=p2-p1
+            p3=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_max,z_min]],device=firmness_points.device))
+            p4=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_max,z_max]],device=firmness_points.device))
+            v2=p4-p3
 
-        # print(quality)
-        # print(alignment)
+            quality=vector_alignment(v1, v2)
+            v_m=(v1+v2)/2.
+            v_ref=torch.tensor([0.,1.],device=firmness_points.device)
+            alignment=vector_alignment(v_m, v_ref)
 
-        # mesh = construct_gripper_mesh(width, T)
-        # scene = trimesh.Scene()
-        # scene.add_geometry([trimesh.PointCloud(points), mesh])
-        # scene.show()
-
-        return 0, quality*alignment
+            return 0,  quality * alignment
+        else: return 0,0
 
 def vector_alignment(v1, v2):
     """
@@ -235,22 +235,17 @@ def vector_alignment(v1, v2):
     Returns:
     Alignment value between 0 and 1
     """
-    v1 = np.asarray(v1)
-    v2 = np.asarray(v2)
+    # v1 = np.asarray(v1)
+    # v2 = np.asarray(v2)
 
     # Handle zero vectors
-    norm1 = np.linalg.norm(v1)
-    norm2 = np.linalg.norm(v2)
+    norm1 = torch.norm(v1)
+    norm2 = torch.norm(v2)
     if norm1 == 0 or norm2 == 0:
         return 1.0  # Consider orthogonal to avoid undefined cases
 
-    # Compute normalized dot product (cosine of angle between vectors)
-    cosine_similarity = np.dot(v1, v2) / (norm1 * norm2)
-
-    # Convert to alignment measure (0 to 1 scale)
-    # alignment = abs(cosine_similarity)
+    cosine_similarity = torch.dot(v1, v2) / (norm1 * norm2)
     alignment = cosine_similarity**2
-
 
     return alignment
 
@@ -287,14 +282,21 @@ def smooth_point_cloud(points, max_neighbors=10, max_distance=0.1, iterations=1)
 
     return smoothed_points
 
-def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor_collision=True,floor_elevation_=None):
+def fast_singularity_check_with_firmness_evaluation(width, T, points,floor_elevation_=None):
     '''
     width: Gripper total width（m）： float
     T： The position of the gripper in the scene ： numpy_array (4*4)
     points: Object points in the scene ： numpy_array (n*3)
-    Note: the axis changed after the transformation, the z axis becomes the x, and y is the gripper opening
+    Note: the axis changed after the transformation, the z axis spans along the gripper thickness, and y is the gripper opening
     '''
     if floor_elevation_ is None: floor_elevation_=floor_elevation
+    # if not check_floor_collision:
+    # points_shift_1=np.copy(points)
+    # points_shift_1[:,-1]-=0.015
+    # points_shift_2=np.copy(points)
+    # points_shift_2[:,-1]-=0.03
+    # points=np.concatenate([points,points_shift_1,points_shift_2],axis=0)
+
     # 1、Multiply the point cloud by the inv of T
     object_points = transform_points(points, T, inverse=False)
 
@@ -319,21 +321,21 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
     val_large = val_x_large & val_y_large & val_z_large
     collision_points = object_points[val_large]
 
-    lower_extreme_points=np.array([[x_max,y_large_max,z_max],[x_max,y_large_max,z_min],[x_max,y_large_min,z_max],[x_max,y_large_min,z_min]])
+    # lower_extreme_points=np.array([[x_max,y_large_max,z_max],[x_max,y_large_max,z_min],[x_max,y_large_min,z_max],[x_max,y_large_min,z_min]])
 
     if collision_points.size == 0:
         '''no points in the big box'''
-        if check_floor_collision:
-            original_lower_extremes=transform_points(lower_extreme_points, T, inverse=True)
-            collision_mask=original_lower_extremes[:,-1]<floor_elevation_-dist_allowance
-            if collision_mask.any():
-                # print(original_lower_extremes)
-                # mesh = construct_gripper_mesh(width, T)
-                # scene = trimesh.Scene()
-                # scene.add_geometry([trimesh.PointCloud(points), mesh])
-                # scene.show()
-                # set quality to zero if collision with unseen floor is detected
-                return 0,0,0,0
+        # if check_floor_collision:
+        #     original_lower_extremes=transform_points(lower_extreme_points, T, inverse=True)
+        #     collision_mask=original_lower_extremes[:,-1]<floor_elevation_-dist_allowance
+        #     if collision_mask.any():
+        #         # print(original_lower_extremes)
+        #         # mesh = construct_gripper_mesh(width, T)
+        #         # scene = trimesh.Scene()
+        #         # scene.add_geometry([trimesh.PointCloud(points), mesh])
+        #         # scene.show()
+        #         # set quality to zero if collision with unseen floor is detected
+        #         return 0,0,0,0
         return 0, 0,0,0
 
     x = collision_points[:, 0]
@@ -345,50 +347,56 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,check_floor
     val_small = val_x_small & val_y_small & val_z_small # points inside the small box
     dist_ = x_max - x
     firmness_points_dist=dist_[val_small]
-    firmness_weight = firmness_points_dist.mean() if firmness_points_dist.size>0 else 0
+    firmness_weight = firmness_points_dist.mean() if firmness_points_dist.numel()>0 else 0
     firmness_weight /= config.distance_scope
 
     # print('points in gripper cavity=',points_in_cavity)
 
-    if np.any(~val_small):
+    if torch.any(~val_small):
         collision_points = dist_[~val_small]
-        collision_weight = collision_points.mean() if collision_points.size > 0 else 0
+        collision_weight = collision_points.mean() if collision_points.numel() > 0 else 0
         # print(collision_points[~val_small])
 
         return 1, firmness_weight,0,collision_weight
     else:
-        if check_floor_collision:
-            original_lower_extremes=transform_points(lower_extreme_points, T, inverse=True)
-            collision_mask=original_lower_extremes[:,-1]<floor_elevation_-dist_allowance
-            if collision_mask.any():
-                # print(original_lower_extremes)
-                # mesh = construct_gripper_mesh(width, T)
-                # scene = trimesh.Scene()
-                # scene.add_geometry([trimesh.PointCloud(points), mesh])
-                # scene.show()
-                return 1,0,0,1
+        # if check_floor_collision:
+        #     original_lower_extremes=transform_points(lower_extreme_points, T, inverse=True)
+        #     collision_mask=original_lower_extremes[:,-1]<floor_elevation_-dist_allowance
+        #     if collision_mask.any():
+        #         # print(original_lower_extremes)
+        #         # mesh = construct_gripper_mesh(width, T)
+        #         # scene = trimesh.Scene()
+        #         # scene.add_geometry([trimesh.PointCloud(points), mesh])
+        #         # scene.show()
+        #         return 1,0,0,1
 
         firmness_points = collision_points[val_small]
 
-        tight_y_min=firmness_points[:,1].min()
-        tight_y_max=firmness_points[:,1].max()
+        if firmness_points.numel()>0:
+            tight_y_min=firmness_points[:,1].min()
+            tight_y_max=firmness_points[:,1].max()
 
-        def nearest_point(points,target):
-            distances = np.sum((points - target) ** 2, axis=1)
-            min_index = np.argmin(distances)
-            nearest_point = points[min_index]
-            return nearest_point
+            def nearest_point(points,target):
+                distances = torch.sum((points - target) ** 2, dim=1)
+                min_index = torch.argmin(distances)
+                nearest_point = points[min_index]
+                return nearest_point
 
-        p1=nearest_point(firmness_points[:,1:],np.array([[tight_y_min,z_min]]))
-        p2=nearest_point(firmness_points[:,1:],np.array([[tight_y_min,z_max]]))
-        v1=p2-p1
-        p3=nearest_point(firmness_points[:,1:],np.array([[tight_y_max,z_min]]))
-        p4=nearest_point(firmness_points[:,1:],np.array([[tight_y_max,z_max]]))
-        v2=p4-p3
+            p1=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_min,z_min]],device=firmness_points.device))
+            p2=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_min,z_max]],device=firmness_points.device))
+            v1=p2-p1
 
-        quality=vector_alignment(v1, v2)
-        v_m=(v1+v2)/2.
-        v_ref=np.array([0.,1.])
-        alignment=vector_alignment(v_m, v_ref)
+            p3=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_max,z_min]],device=firmness_points.device))
+            p4=nearest_point(firmness_points[:,1:],torch.tensor([[tight_y_max,z_max]],device=firmness_points.device))
+            v2=p4-p3
 
-        return 0, firmness_weight,quality*alignment, 0
+            quality=vector_alignment(v1, v2)
+
+            v_m=(v1+v2)/2.
+            v_ref=torch.tensor([0.,1.],device=firmness_points.device)
+            alignment=vector_alignment(v_m, v_ref)
+
+
+            return 0, firmness_weight,quality*alignment, 0
+        else:
+            return 0, firmness_weight, 0, 0

@@ -90,6 +90,72 @@ class TrainActionNet:
 
             return new_depth
 
+    def visualize(self,depth):
+        '''get parameters'''
+        pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
+        pc = transform_to_camera_frame(pc, reverse=True)
+
+        # downsampling_mask=np.random.random(pc.shape[0])>0.5
+
+        elevation_mask = (pc[:, -1] < 0.15)  # & downsampling_mask
+        mask[mask] = (mask[mask]) & elevation_mask
+        pc = pc[elevation_mask]
+
+        '''generated grasps'''
+        gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class = self.actions_net.model(
+            depth.clone(), detach_backbone=detach_backbone)
+
+        # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
+        # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
+        #
+        # print(self.gan.generator.gripper_sampler.width_biased_tanh.b.data)
+        # # print(self.gan.generator.gripper_sampler.width_biased_tanh.k.data)
+        #
+        # exit()
+        # bin_mask = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=True,
+        #                                 file_index=file_ids[0], cache_name='bin_planes2')
+
+        suction_head_predictions = suction_quality_classifier[0, 0][mask]
+        shift_head_predictions = shift_affordance_classifier[0, 0][mask].cpu().numpy()
+        background_class_predictions = background_class.permute(0, 2, 3, 1)[0, :, :, 0][mask]
+        objects_mask = background_class_predictions.detach().cpu().numpy() <= .5
+        gripper_poses = gripper_pose[0].permute(1, 2, 0)[mask]  # .cpu().numpy()
+        collision_with_objects_predictions = griper_collision_classifier[0, 0][mask]
+        collision_with_bin_predictions = griper_collision_classifier[0, 1][mask]
+        gripper_sampling_mask = (collision_with_objects_predictions < .7) & (collision_with_bin_predictions < .7)
+
+        # normal_view_mask=objects_mask& (suction_head_predictions.cpu().numpy()>0.5)
+        # normals=suction_direction[0].permute(1,2,0)[mask].cpu().numpy()
+
+        # colors=np.ones_like(pc)*[0.52, 0.8, 0.92]
+        # custom_normal_open3d_view(pc=pc, normals=normals,normal_mask=normal_view_mask,color=colors,view_coordinate=False)
+
+        # print(pc[objects_mask].min())
+        # print(pc[~objects_mask].min())
+        # print(pc[objects_mask].max())
+        # print(pc[~objects_mask].max())
+        # exit()
+        # view_image(depth[0,0].cpu().numpy().astype(np.float64))
+
+        # view_image(background_class[0, 0].detach().cpu().numpy().astype(np.float64))
+        # sampling_p=1.-torch.sqrt(collision_with_objects_predictions*collision_with_bin_predictions)
+        sampling_p = 1. - collision_with_objects_predictions ** 2.0
+
+        dense_grasps_visualization(pc, gripper_poses,
+                                   view_mask=(gripper_sampling_mask & torch.from_numpy(objects_mask).cuda()),
+                                   sampling_p=sampling_p, view_all=False)
+
+        # gripper_poses[:,3:5]*=-1
+        # dense_grasps_visualization(pc, gripper_poses, view_mask=gripper_sampling_mask&torch.from_numpy(objects_mask).cuda(),sampling_p=sampling_p,view_all=False)
+
+        suction_head_predictions[~torch.from_numpy(objects_mask).cuda()] *= 0.
+
+        # view_mask(pc, background_class_predictions, pivot=0.5)
+        # view_mask(pc, suction_head_predictions, pivot=0.5)
+        # view_mask(pc, shift_head_predictions, pivot=0.5)
+        # view_mask(pc, collision_with_objects_predictions, pivot=0.5)
+        # view_mask(pc, collision_with_bin_predictions, pivot=0.5)
+
     def begin(self):
 
         pi = progress_indicator('Begin new training round: ', max_limit=len(self.data_loader))
@@ -137,7 +203,7 @@ class TrainActionNet:
             gripper_poses=gripper_pose[0].permute(1,2,0)[mask]#.cpu().numpy()
             collision_with_objects_predictions=griper_collision_classifier[0, 0][mask]
             collision_with_bin_predictions=griper_collision_classifier[0, 1][mask]
-            gripper_sampling_mask=(collision_with_objects_predictions<.5 ) & (collision_with_bin_predictions<.5)
+            gripper_sampling_mask=(collision_with_objects_predictions<.5) & (collision_with_bin_predictions<.5)
 
             # normal_view_mask=objects_mask& (suction_head_predictions.cpu().numpy()>0.5)
             # normals=suction_direction[0].permute(1,2,0)[mask].cpu().numpy()

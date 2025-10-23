@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import time
 
 import smbclient
@@ -107,6 +108,25 @@ def model_exist_check(path):
     else:
         return smbclient.path.exists(full_path)
 
+
+def is_remote_path(path: str) -> bool:
+    """
+    Heuristically check if a path is remote (server) or local.
+    """
+    # SMB/UNC paths
+    if path.startswith(r"\\") or path.startswith("//"):
+        return True
+
+    # NFS or SCP style: host:/path
+    if re.match(r"^[\w\.-]+:/", path):  # e.g., "server:/data" or "user@host:/path"
+        return True
+
+    # URL-based remote paths
+    if re.match(r"^(smb|nfs|ssh|ftp|http|https)://", path):
+        return True
+
+    return False
+
 def load_dictionary(file_name,wait=False):
     full_path=check_points_directory+file_name
     c=0
@@ -115,7 +135,7 @@ def load_dictionary(file_name,wait=False):
             if os.path.exists(full_path):
                 # local path
                 return torch.load(full_path, map_location='cpu')
-            elif smbclient.path.exists(full_path):
+            elif is_remote_path(full_path) and smbclient.path.exists(full_path):
                 # on server
                 with smbclient.open_file(full_path, mode='rb') as file:
                     buffer=io.BytesIO(file.read())
@@ -124,7 +144,8 @@ def load_dictionary(file_name,wait=False):
         except Exception as e:
             if  wait:
                 if c == 0:
-                    print(Fore.RED, f'Unable to access the checkpoint file', Fore.RESET)
+                    print(Fore.RED, f'Unable to access the checkpoint file, path: {full_path}', Fore.RESET)
+                    print(str(e))
                 c+=1
             else:
                 print(Fore.RED, f'Error while loading the checkpoint file: {str(e)}', Fore.RESET)
@@ -149,6 +170,7 @@ def initialize_model_state(model,model_state_path,wait=False):
 
 def initialize_model(model_obj,path,wait=False):
     try:
+        # print(path)
         model_obj = initialize_model_state(model_obj, path,wait=wait)
     except Exception as e:
         print(Fore.RED, 'Load state dictionary exception,  ', str(e), Fore.RESET)
