@@ -23,12 +23,12 @@ def check_valid_pair(c_, s_, f_, q_,annealing_factor,prediction_uniqeness):
         if c_[1] == 0 and f_[1] > 0. and q_[1] > 0.5 and c_[0]>0:
             return True, 1, 1
         elif c_[0] == 0 and f_[0] > 0. and q_[0] > 0.5 and c_[1]>0:
-            # return False, 1, -1
+            return False, 1, -1
 
-            if np.random.rand()<prediction_uniqeness:
-                return True,  1, -1
-            else:
-                return False, 0, 0
+            # if np.random.rand()<prediction_uniqeness*annealing_factor**2:
+            #     return True,  1, -1
+            # else:
+            #     return False, 0, 0
         else:
             return False,  0, 0
 
@@ -41,7 +41,7 @@ def check_valid_pair(c_, s_, f_, q_,annealing_factor,prediction_uniqeness):
             relative_firmness = (abs(f_[1] - f_[0]) / (f_[1] + f_[0]))
             # return True, relative_firmness, -1
 
-            if np.random.rand() < prediction_uniqeness:
+            if np.random.rand() < prediction_uniqeness*annealing_factor**2:
                 return True,   relative_firmness, -1
             else:
                 return False, 0, 0
@@ -179,7 +179,7 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
 
         # print(target_ref_pose)
 
-        prediction_uniqeness= (1- grasp_quality[target_index].item())*(target_generated_pose[-2].item()**0.5)
+        prediction_uniqeness= (1- torch.clamp( grasp_quality[target_index],0,1).item())
         # print(f'prediction_uniqeness {prediction_uniqeness}')
         c_, s_, f_, q_ = evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, bin_mask,
                                           visualize=False)
@@ -287,7 +287,7 @@ def sample_contrastive_pairs1d(  pc,  bin_mask, gripper_pose_PW, gripper_pose_re
 
         # print(target_ref_pose)
 
-        prediction_uniqeness= ((1- grasp_quality[target_index].item())**2)*(target_generated_pose[-2].item()**0.5)
+        prediction_uniqeness= (1- torch.clamp( grasp_quality[target_index],0,1).item())
         # print(f'prediction_uniqeness {prediction_uniqeness}')
         c_, s_, f_, q_ = evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, bin_mask,
                                           visualize=False)

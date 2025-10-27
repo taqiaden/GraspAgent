@@ -168,7 +168,6 @@ class TrainGraspGAN:
 
         '''self supervised critic learning'''
         with torch.no_grad():
-        #     generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
 
             generated_grasps_stack=[]
             for pair in pairs:

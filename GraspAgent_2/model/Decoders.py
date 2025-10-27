@@ -505,7 +505,7 @@ class film_fusion_2d(nn.Module):
         ).to('cuda')
 
         self.gate = nn.Sequential(
-            nn.Conv2d(in_c2, in_c1, kernel_size=1),
+            nn.Conv2d(in_c2+in_c1, in_c1, kernel_size=1),
             nn.Sigmoid()
         ).to('cuda')
 
@@ -527,9 +527,8 @@ class film_fusion_2d(nn.Module):
             nn.Conv2d(32, out_c, kernel_size=1),
         ).to('cuda')
 
-
     def forward(self, key_value_input, query_input):
-        gate=self.gate(query_input)
+        gate=self.gate(torch.cat([query_input,key_value_input],dim=1))
         key_value_input=key_value_input*gate
 
         x = self.value(key_value_input)
@@ -555,24 +554,27 @@ class film_fusion_1d(nn.Module):
 
         self.value = nn.Sequential(
             nn.Linear(in_c1, 64),
-            nn.LayerNorm(64),
-            activation_function,
-            nn.Linear(64, 64),
-        ).to('cuda') if normalize else nn.Sequential(
-            nn.Linear(in_c1, 64),
-            activation_function,
-            nn.Linear(64, 64),
         ).to('cuda')
 
 
         self.film_gen = nn.Sequential(
             nn.Linear(in_c2, 64*2),
-            # LayerNorm2D(64),
-            # activation_function,
-            # nn.Conv2d(64, 64 * 2, kernel_size=1),
+        ).to('cuda')
+
+        self.gate = nn.Sequential(
+            nn.Linear(in_c2, 64),
+            nn.Sigmoid()
         ).to('cuda')
 
         self.d = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Linear(64, 32),
+            nn.LayerNorm(32),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Linear(32, out_c),
+        ).to('cuda') if normalize else nn.Sequential(
             nn.Linear(64, 64),
             ParameterizedSine() if use_sin else activation_function,
             nn.Linear(64, 32),
@@ -584,10 +586,11 @@ class film_fusion_1d(nn.Module):
 
 
     def forward(self, key_value_input, query_input):
+        gate = self.gate(query_input)
+        key_value_input=key_value_input*gate
 
         x = self.value(key_value_input)
         gamma,beta = self.film_gen(query_input).chunk(2,dim=-1)
-        # key = self.key(key_value_input)
 
         x=gamma*x+beta
 

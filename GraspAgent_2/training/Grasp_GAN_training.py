@@ -57,6 +57,7 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0):
         max_ = values.max().item()
         min_ = values.min().item()
         range_ = max_ - min_
+        # assert range_>0.0001
 
 
         if not range_>0.:
@@ -64,14 +65,16 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0):
             selection_probability=torch.rand_like(values)
         else:
             pivot_point = np.sqrt(np.abs(balance_indicator)) * np.sign(balance_indicator)
-            # xa = ((max_ - values) / range_) * pivot_point
-            xa=(1-values)* pivot_point
+            xa = ((max_ - values) / range_) * pivot_point
+            # xa=(1-values)* pivot_point
             selection_probability = ((1 - pivot_point) / 2 + xa + 0.5 * (1 - abs(pivot_point)))
             selection_probability = selection_probability ** exponent
 
         if mask is None:
             dist = Categorical(probs=selection_probability)
         else:
+
+
             dist = MaskedCategorical(probs=selection_probability, mask=mask)
 
         target_index = dist.sample()
@@ -188,37 +191,34 @@ class TrainGraspGAN:
         self.gan.critic_optimizer.zero_grad()
 
         '''self supervised critic learning'''
-        with torch.no_grad():
-            generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
+        # with torch.no_grad():
+        #     generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
 
-            # generated_grasps_stack=[]
-            # target_pixels_list=[]
-            # for pair in pairs:
-            #     index=pair[0]
-            #     pixel_index=pair[3]
-            #     target_pixels_list.append(pixel_index)
-            #
-            #     pred_pose=gripper_pose[index]
-            #     label_pose=gripper_pose_ref[index]
-            #     pair_pose=torch.stack([pred_pose,label_pose])
-            #     generated_grasps_stack.append(pair_pose)
-            #
-            # generated_grasps_stack=torch.stack(generated_grasps_stack)
+        with torch.no_grad():
+            generated_grasps_stack = []
+            for pair in pairs:
+                index = pair[0]
+
+                pred_pose = gripper_pose[index]
+                label_pose = gripper_pose_ref[index]
+                pair_pose = torch.stack([pred_pose, label_pose])
+                generated_grasps_stack.append(pair_pose)
+            generated_grasps_stack = torch.stack(generated_grasps_stack)
         # cropped_voxels=torch.stack(cropped_voxels)[:,None,...]
 
         # print(cropped_voxels.shape)
-        score = self.gan.critic(depth[None,None], generated_grasps_cat)
+        score = self.gan.critic(depth[None,None], generated_grasps_stack,pairs)
 
         # print(score)
         # exit()
         #score[600,600]
         #score[mask # n_p
-        gen_scores_ = score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
-        ref_scores_ = score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
+        # gen_scores_ = score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
+        # ref_scores_ = score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
 
 
-        # generated_score=score[:,0]
-        # ref_score=score[:,1]
+        generated_score=score[:,0]
+        ref_score=score[:,1]
 
         loss = torch.tensor(0., device=depth.device)
 
@@ -227,8 +227,8 @@ class TrainGraspGAN:
             margin = pairs[j][1]
             k = pairs[j][2]
 
-            label = ref_scores_[target_index]
-            pred_ = gen_scores_[target_index]
+            label = ref_score[j].squeeze()
+            pred_ = generated_score[j].squeeze()
 
             loss+=(torch.clamp((pred_ - label) * k + margin, 0.)**2)/batch_size
         # loss=self.RGAN_D_loss(pairs,gen_scores_,ref_scores_)
@@ -291,33 +291,33 @@ class TrainGraspGAN:
     def get_generator_loss(self, depth,mask, gripper_pose, gripper_pose_ref, pairs, objects_mask):
 
 
-        generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
+        # generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
 
-        # generated_grasps_stack=[]
-        # target_pixels_list=[]
-        # for pair in pairs:
-        #     index=pair[0]
-        #     pred_pose=gripper_pose[index]
-        #     pixel_index=pair[3]
-        #     target_pixels_list.append(pixel_index)
-        #     label_pose=gripper_pose_ref[index]
-        #     pair_pose=torch.stack([pred_pose,label_pose])
-        #     generated_grasps_stack.append(pair_pose)
-        #
-        # generated_grasps_stack=torch.stack(generated_grasps_stack)
+        gripper_pose = gripper_pose[0].permute(1, 2, 0)[mask]
+
+        generated_grasps_stack = []
+        for pair in pairs:
+            index = pair[0]
+            pred_pose = gripper_pose[index]
+
+            label_pose = gripper_pose_ref[index]
+            pair_pose = torch.stack([pred_pose, label_pose])
+            generated_grasps_stack.append(pair_pose)
+
+        generated_grasps_stack = torch.stack(generated_grasps_stack)
         # cropped_voxels=torch.stack(cropped_voxels)[:,None,...]
         # print(cropped_voxels.shape)
-        critic_score = self.gan.critic(depth[None,None], generated_grasps_cat)
-        # critic_score = self.gan.critic(pc, generated_grasps_cat, detach_backbone=True)
+        # critic_score = self.gan.critic(depth[None,None], generated_grasps_cat)
+        critic_score = self.gan.critic(depth[None,None], generated_grasps_stack, pairs,detach_backbone=True)
 
         gen_scores_ = critic_score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
         ref_scores_ = critic_score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
 
-        gripper_pose = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask]
-        gripper_pose_ref = gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :][mask]
+        # gripper_pose = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :][mask]
+        # gripper_pose_ref = gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :][mask]
 
-        # generated_score = critic_score[:,0]
-        # ref_score = critic_score[:,1]
+        generated_score = critic_score[:,0]
+        ref_score = critic_score[:,1]
 
         loss = torch.tensor(0., device=depth.device)
 
@@ -329,8 +329,8 @@ class TrainGraspGAN:
             target_generated_pose = gripper_pose[target_index].detach()
             target_ref_pose = gripper_pose_ref[target_index].detach()
 
-            label = ref_scores_[target_index]
-            pred_ = gen_scores_[target_index]
+            label = ref_scores_[j]
+            pred_ = gen_scores_[j]
 
             if k==1:
                 print(Fore.LIGHTCYAN_EX,f'{target_ref_pose.cpu()} {target_generated_pose.cpu().detach()} s=[{label.cpu()},{pred_.cpu()}] m={margin}',Fore.RESET)
@@ -610,8 +610,8 @@ class TrainGraspGAN:
                 self.gan.critic.zero_grad(set_to_none=True)
                 self.gan.generator.zero_grad(set_to_none=True)
 
-                # gripper_pose=gripper_pose[0].permute(1,2,0)[mask]
-                # gripper_pose_ref=gripper_pose_ref[0].permute(1,2,0)[mask]
+                gripper_pose=gripper_pose[0].permute(1,2,0)[mask]
+                gripper_pose_ref=gripper_pose_ref[0].permute(1,2,0)[mask]
 
                 self.step_discriminator(depth,mask,  gripper_pose, gripper_pose_ref, pairs)
 
