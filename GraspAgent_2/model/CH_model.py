@@ -158,7 +158,6 @@ class CH_G(nn.Module):
             with torch.no_grad():
                 features = self.back_bone_(input)#*scale
                 features2 = self.back_bone_2(input)#*scale
-
         else:
             features = self.back_bone_(input)#*scale
             features2 = self.back_bone_2(input)#*scale
@@ -211,7 +210,7 @@ class CH_D(nn.Module):
         # self.att_block = normalize_free_att_2d(in_c1=64, in_c2=7+1, out_c=1,
         #                                relu_negative_slope=0.2, activation=None,softmax_att=True).to('cuda')
         self.att_block = film_fusion_1d(in_c1=64, in_c2=10+60+1, out_c=1,
-                                       relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=False,bias=False).to('cuda')
+                                       relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False).to('cuda')
 
         # self.att_block = nn.Sequential(
         #     nn.Linear(64+10+40+1+8, 128),
