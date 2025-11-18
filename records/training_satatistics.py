@@ -68,9 +68,8 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.1,min_decay=0.01,initial_val=0.0):
+    def __init__(self,name='000',decay_rate=0.01,initial_val=0.0):
         self.name=name
-        self.min_decay=min_decay
         self.decay_rate = decay_rate
         self.counter = 0
         self.moving_rate=initial_val
@@ -100,9 +99,6 @@ class MovingRate():
             self.counter+=1
 
 
-    # def set_decay_rate(self):
-    #     x=0.1*(1-0.0045)**self.counter
-    #     self.decay_rate=max(x,self.min_decay)
 
     def save(self):
         save_key('moving_rate_', self.moving_rate, config_file=self.name)
@@ -134,7 +130,7 @@ class MovingRate():
         print(Fore.RESET)
 
 class TrainingTracker:
-    def __init__(self,name='',track_label_balance=False,track_prediction_balance=False,min_decay=0.01):
+    def __init__(self,name='',track_label_balance=False,track_prediction_balance=False,decay_rate=0.01,track_history=False):
         try:
             self.name=name
 
@@ -148,22 +144,21 @@ class TrainingTracker:
             self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
             self.loss_moving_average_=self.load_loss_moving_average()
+            self.moving_accuracy=self.load_moving_accuracy()
+
             if self.loss_moving_average_ is None: self.loss_moving_average_=1.0
             self.convergence=self.load_convergence()
             self.momentum=self.load_momentum()
-            self.decay_rate=min_decay
-            self.min_decay=min_decay
+            self.decay_rate=decay_rate
             self.counter=self.load_counter()
             self.last_loss=None
 
-            # self.set_decay_rate()
+            self.track_history=track_history
+
             self.tmp_counter=0
         except Exception as e:
             print(str(e))
 
-    # def set_decay_rate(self):
-    #     x=0.1*(1-0.0045)**self.counter
-    #     self.decay_rate=max(x,self.min_decay)
     @property
     def accuracy(self):
         return self.confession_matrix.accuracy
@@ -191,6 +186,10 @@ class TrainingTracker:
             TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
             if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
             if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(label)
+
+            instance_accuracy=(TP_mask.sum()+TN_mask.sum()).item()/(TP_mask.sum()+FP_mask.sum()+FN_mask.sum()+TN_mask.sum()).item()
+            self.moving_accuracy = (1 - self.decay_rate) * self.moving_accuracy + self.decay_rate*instance_accuracy
+
             return TP_mask,FP_mask,FN_mask,TN_mask
 
     def load_label_balance_indicator(self):
@@ -201,6 +200,9 @@ class TrainingTracker:
 
     def load_loss_moving_average(self):
         return get_float('loss_moving_average',config_file=self.name)
+
+    def load_moving_accuracy(self):
+        return get_float('moving_accuracy',config_file=self.name,default=1.0)
 
     def load_convergence(self):
         return get_float('convergence',config_file=self.name)
@@ -233,10 +235,11 @@ class TrainingTracker:
         self.loss_moving_average_ = truncate(self.loss_moving_average_,k=100000)
         self.convergence = truncate(self.convergence,k=100000)
         self.momentum = truncate(self.momentum,k=100000)
-        print(f'Moving average loss= {self.loss_moving_average_}, Convergence = {self.convergence}, momentum = {self.momentum}')
+        print(f'Moving average loss= {self.loss_moving_average_},  Convergence = {self.convergence}, momentum = {self.momentum}')
 
         if self.confession_matrix.total_classification>0:
             self.confession_matrix.view()
+            print(f'Moving accuracy = {self.moving_accuracy}')
 
         if self.label_balance_indicator is not None:
             self.label_balance_indicator = truncate(self.label_balance_indicator)
@@ -255,19 +258,21 @@ class TrainingTracker:
         save_key('convergence', self.convergence, config_file=self.name)
         save_key('momentum', self.momentum, config_file=self.name)
         save_key('counter', self.counter, config_file=self.name)
+        save_key('moving_accuracy',self.moving_accuracy,config_file=self.name)
 
-        '''append to history records'''
-        save_new_data_point(self.label_balance_indicator, self.name+'_label_balance_indicator.txt')
-        save_new_data_point(self.prediction_balance_indicator, self.name+'_prediction_balance_indicator.txt')
-        save_new_data_point(self.loss_moving_average_, self.name+'_loss_moving_average_.txt')
-        save_new_data_point(self.convergence, self.name+'_convergence.txt')
-        save_new_data_point(self.momentum, self.name+'_momentum.txt')
-        save_new_data_point(self.counter, self.name+'_counter.txt')
+        if self.track_history:
+            '''append to history records'''
+            save_new_data_point(self.label_balance_indicator, self.name+'_label_balance_indicator.txt')
+            save_new_data_point(self.prediction_balance_indicator, self.name+'_prediction_balance_indicator.txt')
+            save_new_data_point(self.loss_moving_average_, self.name+'_loss_moving_average_.txt')
+            save_new_data_point(self.convergence, self.name+'_convergence.txt')
+            save_new_data_point(self.momentum, self.name+'_momentum.txt')
+            save_new_data_point(self.counter, self.name+'_counter.txt')
 
-        save_new_data_point(self.confession_matrix.TP, self.name+'_TP.txt')
-        save_new_data_point(self.confession_matrix.FP, self.name+'_FP.txt')
-        save_new_data_point(self.confession_matrix.TN, self.name+'_TN.txt')
-        save_new_data_point(self.confession_matrix.FN, self.name+'_FN.txt')
+            save_new_data_point(self.confession_matrix.TP, self.name+'_TP.txt')
+            save_new_data_point(self.confession_matrix.FP, self.name+'_FP.txt')
+            save_new_data_point(self.confession_matrix.TN, self.name+'_TN.txt')
+            save_new_data_point(self.confession_matrix.FN, self.name+'_FN.txt')
 
     def clear(self):
         self.running_loss_=0

@@ -94,6 +94,13 @@ class GANWrapper():
                                      weight_decay=weight_decay_)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
 
+    def critic_adamW_optimizer(self,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,eps=1e-8):
+        if learning_rate is not None: self.learning_rate=learning_rate
+
+        self.critic_optimizer = torch.optim.AdamW(self.critic.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=eps,
+                                     weight_decay=weight_decay_)
+        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
+
     def generator_adam_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
         if learning_rate is not None: self.learning_rate=learning_rate
         if param_group is None:
@@ -101,6 +108,17 @@ class GANWrapper():
                                          weight_decay=weight_decay_)
         else:
             self.generator_optimizer = torch.optim.Adam(param_group,
+                                                        betas=(beta1, beta2), eps=1e-8,
+                                                        weight_decay=weight_decay_)
+        self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
+
+    def generator_adamW_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
+        if learning_rate is not None: self.learning_rate=learning_rate
+        if param_group is None:
+            self.generator_optimizer = torch.optim.AdamW(self.generator.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
+                                         weight_decay=weight_decay_)
+        else:
+            self.generator_optimizer = torch.optim.AdamW(param_group,
                                                         betas=(beta1, beta2), eps=1e-8,
                                                         weight_decay=weight_decay_)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')

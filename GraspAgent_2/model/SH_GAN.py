@@ -9,6 +9,7 @@ from GraspAgent_2.model.Grasp_Discriminator import D, SubD
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
 from GraspAgent_2.utils.positional_encoding import PositionalEncoding_2d, PositionalEncoding_1d
 from GraspAgent_2.utils.quat_encoding import sign_invariant_quat_encoding_2d
+from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d
 from models.decoders import sine, LayerNorm2D, att_res_conv_normalized
 from models.resunet import res_unet
 import torch
@@ -16,39 +17,6 @@ import torch.nn as nn
 SH_model_key = 'SH_model'
 
 
-
-def sign_invariant_quat_encoding_1d(q):
-    """
-    Sign-invariant encoding for a batch of quaternion sets.
-
-    Args:
-        q: torch.Tensor of shape [B, N, 4]
-           Each quaternion is (w, x, y, z).
-
-    Returns:
-        encoded: torch.Tensor of shape [B, N, 10]
-                 Sign-invariant quadratic features per quaternion.
-    """
-    # Normalize quaternions along the last dimension
-    q = F.normalize(q, dim=-1)
-
-    qw, qx, qy, qz = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-
-    # Compute quadratic, sign-invariant terms
-    encoded = torch.stack([
-        qw * qw,      # 1
-        qx * qx,      # 2
-        qy * qy,      # 3
-        qz * qz,      # 4
-        2 * qw * qx,  # 5
-        2 * qw * qy,  # 6
-        2 * qw * qz,  # 7
-        2 * qx * qy,  # 8
-        2 * qy * qz,  # 9
-        2 * qz * qx,  # 10
-    ], dim=-1)  # stack along feature dimension → [B, N, 10]
-
-    return encoded
 
 class ParallelGripperPoseSampler(nn.Module):
     def __init__(self):

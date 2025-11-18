@@ -1,4 +1,6 @@
+import json
 import time
+from abc import abstractmethod
 from collections import deque
 
 import mujoco.viewer
@@ -9,12 +11,29 @@ from mujoco.renderer import Renderer
 import numpy as np
 import xml.etree.ElementTree as ET
 from random import sample
+import random
+
 import os
 
 from GraspAgent_2.hands_config.sh_config import fingers_max, fingers_min
 from GraspAgent_2.utils.quat_operations import random_quaternion, quat_mul, quat_rotate_vector
 
+def farthest_point_from_points(points, xmin, xmax, ymin, ymax, resolution=200):
+    pts = np.array(points).reshape(-1, 2)  # shape: (N,2)
 
+    # Create grid in box
+    xs = np.linspace(xmin, xmax, resolution)
+    ys = np.linspace(ymin, ymax, resolution)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    grid = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1)  # (res^2, 2)
+
+    # Compute distance to each point and take the minimum
+    dists = np.linalg.norm(grid[:, None, :] - pts[None, :, :], axis=2)
+    min_dist = dists.min(axis=1)  # closest object distance
+
+    # Pick the grid point whose closest-object distance is maximal
+    idx = np.argmax(min_dist)
+    return grid[idx]
 
 def draw_point(viewer, pos, radius=0.02, rgba=[1, 0, 0, 1]):
     """Draw a sphere at the specified position"""
@@ -31,7 +50,7 @@ def draw_point(viewer, pos, radius=0.02, rgba=[1, 0, 0, 1]):
 
 
 class MojocoMultiFingersEnv():
-    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,selected_idx=None,max_obj_per_scene=10):
+    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,max_obj_per_scene=2):
         super().__init__()
         '''
 
@@ -46,9 +65,7 @@ class MojocoMultiFingersEnv():
         self.m=None
         self.d=None
 
-        self.idx=self.sample_random_obj() if selected_idx is None else selected_idx
-        self.prepare_obj_mesh(self.idx)
-
+        self.prepare_obj_mesh()
         self.initiate_mojoco()
 
         '''camera info'''
@@ -59,7 +76,7 @@ class MojocoMultiFingersEnv():
         self.intr=None
         self.extr=None
 
-        self.ini_renderer()
+        # self.ini_renderer()
 
 
         self.far_hand_pos = [10, 10., 10.]
@@ -70,59 +87,106 @@ class MojocoMultiFingersEnv():
         self.objects_poses = []
         self.max_obj_per_scene=max_obj_per_scene
 
+        self.last_hand_geom_id=None
 
-    def drop_new_obj(self):
-        for j in range(1000):
-            new_obj_id=self.sample_random_obj()[0]
-            if new_obj_id not in self.objects: break
-        else: assert False
 
-        print('Newly added object ID: ',new_obj_id)
+        self.dict_file_path=self.root+'/obj_data.json'
+        self.obj_dict= self.load_obj_dict()
 
-        self.objects.append(new_obj_id)
 
-        obj_pose = [(np.random.rand() - 0.5)*0.3, (np.random.rand() - 0.5)*0.3, 0.3]
 
-        obj_quat = torch.randn((4,))
-        obj_quat[[1, 2]] *= 0
-        obj_quat = obj_quat / torch.norm(obj_quat)
-        obj_quat = obj_quat.tolist()
+        assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
-        self.objects_poses+=obj_pose+obj_quat
+    def update_obj_info(self,score):
+        for obj in self.objects:
+            if str(obj) in self.obj_dict:
+                self.obj_dict[str(obj)]=max(0.9*self.obj_dict[str(obj)]+.1*score,0.01)
+                print(f'test -----------------------------------{len(self.obj_dict)}---------------------,{obj}, {self.obj_dict[obj]}')
+                # if not len(self.obj_dict) <= self.object_nums_all:
+                #     for key, value in self.obj_dict.items():
+                #         print(f"Key: {key}, type: {type(key)}, Value: {value}, type: {type(value)}")
+                assert len(self.obj_dict) <= self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}, {obj}'
+            else:
+                self.obj_dict[str(obj)]=1
 
-        if len(self.objects)>self.max_obj_per_scene:
-            print('Drop object ID: ',self.objects[0])
+
+    def load_obj_dict(self):
+        if os.path.exists(self.dict_file_path):
+            with open(self.dict_file_path, "r") as f:
+                data = json.load(f)
+            return data if data is not None else {}
+        else:
+            return {}
+
+    def save_obj_dict(self):
+        with open(self.dict_file_path, "w") as f:
+            json.dump(self.obj_dict, f, indent=4)
+
+
+    @property
+    def obj_positions(self):
+        return [self.objects_poses [i:i+3] for i in range(0, len(self.objects_poses ), 7)]
+
+    @property
+    def obj_xy_positions(self):
+        return [self.objects_poses [i:i+2] for i in range(0, len(self.objects_poses ), 7)]
+
+    def drop_new_obj(self,selected_index=None,obj_pose=None,stablize=True):
+        while True:
+            if selected_index is None:
+                for j in range(1000):
+                    new_obj_id=self.sample_random_obj()
+                    if new_obj_id not in self.objects: break
+                else: assert False
+            else: new_obj_id=selected_index
+
+            print('Newly added object ID: ',new_obj_id)
+
+            self.objects.append(new_obj_id)
+
+            if obj_pose is None:
+                if len(self.objects)>1:
+                    xy_farthest=farthest_point_from_points(self.obj_xy_positions, xmin=-.3, xmax=0.3, ymin=-0.3, ymax=0.3, resolution=200)
+                    obj_pose = [xy_farthest[0], xy_farthest[1], 0.2]
+                else:
+                    obj_pose = [(np.random.rand() - 0.5)*0.4, (np.random.rand() - 0.5)*0.4, 0.2]
+
+
+            obj_quat = torch.randn((4,))
+            obj_quat[[1, 2]] *= 0
+            obj_quat = obj_quat / torch.norm(obj_quat)
+            obj_quat = obj_quat.tolist()
+
+            self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
+
+            if len(self.objects)>self.max_obj_per_scene:
+                print('Remove object ID: ',self.objects[0])
+                self.objects.popleft()
+                self.objects_poses=self.objects_poses[:-7]
+
+
+            self.prepare_obj_mesh(self.objects)
+
+            self.initiate_mojoco()
+            self.camera_id = None
+            self.renderer = None
+            self.intr=None
+            self.extr=None
+            self.ini_renderer()
+
+            if stablize:
+                new_poses=self.get_stable_object_pose(self.objects_poses)
+                if new_poses is not None:
+                    self.objects_poses=new_poses.tolist()
+                    break
+                else:
+                    self.remove_all_objects()
+
+    def remove_all_objects(self):
+        for i in range(len(self.objects)):
+            print('Drop object ID: ', self.objects[0])
             self.objects.popleft()
-            self.objects_poses=self.objects_poses[7:]
-
-
-        self.prepare_obj_mesh(self.objects)
-
-        self.initiate_mojoco()
-        self.camera_id = None
-        self.renderer = None
-        self.intr=None
-        self.extr=None
-        self.ini_renderer()
-
-        self.objects_poses=self.get_stable_object_pose(self.objects_poses).tolist()
-
-
-    def set_new_scene(self):
-        self.m=None
-        self.d=None
-        self.idx = self.sample_random_obj() #if selected_idx is None else selected_idx
-
-        print('object index :',self.idx)
-
-        self.prepare_obj_mesh(self.idx)
-
-        self.initiate_mojoco()
-        self.camera_id = None
-        self.renderer = None
-        self.intr=None
-        self.extr=None
-        self.ini_renderer()
+            self.objects_poses = self.objects_poses[:-7]
 
     def view_geom_names_and_ids(self):
         for geom_id in range(self.m.ngeom):
@@ -162,38 +226,32 @@ class MojocoMultiFingersEnv():
             print()
 
     def sample_random_obj(self):
-        idxs = sample(range(self.object_nums_all), self.obj_nums_in_scene)
+        idxs = sample(range(self.object_nums_all), 1)[0]
+        if len(self.obj_dict) == 0: return idxs
+        if str(idxs) not in self.obj_dict: return idxs
+        # print(self.obj_dict,'----',idxs)
+
+        keys = list(self.obj_dict.keys())
+        weights = list(self.obj_dict.values())
+        idxs = random.choices(keys, weights=weights, k=1)[0]
+
+        # while True:
+        #     if idxs not in self.obj_dict: break
+        #     p=self.obj_dict[idxs]
+        #     if p>np.random.random(): break
+        #     idxs = sample(range(self.object_nums_all), self.obj_nums_in_scene)
+
         return idxs
 
-    def prepare_obj_mesh(self,idxs):
+    def prepare_obj_mesh(self,idxs=None):
         tree = ET.parse(self.root+'/scene.xml')
         root = tree.getroot()
-        for idx in idxs:
-            new_mesh = ET.Element('include')
-            new_mesh.set('file', 'mesh/mesh_' + str(idx) + '.xml')
-            root.insert(1, new_mesh)
+        if idxs is not None:
+            for idx in idxs:
+                new_mesh = ET.Element('include')
+                new_mesh.set('file', 'mesh/mesh_' + str(idx) + '.xml')
+                root.insert(1, new_mesh)
         tree.write(self.root+'/temp.xml')
-
-    # def prepare_obj_mesh(self, idxs):
-    #     tree = ET.parse(self.root + '/scene.xml')
-    #     root = tree.getroot()
-    #
-    #     # --- Add/modify arena memory ---
-    #     # Check if <size> already exists
-    #     size_elem = root.find('size')
-    #     if size_elem is None:
-    #         size_elem = ET.Element('size')
-    #         root.insert(0, size_elem)  # insert at the top
-    #     size_elem.set('memory', '64M')  # set memory to 64M
-    #
-    #     # --- Add the meshes ---
-    #     for idx in idxs:
-    #         new_mesh = ET.Element('include')
-    #         new_mesh.set('file', 'mesh/mesh_' + str(idx) + '.xml')
-    #         root.insert(1, new_mesh)  # insert after <size>
-    #
-    #     tree.write(self.root + '/temp.xml')
-
 
     def initiate_mojoco(self):
         self.m = mujoco.MjModel.from_xml_path(self.root+'/temp.xml')
@@ -204,6 +262,7 @@ class MojocoMultiFingersEnv():
     def ini_renderer(self):
         # Define camera parameters and init renderer.
         self.camera_id = self.m.cam("camera_1").id
+
         self.renderer = Renderer(self.m, height=self.height, width=self.width)
         self.intr=self.get_camera_intrinsic()
         self.extr=self.get_camera_extrinsic()
@@ -234,6 +293,7 @@ class MojocoMultiFingersEnv():
         renderer.update_scene(self.d, camera=camera_id)
         renderer.enable_depth_rendering()
         depth = renderer.render()
+
         return depth
 
     def depth_to_pointcloud(self,
@@ -269,22 +329,13 @@ class MojocoMultiFingersEnv():
         return obj_poses
 
     def set_configuration(self,hand_position,hand_quat,finger_joints):
-        # d.mocap_pos shape=[1, 3]
-        # d.mocap_quat shape=[1, 4] wxyz
         self.d.mocap_pos[0] = hand_position
         self.d.mocap_quat[0] = hand_quat
 
-        # d.qpos shape=7+12+7*obj_nums_in_scene, first 7 for gripper_base, next 12 for 12 finger joints, then each mesh has 7, 3 for pos and 4 for quat(wxyz)
-        # set initial qpos
-        # self.d.qpos = [0, 0.5, 0.35, 0, 1, 0, 0, 0, -0.8, 0, 0, 0, -0.8, 0, 0, 0, -0.8, 0, 0, 0.2, 0, -0.07, 1, 0, 0, 0, 0,
-        #           0, -0.07, 1, 0, 0, 0, -0.2, 0, -0.07, 1, 0, 0, 0]
-
         self.d.qpos=hand_position+hand_quat+finger_joints+self.generate_random_obj_poses()
 
-
-
     def check_hand_contact(self,margin=0,report=False):
-        is_hand_geom= lambda x: x>=1 and x<=105
+        is_hand_geom= lambda x: x>=1 and x<=self.last_hand_geom_id
         contact_with_floor=False
         contact_with_obj=False
         for i in range(self.d.ncon):
@@ -304,7 +355,7 @@ class MojocoMultiFingersEnv():
         return contact_with_obj,contact_with_floor
 
     def check_grasped_obj(self,margin=0):
-        is_hand_geom = lambda x: x >= 1 and x <= 105
+        is_hand_geom = lambda x: x >= 1 and x <= self.last_hand_geom_id
         sensors_ids=self.f0_sensors_ids+self.f1_sensors_ids+self.f2_sensors_ids
 
         f0_contact = 0
@@ -349,143 +400,36 @@ class MojocoMultiFingersEnv():
                 timer+=1
                 if timer>period: return
 
+    @abstractmethod
     def check_fingers_scope(self,fingers):
-        fingers=np.array(fingers)
-        result=True
-        for i in range(3):
-            b=(fingers[i*4:i*4+3]<=fingers_max[0:3]) & (fingers[i*4:i*4+3]>=fingers_min[0:3])
-            # print(b)
-            result= np.all(b) & result
-        return  result
+        pass
 
-    def check_collision(self,hand_pos,hand_quat,hand_fingers,view=False):
+    @abstractmethod
+    def clip_fingers_to_scope(self,hand_fingers):
+        pass
 
-        fingers_min_ = torch.from_numpy(fingers_min).repeat(3)
-        fingers_max_ = torch.from_numpy(fingers_max).repeat(3)
-        hand_fingers = torch.clamp(torch.tensor(hand_fingers), min=fingers_min_ + 0.01,
-                                   max=fingers_max_ - 0.01).tolist()
+    def check_collision(self,hand_pos,hand_quat,hand_fingers=None,view=False):
+        if hand_fingers is None: hand_fingers=self.default_finger_joints
+        else: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
 
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
 
         self.d.qpos =hand_pos + hand_quat + hand_fingers + self.objects_poses
-        # print(self.d.time)
 
         mujoco.mj_step(self.m, self.d)
 
         '''check initial contact'''
         contact_with_obj, contact_with_floor = self.check_hand_contact()
-        # print(f'Initial contact result with obj = {contact_with_obj}, with floor = {contact_with_floor}')
 
         if view:
             self.static_view()
 
-        return  contact_with_obj or contact_with_floor
+        return  contact_with_obj , contact_with_floor
 
+    @abstractmethod
     def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=50,shake_intensity=0.05):
-
-        if obj_pose is None: obj_pose=self.objects_poses
-
-        in_scope = self.check_fingers_scope(hand_fingers)
-
-        fingers_min_ = torch.from_numpy(fingers_min).repeat( 3)
-        fingers_max_ = torch.from_numpy(fingers_max).repeat( 3)
-        hand_fingers = torch.clamp(torch.tensor(hand_fingers),min=fingers_min_+0.01,max=fingers_max_-0.01).tolist()
-
-        # if not in_scope: return False, None, None,None,None
-
-        self.d.time = 0.0
-        self.d.mocap_pos[0] = hand_pos
-        self.d.mocap_quat[0] = hand_quat
-
-        self.d.qpos = hand_pos + hand_quat + hand_fingers + obj_pose
-
-        delta=quat_rotate_vector(np.array(hand_quat),np.array([0,0,1]))
-        if delta[-1]>0:in_scope=False
-
-        delta*=-0.02
-        # self.d.ctrl = [0, -0.4, 0, 0, 0, -0.4, 0, 0, 0, -0.4, 0, 0]
-        a=0.
-        b=1.
-        c=0.2
-        self.d.ctrl = [a, b, c,  a, b, c, a, b, c]
-
-        # if view:
-        #     # Run with viewer
-        #     mujoco.mj_step(self.m, self.d)
-        #     # self.static_view()
-        #     with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
-        #
-        #         viewer.sync()
-        #         contact_with_obj, contact_with_floor = self.check_hand_contact()
-        #         if contact_with_obj or contact_with_floor:
-        #             return in_scope, None, contact_with_obj, contact_with_floor
-        #
-        #         for i in range(iterations):
-        #             if i>10:
-        #                 if i<30:
-        #                     self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta.tolist()
-        #                 elif i==30:
-        #                     final_contact_with_obj, contact_with_floor = self.check_hand_contact()
-        #                     if not final_contact_with_obj: break
-        #                 else:
-        #                     if shake_intensity is None: break
-        #                     if i%6==0:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0]+[shake_intensity,0,0]
-        #                     elif i % 6 == 1:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0] + [-shake_intensity, 0, 0]
-        #                     elif i % 6 == 2:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, shake_intensity, 0]
-        #                     elif i % 6 == 3:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, -shake_intensity, 0]
-        #                     elif i % 6 == 4:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0,shake_intensity]
-        #                     elif i % 6 == 5:
-        #                         self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, -shake_intensity]
-        #
-        #
-        #             for _ in range(20):
-        #                 mujoco.mj_step(self.m, self.d)
-        #
-        #             viewer.sync()
-        #     self.static_view(1000)
-        # else:
-        # Run headless (no viewer)
-        mujoco.mj_step(self.m, self.d)
-        contact_with_obj, contact_with_floor = self.check_hand_contact()
-        if contact_with_obj or contact_with_floor:
-            return in_scope, None, contact_with_obj, contact_with_floor
-        for i in range(iterations):
-            if i > 10:
-                if i < 30:
-                    self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta.tolist()
-                elif i == 30:
-                    final_contact_with_obj, contact_with_floor = self.check_hand_contact()
-                    if not final_contact_with_obj: break
-                else:
-                    if shake_intensity is None: break
-                    if i % 6 == 0:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [shake_intensity, 0, 0]
-                    elif i % 6 == 1:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [-shake_intensity, 0, 0]
-                    elif i % 6 == 2:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, shake_intensity, 0]
-                    elif i % 6 == 3:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, -shake_intensity, 0]
-                    elif i % 6 == 4:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, shake_intensity]
-                    elif i % 6 == 5:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, -shake_intensity]
-
-            for _ in range(20):
-                mujoco.mj_step(self.m, self.d)
-        # After stepping
-        # grasp_success = self.check_grasped_obj()
-        grasp_success, contact_with_floor = self.check_hand_contact()
-
-        if view:self.static_view(1000)
-
-        return in_scope,grasp_success,False,False
+        pass
 
 
 
@@ -526,7 +470,7 @@ class MojocoMultiFingersEnv():
                     self.d.mocap_pos[0] = hand_pos
                     self.d.mocap_quat[0] = hand_quat
 
-                    self.d.qpos[:7 + 12] = hand_pos + hand_quat + hand_fing
+                    self.d.qpos[:7 + len(self.default_finger_joints)] = hand_pos + hand_quat + hand_fing
 
                     # '''check initial contact'''
                     # contact_with_obj, contact_with_floor = self.check_hand_contact()
@@ -557,6 +501,7 @@ class MojocoMultiFingersEnv():
         # mujoco.mj_step(self.m, self.d)
 
         depth = self.render_depth(self.renderer, self.camera_id)
+
         pointcloud ,floor_mask= self.depth_to_pointcloud(depth, self.intr, self.extr)
         pointcloud[:, 0] *= -1
         # if pointcloud.shape[0]!=600*600:
@@ -568,29 +513,49 @@ class MojocoMultiFingersEnv():
         if view:
             from lib.image_utils import view_image
             view_image(depth)
-            pc = trimesh.PointCloud(pointcloud)
-            pc.show()
+            # pc = trimesh.PointCloud(pointcloud)
+            # pc.show()
 
         return depth,pointcloud,floor_mask
 
-    def get_stable_object_pose(self,obj_pos_quat,threshold=1e-4,window_size=30):
+    def check_masses(self):
+        for body_id in range(self.m.nbody):
+            body_name = mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_BODY, body_id)
+            mass = self.m.body_mass[body_id]
+
+            if mass > 0:
+                print(f"Body '{body_name}' has mass: {mass}")
+            else:
+                print(f"Body '{body_name}' is massless (mass=0)")
+
+    def get_stable_object_pose(self,obj_pos_quat,threshold=1e-4,window_size=20):
         self.d.mocap_pos[0] = self.far_hand_pos
         self.d.mocap_quat[0] = self.far_hand_quat
 
         self.d.qpos= self.far_hand_pos+ self.far_hand_quat+self.default_finger_joints+obj_pos_quat
 
-        self.m.opt.timestep = 0.01
+        # self.m.opt.timestep = 0.01
+        counter=0
         last_obj_pos=None
-        for i in range(10000):
-            # print(self.d.qpos[7 + 12:])
+        for i in range(1000):
             for j in range(window_size):
                 mujoco.mj_step(self.m, self.d)
-            new_obj_pos=np.copy(self.d.qpos[7 + 12:])
+            new_obj_pos=np.copy(self.d.qpos[7 + len(self.default_finger_joints):])
             if last_obj_pos is not None:
                 diff=np.sum(last_obj_pos-new_obj_pos)
                 if diff<threshold:
-                    # print(self.d.qpos[7 + 12:])
-                    break
+                    counter+=1
+                    self.d.qvel[:] = 0
+                    self.d.cvel[:] = 0
+                    self.d.qacc[:] = 0.0
+                    self.d.qfrc_applied[:] = 0.0
+                    self.d.qfrc_actuator[:] = 0.0
+                    self.d.qfrc_constraint[:] = 0.0
+                    self.d.ctrl[:] = 0.0
+                    if counter>window_size:
+                        break
+                else:
+                    counter=0
 
             last_obj_pos=new_obj_pos
         else:
@@ -599,96 +564,66 @@ class MojocoMultiFingersEnv():
 
         self.m.opt.timestep = 0.002
 
-        return  self.d.qpos[7 + 12:]
+        return  self.d.qpos[7 + len(self.default_finger_joints):]
 
-
-
-    def manual_view(self):
-        pos=[0., 0., .3]
-        # v1 = torch.tensor([0., 0., 1.])
-        # approach = torch.tensor([0.5, 0., 0.7])  # example direction
-        # approach = approach / torch.norm(approach)
-        q1 = torch.tensor([0., 1., 0., 0.])  # 180° around X
-        # beta_quat=torch.tensor([0.7, .0, 0., 0.7])
-        # beta_quat = beta_quat / torch.norm(beta_quat)
-        # approach_quat = quat_between(v1, approach)
-        # approach_quat = approach_quat / torch.norm(approach_quat)
-        #
-        #
-        # q_r=quat_mul(beta_quat, q1)
-        # # print('q_r: ',q_r)
-        # q = quat_mul(approach_quat, q_r)
-        # q = q / torch.norm(q)
-        # quat=q.tolist()
-        # # q1=quat_from_z_to_vec_single(torch.tensor([0,0,9]).float()).numpy()
-        # quat=np.array([1.0,0,0,0]).tolist()
-        # quat=  quat_mul(q2,q1).tolist()
-        # first_quat = torch.tensor([[0., 1., 0., 0.]])
-        # size=1000
-        # beta_quat = torch.zeros((size, 4))
-        # beta_quat[:, [0, 3]] = torch.randn((size, 2))
-        # import torch.nn.functional as F
-
-        # beta_quat = F.normalize(beta_quat, dim=-1)
-        # batch_quat = batch_quat_mul(beta_quat, first_quat)
-        def get_beta_quat():
-            quat=torch.randn((4,))
-            quat[1:3]*=0
-            # quat=torch.tensor([0.7, .0, 0., 0.7])
-            quat = quat / torch.norm(quat)
-            quat = quat_mul(quat, q1)
-            quat = quat / torch.norm(quat)
-
-            quat=quat.tolist()
-            return quat
-        quat=get_beta_quat()
+    def manual_view(self,pos=None,quat=None):
+        pos=[0., 0., .3] if pos is None else pos
+        quat = [0., 1., 0., 0.] if quat is None else quat
 
         self.d.mocap_pos[0] = pos
         self.d.mocap_quat[0] = quat
 
-        obj_quat=torch.tensor([0.5, 0.,0., 0.])
-        obj_quat=obj_quat / torch.norm(obj_quat)
+        self.d.qpos = pos + quat + self.default_finger_joints+list(self.objects_poses)
 
-
-        self.d.qpos = pos + quat + self.default_finger_joints + [0.3, 0.3, 0.]+obj_quat.tolist()
-
-        # a = 0.
-        # b = 0.7
-        # c = 0.
-
-        # self.d.ctrl = [a, b, c, a, b, c, a, b, c]
-        counter=0
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
             # optional: show contact points
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
 
-            # mujoco.mj_step(self.m, self.d)
-
-            # depth, pc, floor_mask = self.get_scene_preception(np.array([0.3, 0.3, 0.]+[1, 0, 0, 0]), view=False)
-            # obj_pc=pc[~floor_mask]
-            # print(obj_pc.mean(axis=0))
-            # print(obj_pc.max(axis=0))
-            # print(obj_pc.min(axis=0))
-
-            # pc_ = trimesh.PointCloud(pc[~floor_mask])
-            # pc_.show()
             while viewer.is_running():
-                # quat=batch_quat[counter].tolist()
-                # self.d.mocap_quat[0] =quat
-                # self.d.qpos = pos + quat + self.default_finger_joints + [0.3, 0.3, 0.] + obj_quat.tolist()
+                step_start = time.time()
 
                 mujoco.mj_step(self.m, self.d)
-                counter+=1
-                # print(self.d.ctrl)
-                # self.d.ctrl[0]=self.d.qpos[3+4]
-                # self.d.ctrl[1]=self.d.qpos[3+4+1]
-                # self.d.ctrl[2]=self.d.qpos[3+4+2]
 
                 viewer.sync()
-                # time.sleep(1)
+                time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                if time_until_next_step > 0:
+                    time.sleep(time_until_next_step)
 
+    def passive_viewer(self,pos=None,quat=None,delta_pos=None,ctrl=None):
+        pos=[0., 0., .3] if pos is None else pos
+        quat = [0., 1., 0., 0.] if quat is None else quat
 
+        self.d.mocap_pos[0] = pos
+        self.d.mocap_quat[0] = quat
+
+        self.d.qpos = pos + quat + self.default_finger_joints +list(self.objects_poses)
+
+        with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
+            viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
+            viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
+            # Close the viewer automatically after 30 wall-seconds.
+            start = time.time()
+            while viewer.is_running() and time.time() - start < 30:
+                step_start = time.time()
+
+                # mj_step can be replaced with code that also evaluates
+                # a policy and applies a control signal before stepping the physics.
+                if self.d.time > 0.5 and delta_pos is not None:
+                    self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta_pos
+                self.d.mocap_quat[0] = quat
+
+                if ctrl is not None: self.d.ctrl = ctrl
+                # print(d.qpos)
+                mujoco.mj_step(self.m, self.d)
+
+                # Pick up changes to the physics state, apply perturbations, update options from GUI.
+                viewer.sync()
+
+                # Rudimentary time keeping, will drift relative to wall clock.
+                time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                if time_until_next_step > 0:
+                    time.sleep(time_until_next_step)
 if __name__ == "__main__":
     print(mujoco.__version__)
 

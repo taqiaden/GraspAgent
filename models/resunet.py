@@ -38,7 +38,7 @@ class residual_block(nn.Module):
         """ Shortcut Connection (Identity Mapping) """
         self.s = nn.Conv2d(in_c, out_c, kernel_size=1, padding=0, stride=stride)
 
-        self.scale= nn.Parameter(torch.tensor(scale, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.scale=1. if scale is None else nn.Parameter(torch.tensor(scale, dtype=torch.float32, device='cuda'), requires_grad=True)
 
 
     def forward(self, inputs):
@@ -66,7 +66,7 @@ class decoder_block(nn.Module):
         return x
 
 class res_unet(nn.Module):
-    def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=1.0):
+    def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=None):
         super().__init__()
 
         """ Encoder 1 """

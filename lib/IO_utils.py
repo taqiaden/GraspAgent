@@ -173,20 +173,46 @@ def save_image_to_server(path,data):
     save_to_server(path, byte_buffer)
 
 def save_data_to_server(data,path):
-    # try:
-        #method 1
-        # pickled=pickle.dumps(data)
-        # with smbclient.open_file(path,mode="wb") as f:
-        #     f.write(pickled)
-        # method 2
+
+    print(Fore.LIGHTYELLOW_EX,f'-------------------- Export check point: {path}',Fore.RESET)
     buffer=io.BytesIO()
     torch.save(data,buffer)
     buffer.seek(0)
     with smbclient.open_file(path,mode='wb') as f:
         f.write(buffer.read())
+    print(Fore.LIGHTGREEN_EX,f'-------------------------------------------- check points exported to: {path}',Fore.RESET)
 
-    # except OSError:
-    #     print('save data failed')
+def safe_save_to_smb(data, path):
+    """
+    Safely save a torch object to an SMB path using a temp file + atomic rename.
+    Prevents corruption if interrupted.
+    """
+    print(Fore.LIGHTYELLOW_EX,f'-------------------- Export check point: {path}',Fore.RESET)
+
+    dir_path = os.path.dirname(path)
+    base_name = os.path.basename(path)
+    tmp_name = f".tmp_{base_name}_{os.getpid()}"
+    tmp_path = os.path.join(dir_path, tmp_name)
+
+    # Step 1: Serialize data into memory
+    buffer = io.BytesIO()
+    torch.save(data, buffer)
+    buffer.seek(0)
+
+    # Step 2: Write to temporary file on SMB share
+    with smbclient.open_file(tmp_path, mode="wb") as f:
+        f.write(buffer.read())
+
+    # Step 3: Safely replace the old file (manual fallback)
+    try:
+        smbclient.remove(path)  # delete old file if exists
+    except smbclient.SMBResponseException:
+        pass  # file might not exist, ignore
+
+    # Step 4: Rename temporary file to final name
+    smbclient.rename(tmp_path, path)
+    print(Fore.LIGHTGREEN_EX,f'-------------------------------------------- check points exported to: {path}',Fore.RESET)
+
 
 def save_data_to_local(data,path):
     # try:

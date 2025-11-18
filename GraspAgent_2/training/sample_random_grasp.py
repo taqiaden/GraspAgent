@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from GraspAgent_2.hands_config.sh_config import fingers_range, fingers_min, fingers_max
+from GraspAgent_2.utils.quat_operations import bulk_quat_mul, signed_cosine_distance
 
 
 def generate_random_beta_dist_widh( size):
@@ -28,28 +29,25 @@ def generate_random_beta_dist_widh( size):
 
     return sampled_pose
 
-def pose_interpolation( gripper_pose, objects_mask,annealing_factor=0.99):
+def pose_interpolation( gripper_pose, objects_mask,annealing_factor):
     assert objects_mask.sum() > 0
 
     ref_pose = gripper_pose.detach().clone()
 
     ref_pose[:, 5:] = torch.clamp(ref_pose[:,5:], 0.01, 0.99)
 
-    annealing_factor = max(min(annealing_factor,0.99),0.01)
-    p1=annealing_factor#**2
-    p2=annealing_factor**0.5
+    annealing_factor = torch.clip(annealing_factor,0.01,0.99)
 
 
-    print(f'p1= {p1}')
 
     sampled_pose = generate_random_beta_dist_widh(ref_pose[:,  0].numel()).reshape(480,-1,7).permute(2,0,1)[None,...]
 
-    sampling_ratios1 = 1/(1+((1-p1)*torch.rand_like(ref_pose[:,0:5])) /(p1*torch.rand_like(ref_pose[:,0:5])))
-    sampling_ratios2 = 1/(1+((1-p2)*torch.rand_like(ref_pose[:,5:])) /(p2*torch.rand_like(ref_pose[:,5:])))
-    sampling_ratios=torch.cat([sampling_ratios1,sampling_ratios2],dim=1)
+    sampling_ratios = 1/(1+((1-annealing_factor)*torch.rand_like(ref_pose)) /(annealing_factor*torch.rand_like(ref_pose)))
+    # sampling_ratios2 = 1/(1+((1-p2)*torch.rand_like(ref_pose[:,5:])) /(p2*torch.rand_like(ref_pose[:,5:])))
+    # sampling_ratios=torch.cat([sampling_ratios1,sampling_ratios2],dim=1)
 
     sampled_pose = sampled_pose.detach().clone() * sampling_ratios + (1 - sampling_ratios) * ref_pose
-    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios1.min()}, {sampled_pose.min()}, {ref_pose.min()}, {sampling_ratios1.max()}, {sampled_pose.max()}, {ref_pose.max()}, {p1}'
+    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampled_pose.min()}, {ref_pose.min()}, {sampled_pose.max()}, {ref_pose.max()}'
 
     sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
     sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
@@ -57,6 +55,7 @@ def pose_interpolation( gripper_pose, objects_mask,annealing_factor=0.99):
     sampled_pose[:, 5:] = torch.clamp(sampled_pose[:, 5:], 0.01, 0.99)
 
     return sampled_pose
+
 def beta_peak_intensity_tensor(n, c, centers, data_range, peak_intensity=30.0):
     """
     Generate tensor with controllable peak intensity for each channel
@@ -107,7 +106,6 @@ def beta_peak_intensity_tensor(n, c, centers, data_range, peak_intensity=30.0):
 
     return tensor_data
 
-
 def quat_between_batch(v_from, v_to):
     """
     Compute quaternions to rotate a single vector v_from to each vector in v_to.
@@ -137,30 +135,8 @@ def quat_between_batch(v_from, v_to):
     quat = quat / torch.norm(quat, dim=1, keepdim=True)
     return quat
 
-
-def quat_mul(q1, q2):
-    """
-    Multiply two batches of quaternions q1 * q2 element-wise.
-
-    Args:
-        q1: Tensor of shape [n, 4], quaternions [w, x, y, z]
-        q2: Tensor of shape [n, 4], quaternions [w, x, y, z]
-
-    Returns:
-        Tensor of shape [n, 4], resulting quaternions.
-    """
-    w1, x1, y1, z1 = q1[:, 0], q1[:, 1], q1[:, 2], q1[:, 3]
-    w2, x2, y2, z2 = q2[:, 0], q2[:, 1], q2[:, 2], q2[:, 3]
-
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-
-    return torch.stack([w, x, y, z], dim=1)
-
-def sample_quat(size):
-    first_quat = torch.tensor([[0., 1., 0., 0.]],device='cuda')
+def sample_sh_quat(size):
+    ref_quat = torch.tensor([[0., 1., 0., 0.]],device='cuda')
 
     beta_quat=torch.zeros((size,4),device='cuda')
     beta_quat[:,[0,3]]=torch.randn((size, 2), device='cuda')
@@ -174,17 +150,163 @@ def sample_quat(size):
     approach_quat=quat_between_batch(torch.tensor([0.0, 0.0, 1.0],device='cuda'),approach)
     approach_quat = F.normalize(approach_quat, dim=-1)
 
-    quat=quat_mul(beta_quat,first_quat)
+    quat=bulk_quat_mul(beta_quat,ref_quat)
 
-    quat=quat_mul(approach_quat,quat)
+    quat=bulk_quat_mul(approach_quat,quat)
     quat = F.normalize(quat, dim=-1)
 
     return quat
 
+def sample_ch_quat(size):
+    ref_quat = torch.tensor([[1., 1., 0., 0.]],device='cuda')
+
+    beta_quat=torch.zeros((size,4),device='cuda')
+    beta_quat[:,[0,3]]=torch.randn((size, 2), device='cuda')
+    beta_quat = F.normalize(beta_quat, dim=-1)
+
+    approach=(torch.rand((size, 3), device='cuda'))
+
+    approach[:,[0,2]]=2*(approach[:,[0,2]]-0.5)
+    U=approach[:,1]
+    k=2
+    approach[:, 1] = (1 + torch.sign(2*U - 1) * torch.abs(2*U - 1) ** (1 / (k + 1))) / 2 # this is the CDF inversion of the Probability function defined as (x/0.5-1)^k
+    approach = F.normalize(approach, dim=-1)
+
+    approach_quat=quat_between_batch(torch.tensor([0.0, 1.0, 0.0],device='cuda'),approach)
+    approach_quat = F.normalize(approach_quat, dim=-1)
+
+    quat=bulk_quat_mul(beta_quat,ref_quat)
+
+    quat=bulk_quat_mul(approach_quat,quat)
+    quat = F.normalize(quat, dim=-1)
+
+    return quat
+
+
+def sample_mixed_tensors(base, n, device='cuda', smooth=False, noise_rate=0.0):
+    """
+    Sample a tensor of shape [n, 4] by mixing given base vectors equally,
+    with optional smooth interpolation and controllable random noise.
+
+    Args:
+        base_list (list[list[float]]): list of lists, each inner list of size 4
+        n (int): number of samples
+        device (str): 'cuda' or 'cpu'
+        smooth (bool): if True, interpolate between random pairs of base vectors
+        noise_rate (float): standard deviation of added Gaussian noise (0 = none)
+
+    Returns:
+        torch.Tensor: [n, 4] sampled tensor
+    """
+    # Convert list of lists to tensor
+    # base = torch.tensor(base_list, dtype=torch.float32, device=device)  # [m, 4]
+    m = base.shape[0]
+
+    if not smooth:
+        # Discrete selection with equal probability
+        idx = torch.randint(0, m, (n,), device=device)
+        samples = base[idx]
+    else:
+        # Smooth interpolation between two random base vectors
+        idx1 = torch.randint(0, m, (n,), device=device)
+        idx2 = torch.randint(0, m, (n,), device=device)
+        alpha = torch.rand(n, 1, device=device)
+        samples = alpha * base[idx1] + (1 - alpha) * base[idx2]
+
+    # Add controllable Gaussian noise
+    if noise_rate > 0:
+        noise = torch.randn_like(samples) * noise_rate
+        samples = samples + noise
+
+    return samples
+
+
+def sample_from_two(A, B, ratio_of_A):
+    """
+    Select rows from A or B based on probability p.
+
+    Args:
+        A (torch.Tensor): tensor of shape [n, 4]
+        B (torch.Tensor): tensor of shape [n, 4]
+        p (float or torch.Tensor): probability of selecting from A
+                                   (if tensor, must be shape [n] or [n,1])
+
+    Returns:
+        torch.Tensor: selected tensor of shape [n, 4]
+    """
+    n = A.shape[0]
+
+    # Convert scalar p to tensor if needed
+    if not torch.is_tensor(ratio_of_A):
+        p = torch.full((n,), ratio_of_A, device=A.device)
+    if p.dim() == 1:
+        p = p.unsqueeze(1)  # [n,1]
+
+    # Random uniform draw per sample
+    rand = torch.rand(n, 1, device=A.device)
+
+    # Boolean mask where to pick from A
+    mask = (rand < p).float()  # [n,1]
+
+    # Select entire rows from A or B
+    result = mask * A + (1 - mask) * B
+    return result
+
+def generate_random_CH_poses(size,sampling_centroid,quat_centers=None,finger_centers=None):
+
+    # quat = sample_ch_quat(size)
+    quat=torch.randn(size=(size,4),device='cuda')
+    quat = F.normalize(quat, dim=-1)
+
+    if quat_centers is not None:
+        sampled_taxonomies=sample_mixed_tensors(quat_centers,size,smooth=False,noise_rate=0.1)
+        quat=sample_from_two(A=quat, B=sampled_taxonomies, ratio_of_A=0.3)
+
+
+    # fingers=beta_peak_intensity_tensor(n=size,c=3,data_range=[0,1],centers=torch.tensor([0.5,0.5,0.5],device='cuda'))
+    fingers=torch.rand((size,3),device='cuda')
+    if finger_centers is not None:
+        sampled_fingers=sample_mixed_tensors(finger_centers,size,smooth=False,noise_rate=0.1)
+        fingers=sample_from_two(A=fingers, B=sampled_fingers, ratio_of_A=0.3)
+
+    transition=beta_peak_intensity_tensor(n=size,c=3,data_range=[-1,1],centers=sampling_centroid[-3:],peak_intensity=5)
+
+    sampled_pose = torch.cat([quat, fingers, transition], dim=1)
+
+    return sampled_pose
+
+def ch_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor,quat_centers=None,finger_centers=None):
+
+    ref_pose = gripper_pose.detach().clone()
+
+    p = torch.clip(annealing_factor,0.0,1.0)
+
+
+    sampled_pose = generate_random_CH_poses(ref_pose[:,  0].numel(),sampling_centroid,quat_centers=quat_centers,finger_centers=finger_centers).reshape(600,600,10).permute(2,0,1)[None,...]
+
+    '''process quat sign'''
+    dist1=signed_cosine_distance(sampled_pose[:,0:4],ref_pose[:,0:4])
+    dist2=signed_cosine_distance(-sampled_pose[:,0:4],ref_pose[:,0:4])
+    f=torch.ones_like(ref_pose[:,0:1])
+    f[dist2<dist1]*=-1
+    sampled_pose[:,0:4]*=f
+
+    sampling_ratios = 1/(1+((1-p)*torch.rand_like(ref_pose)) /(p*torch.rand_like(ref_pose)+1e-5))
+
+    sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
+    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
+
+    sampled_pose[:, :4] = F.normalize(sampled_pose[:, :4], dim=1)
+
+    '''clip fingers to scope'''
+    sampled_pose[:,4:4+3]=torch.clamp(sampled_pose[:,4:4+3],min=0.01,max=0.99)
+
+
+    return sampled_pose
+
 def generate_random_SH_poses(size,sampling_centroid):
 
-    quat = sample_quat(size)
-
+    quat = sample_sh_quat(size)
 
 
     fingers_beta=beta_peak_intensity_tensor(n=size,c=3,data_range=[-1,1],centers=torch.tensor([0,0,0],device='cuda'))
@@ -205,13 +327,13 @@ def sh_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor=0.99
 
     ref_pose = gripper_pose.detach().clone()
 
-    p = max(min(annealing_factor,0.99),0.01)
+    p = max(min(annealing_factor,1.),0.0)
 
     print(f'p= {p}')
 
     sampled_pose = generate_random_SH_poses(ref_pose[:,  0].numel(),sampling_centroid).reshape(600,600,14).permute(2,0,1)[None,...]
 
-    sampling_ratios = 1/(1+((1-p)*torch.rand_like(ref_pose)) /(p*torch.rand_like(ref_pose)))
+    sampling_ratios = 1/(1+((1-p)*torch.rand_like(ref_pose)) /(p*torch.rand_like(ref_pose)+1e-5))
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
@@ -233,7 +355,7 @@ def pose_interpolation1d( gripper_pose, objects_mask,annealing_factor=0.99):
 
     ref_pose[:, 5:] = torch.clamp(ref_pose[:,5:], 0.01, 0.99)
 
-    annealing_factor = max(min(annealing_factor,0.99),0.01)
+    annealing_factor = max(min(annealing_factor,1.),0.0)
     p1=annealing_factor#**2
     p2=annealing_factor**0.5
 
@@ -242,8 +364,8 @@ def pose_interpolation1d( gripper_pose, objects_mask,annealing_factor=0.99):
 
     sampled_pose = generate_random_beta_dist_widh(ref_pose[:,  0].numel())
 
-    sampling_ratios1 = 1/(1+((1-p1)*torch.rand_like(ref_pose[:,0:5])) /(p1*torch.rand_like(ref_pose[:,0:5])))
-    sampling_ratios2 = 1/(1+((1-p2)*torch.rand_like(ref_pose[:,5:])) /(p2*torch.rand_like(ref_pose[:,5:])))
+    sampling_ratios1 = 1/(1+((1-p1)*torch.rand_like(ref_pose[:,0:5])) /(p1*torch.rand_like(ref_pose[:,0:5])+1e-5))
+    sampling_ratios2 = 1/(1+((1-p2)*torch.rand_like(ref_pose[:,5:])) /(p2*torch.rand_like(ref_pose[:,5:])+1e-5))
     sampling_ratios=torch.cat([sampling_ratios1,sampling_ratios2],dim=1)
 
     sampled_pose = sampled_pose.detach().clone() * sampling_ratios + (1 - sampling_ratios) * ref_pose

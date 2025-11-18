@@ -11,7 +11,6 @@ from Online_data_audit.data_tracker import gripper_grasp_tracker, DataTracker
 from check_points.check_point_conventions import GANWrapper
 from lib.IO_utils import custom_print
 from lib.cuda_utils import cuda_memory_report
-from lib.dataset_utils import online_data2
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
 from records.training_satatistics import TrainingTracker, MovingRate
@@ -24,8 +23,6 @@ batch_size = 4
 freeze_backbone = False
 max_n = 50
 
-training_buffer = online_data2()
-training_buffer.main_modality = training_buffer.depth
 
 bce_loss = nn.BCELoss()
 
@@ -363,7 +360,7 @@ class TrainGraspGAN:
 
                 label = torch.ones_like(gripper_prediction_) if grasp_success else torch.zeros_like(gripper_prediction_)
 
-                grasp_quality_loss = bce_loss(gripper_prediction_, label)**2
+                grasp_quality_loss = bce_loss(gripper_prediction_, label)
 
                 with torch.no_grad():
                     self.grasp_quality_statistics.loss = grasp_quality_loss.item()
@@ -382,7 +379,7 @@ class TrainGraspGAN:
               f'g_loss={gripper_sampling_loss.item()}',
               Fore.RESET)
 
-        loss = gripper_sampling_loss*30+gripper_collision_loss+gripper_quality_loss_ #+ background_detection_loss * 30 + gripper_collision_loss + 10 * gripper_quality_loss_
+        loss = gripper_sampling_loss+gripper_collision_loss+gripper_quality_loss_ #+ background_detection_loss * 30 + gripper_collision_loss + 10 * gripper_quality_loss_
 
         with torch.no_grad():
             self.gripper_sampler_statistics.loss = gripper_sampling_loss.item()

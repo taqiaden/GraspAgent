@@ -7,8 +7,10 @@ from lib.models_utils import load_optimizer_state, export_model_state
 
 def load_opt(optimizer,path):
     try:
-        if isinstance(optimizer,torch.optim.Adam) or isinstance(optimizer,torch.optim.AdamW):
+        if isinstance(optimizer,torch.optim.Adam) :
             optimizer=load_optimizer_state(optimizer, path+'_ADAM'+check_points_extension)
+        elif isinstance(optimizer,torch.optim.AdamW):
+            optimizer=load_optimizer_state(optimizer, path+'_ADAMW'+check_points_extension)
         elif isinstance(optimizer, torch.optim.RMSprop):
             optimizer = load_optimizer_state(optimizer, path + '_RMSprop' + check_points_extension)
         elif isinstance(optimizer,torch.optim.SGD):
@@ -21,8 +23,10 @@ def load_opt(optimizer,path):
     return optimizer
 
 def export_optm(optimizer,path):
-    if isinstance(optimizer, torch.optim.Adam) or isinstance(optimizer,torch.optim.AdamW):
+    if isinstance(optimizer, torch.optim.Adam) :
         export_model_state(optimizer, path+'_ADAM')
+    elif isinstance(optimizer,torch.optim.AdamW):
+        export_model_state(optimizer, path + '_ADAMW')
     elif isinstance(optimizer, torch.optim.RMSprop):
         export_model_state(optimizer, path + '_RMSprop')
     elif isinstance(optimizer, torch.optim.SGD):

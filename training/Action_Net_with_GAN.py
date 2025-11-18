@@ -15,7 +15,7 @@ from lib.IO_utils import custom_print, load_pickle, save_pickle
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, cache_dir
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
-from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
+from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds, transform_to_camera_frame_torch
 from lib.loss.balanced_bce_loss import BalancedBCELoss
 from lib.models_utils import reshape_for_layer_norm
 from lib.report_utils import progress_indicator
@@ -160,7 +160,7 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0):
         if mask is None:
             dist = Categorical(probs=selection_probability)
         else:
-            dist = MaskedCategorical(probs=selection_probability, mask=torch.from_numpy(mask).cuda())
+            dist = MaskedCategorical(probs=selection_probability, mask=mask)
 
         target_index = dist.sample()
 
@@ -490,7 +490,7 @@ class TrainGraspGAN:
 
         # margin_params= margin_params.permute(0, 2, 3, 1)[0, :, :, 0][mask]
 
-        selection_mask = torch.from_numpy(~bin_mask).cuda() & (ref_scores_ != 0)
+        selection_mask = (~bin_mask) & (ref_scores_ != 0)
 
         # score_delta_mean=torch.abs(ref_scores_-gen_scores_)[selection_mask].mean().item()
         # print(f'score_delta_mean={score_delta_mean}')
@@ -519,7 +519,7 @@ class TrainGraspGAN:
             gamma_dive=norm_(gamma_dive)
 
             range=pc[~bin_mask][:,-1].max()-pc[~bin_mask][:,-1].min()
-            d_gamma=norm_(1-torch.abs(torch.from_numpy(pc[:,-1]-pc[~bin_mask][:,-1].min()).cuda()/range),2.0)
+            d_gamma=norm_(1-torch.abs((pc[:,-1]-pc[~bin_mask][:,-1].min())/range),2.0)
 
 
             selection_p = (gamma_dive *   gamma_rand * d_gamma*gamma_firmness) ** (1 / 4)
@@ -910,8 +910,8 @@ class TrainGraspGAN:
         '''background detection head'''
         bin_mask, floor_elevation_ = self.analytical_bin_mask(pc, file_ids)
         if bin_mask is None: return None,None,None,None,None
-        objects_mask_numpy = bin_mask <= 0.5
-        objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
+        objects_mask = bin_mask <= 0.5
+        # objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
         objects_mask_pixel_form = torch.ones_like(depth)
         objects_mask_pixel_form[0, 0][mask] = objects_mask_pixel_form[0, 0][mask] * objects_mask
         objects_mask_pixel_form = objects_mask_pixel_form > 0.5
@@ -934,7 +934,7 @@ class TrainGraspGAN:
         background_class_predictions = background_class.permute(0, 2, 3, 1)[0, :, :, 0][mask]
         normals = predicted_normal[0].permute(1, 2, 0)[mask].detach().cpu().numpy()
 
-        label = torch.from_numpy(bin_mask).to(background_class_predictions.device).float()
+        label = bin_mask.float()
         background_detection_loss += bce_loss(background_class_predictions, label)
         self.background_detector_statistics.update_confession_matrix(label,
                                                                      background_class_predictions.detach())
@@ -942,14 +942,14 @@ class TrainGraspGAN:
         for k in range(batch_size2):
             '''gripper-object collision - 1'''
             while True:
-                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 0], mask=objects_mask_numpy,
+                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 0], mask=objects_mask,
                                                          exponent=10.0,
                                                          balance_indicator=self.objects_collision_statistics.label_balance_indicator)
                 gripper_target_point = pc[gripper_target_index]
                 gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
                 gripper_target_pose = gripper_poses1[gripper_target_index]
                 loss, counted = gripper_object_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                              objects_mask_numpy, gripper_prediction_,
+                                                              objects_mask, gripper_prediction_,
                                                               self.objects_collision_statistics)
                 if counted: break
             gripper_collision_loss += loss / batch_size2
@@ -957,14 +957,14 @@ class TrainGraspGAN:
         for k in range(batch_size2):
             '''gripper-bin collision - 1'''
             while True:
-                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 1], mask=objects_mask_numpy,
+                gripper_target_index = balanced_sampling(gripper_head_predictions1[:, 1], mask=objects_mask,
                                                          exponent=10.0,
                                                          balance_indicator=self.bin_collision_statistics.label_balance_indicator)
                 gripper_target_point = pc[gripper_target_index]
                 gripper_prediction_ = gripper_head_predictions1[gripper_target_index]
                 gripper_target_pose = gripper_poses1[gripper_target_index]
                 loss, counted = gripper_bin_collision_loss(gripper_target_pose, gripper_target_point, pc,
-                                                           objects_mask_numpy, gripper_prediction_,
+                                                           objects_mask, gripper_prediction_,
                                                            self.bin_collision_statistics, floor_elevation_)
 
                 if counted: break
@@ -972,12 +972,12 @@ class TrainGraspGAN:
 
         for k in range(batch_size2):
             '''suction seal head'''
-            suction_target_index = balanced_sampling(suction_head_predictions, mask=objects_mask_numpy,
+            suction_target_index = balanced_sampling(suction_head_predictions, mask=objects_mask,
                                                      exponent=10.0,
                                                      balance_indicator=self.suction_head_statistics.label_balance_indicator)
             suction_prediction_ = suction_head_predictions[suction_target_index]
-            suction_seal_loss += get_suction_seal_loss(pc, normals, suction_target_index, suction_prediction_,
-                                                       self.suction_head_statistics, objects_mask_numpy) / batch_size2
+            suction_seal_loss += get_suction_seal_loss(pc.cpu().numpy(), normals, suction_target_index, suction_prediction_,
+                                                       self.suction_head_statistics, objects_mask) / batch_size2
 
         for k in range(batch_size2):
             '''shift affordance head'''
@@ -985,7 +985,7 @@ class TrainGraspGAN:
                                                    balance_indicator=self.shift_head_statistics.label_balance_indicator)
             shift_target_point = pc[shift_target_index]
             shift_prediction_ = shift_head_predictions[shift_target_index]
-            shift_appealing_loss += shift_affordance_loss(pc, shift_target_point, objects_mask_numpy,
+            shift_appealing_loss += shift_affordance_loss(pc.cpu().numpy(), shift_target_point.cpu().numpy(), objects_mask.cpu().numpy(),
                                                           self.shift_head_statistics, shift_prediction_) / batch_size2
 
         return suction_seal_loss, gripper_collision_loss, shift_appealing_loss, background_detection_loss, suction_sampling_loss
@@ -1080,8 +1080,8 @@ class TrainGraspGAN:
 
             pi.step(i)
 
-            pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
-            pc = transform_to_camera_frame(pc, reverse=True)
+            pc, mask = depth_to_point_clouds(depth[0, 0], camera)
+            pc = transform_to_camera_frame_torch(pc, reverse=True)
 
             if valid_gripper_pose:
                 valid_pose_index = self.pixel_to_point_index(depth, mask, gripper_pixel_index)
@@ -1089,8 +1089,8 @@ class TrainGraspGAN:
             '''background detection head'''
             bin_mask, floor_elevation = self.analytical_bin_mask(pc, file_ids)
             if bin_mask is None: continue
-            objects_mask_numpy = bin_mask <= 0.5
-            objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
+            objects_mask = bin_mask <= 0.5
+            # objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
             objects_mask_pixel_form = torch.ones_like(depth)
             objects_mask_pixel_form[0, 0][mask] = objects_mask_pixel_form[0, 0][mask] * objects_mask
             objects_mask_pixel_form = objects_mask_pixel_form > 0.5
@@ -1100,7 +1100,7 @@ class TrainGraspGAN:
             '''Elevation-based augmentation'''
             if np.random.rand() > 1.:
                 depth = self.simulate_elevation_variations(depth, objects_mask_pixel_form, exponent=5.0)
-                pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
+                pc, mask = depth_to_point_clouds(depth[0, 0], camera)
                 pc = transform_to_camera_frame(pc, reverse=True)
                 altered_objects_elevation = True
             else:
@@ -1336,14 +1336,14 @@ def train_N_grasp_GAN(n=1):
     # torch.autograd.set_detect_anomaly(True)
 
     for i in range(n):
-        try:
+        # try:
             cuda_memory_report()
             Train_grasp_GAN.initialize(n_samples=None)
             Train_grasp_GAN.begin()
-        except Exception as e:
-            print(Fore.RED, str(e), Fore.RESET)
-            del Train_grasp_GAN
-            Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
+        # except Exception as e:
+        #     print(Fore.RED, str(e), Fore.RESET)
+        #     del Train_grasp_GAN
+        #     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
 
     # del Train_grasp_GAN
 

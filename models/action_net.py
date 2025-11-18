@@ -300,6 +300,9 @@ class ActionNet(nn.Module):
         else:
             features = self.back_bone(depth)
 
+        print('A max_features_output=',features.max().item(), ', min=',features.min().item(),', mean=',features.mean().item())
+
+
         # features=self.LN(features)
         # print(features)
 

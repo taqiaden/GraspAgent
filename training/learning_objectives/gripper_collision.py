@@ -71,61 +71,61 @@ def evaluate_grasps3(target_point,target_generated_pose,target_ref_pose,pc,bin_m
     gen_out_of_scope=scope_drift_intensity(target_generated_pose)
     ref_out_of_scope=scope_drift_intensity(target_ref_pose)
 
-    if gen_out_of_scope==0:
-        '''check collision'''
-        T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
+    # if gen_out_of_scope==0:
+    '''check collision'''
+    T_d, width, distance = pose_7_to_transformation(target_generated_pose, target_point)
 
-        detect_collision,pred_firmness_val,pred_quality,collision_val = gripper_firmness_check(T_d,width, pc[~bin_mask], with_allowance=True, visualize=visualize )
-        # print(f'-------------------------{pred_firmness_val},----------{pred_quality}')
-        # pred_firmness_val*=1 if pred_quality>0.5 else 0.
-        pred_firmness_val*=pred_quality
+    detect_collision,pred_firmness_val,pred_quality,collision_val = gripper_firmness_check(T_d,width, pc[~bin_mask], with_allowance=True, visualize=visualize )
+    # print(f'-------------------------{pred_firmness_val},----------{pred_quality}')
+    # pred_firmness_val*=1 if pred_quality>0.5 else 0.
+    pred_firmness_val*=pred_quality
 
-        # if distance<0.001:pred_firmness_val*=0
-        if not detect_collision:
-            detect_collision,_,_,collision_val = gripper_firmness_check(T_d,width, pc[bin_mask], with_allowance=True, visualize=visualize,floor_elevation_=floor_elevation )
+    # if distance<0.001:pred_firmness_val*=0
+    if not detect_collision:
+        detect_collision,_,_,collision_val = gripper_firmness_check(T_d,width, pc[bin_mask], with_allowance=True, visualize=visualize,floor_elevation_=floor_elevation )
 
-        # print('------------------------',pred_firmness_val,collision_val,int(pred_firmness_val*1000)/30,int(collision_val*1000)/30)
-        if visualize: print(f'pred: {(detect_collision,pred_firmness_val,collision_val)}')
+    # print('------------------------',pred_firmness_val,collision_val,int(pred_firmness_val*1000)/30,int(collision_val*1000)/30)
+    if visualize: print(f'pred: {(detect_collision,pred_firmness_val,collision_val)}')
 
-        # pred_firmness_val, collision_val = int(pred_firmness_val*1000)/30,  int(collision_val*1000)/30
-    else:
-        gen_has_collision, pred_firmness_val, collision_val ,pred_quality= None, None, None, None
+    # pred_firmness_val, collision_val = int(pred_firmness_val*1000)/30,  int(collision_val*1000)/30
+    # else:
+    #     gen_has_collision, pred_firmness_val, collision_val ,pred_quality= None, None, None, None
 
-    if ref_out_of_scope==0:
-        '''check firmness of the label'''
-        T_d_label, width_label, distance_label = pose_7_to_transformation(target_ref_pose, target_point)
+    # if ref_out_of_scope==0:
+    '''check firmness of the label'''
+    T_d_label, width_label, distance_label = pose_7_to_transformation(target_ref_pose, target_point)
 
-        ref_detect_collision, ref_firmness_val,ref_quality, ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc[~bin_mask],
-                                                                                    with_allowance=True,
-                                                                                    visualize=visualize )
-        # ref_firmness_val*=1 if ref_quality>0.5 else 0.
-        ref_firmness_val*=ref_quality
+    ref_detect_collision, ref_firmness_val,ref_quality, ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc[~bin_mask],
+                                                                                with_allowance=True,
+                                                                                visualize=visualize )
+    # ref_firmness_val*=1 if ref_quality>0.5 else 0.
+    ref_firmness_val*=ref_quality
 
-        # if distance_label < 0.001: ref_firmness_val *= 0
-        if not ref_detect_collision:
-            ref_detect_collision, _,_, ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc[bin_mask], with_allowance=True,
-                                                                        visualize=visualize,
-                                                                        floor_elevation_=floor_elevation)
+    # if distance_label < 0.001: ref_firmness_val *= 0
+    if not ref_detect_collision:
+        ref_detect_collision, _,_, ref_collision_val = gripper_firmness_check(T_d_label, width_label, pc[bin_mask], with_allowance=True,
+                                                                    visualize=visualize,
+                                                                    floor_elevation_=floor_elevation)
 
-        # if  ref_detect_collision==0:
-        #     gripper_firmness_check(T_d, width, pc, with_allowance=True,
-        #                            visualize=True,
-        #                            floor_elevation_=floor_elevation)
-        #
-        # elif  detect_collision==0:
-        #     gripper_firmness_check(T_d_label, width_label, pc, with_allowance=True,
-        #                            visualize=True,
-        #                            floor_elevation_=floor_elevation)
-        if visualize: print(f'ref: {(ref_detect_collision, ref_firmness_val, ref_collision_val )}')
+    # if  ref_detect_collision==0:
+    #     gripper_firmness_check(T_d, width, pc, with_allowance=True,
+    #                            visualize=True,
+    #                            floor_elevation_=floor_elevation)
+    #
+    # elif  detect_collision==0:
+    #     gripper_firmness_check(T_d_label, width_label, pc, with_allowance=True,
+    #                            visualize=True,
+    #                            floor_elevation_=floor_elevation)
+    if visualize: print(f'ref: {(ref_detect_collision, ref_firmness_val, ref_collision_val )}')
 
 
-        # ref_firmness_val, ref_collision_val =  int(ref_firmness_val*1000)/30,  int(ref_collision_val*1000)/30
-        # print(ref_has_collision,ref_firmness_val,ref_collision_val)
-        # if ref_has_collision==0:
-        #     print('ref: ', target_ref_pose)
-        #     print('G: ', target_generated_pose)
-    else:
-        ref_has_collision, ref_firmness_val, ref_collision_val,ref_quality=None,None,None,None
+    # ref_firmness_val, ref_collision_val =  int(ref_firmness_val*1000)/30,  int(ref_collision_val*1000)/30
+    # print(ref_has_collision,ref_firmness_val,ref_collision_val)
+    # if ref_has_collision==0:
+    #     print('ref: ', target_ref_pose)
+    #     print('G: ', target_generated_pose)
+    # else:
+    #     ref_has_collision, ref_firmness_val, ref_collision_val,ref_quality=None,None,None,None
     #
     # print('ref: ', target_ref_pose)
     # print('G: ', target_generated_pose)
@@ -201,6 +201,28 @@ def gripper_collision_loss(gripper_target_pose, gripper_target_point,pc,objects_
 
     return (object_collision_loss+bin_collision_loss)/2
 
+def gripper_collision_loss(gripper_target_pose, gripper_target_point,pc,prediction_,objects_collision_statistics,visualize=False):
+    with torch.no_grad():
+
+        T_d, width, distance = pose_7_to_transformation(gripper_target_pose.detach(), gripper_target_point.detach())
+        collision_with_objects ,low_quality_grasp= grasp_collision_detection(T_d, width, pc,with_allowance=True, visualize=visualize)
+
+    object_collision_label = torch.ones_like(prediction_[0]) if collision_with_objects  else torch.zeros_like(prediction_[0])
+    object_collision_pred=prediction_[0]
+
+
+    if visualize: print(f'   collision (label ={object_collision_label}, prediction= {object_collision_pred})')
+    object_collision_loss=bce_loss(object_collision_pred, object_collision_label)
+
+    with torch.no_grad():
+        objects_collision_statistics.loss=object_collision_loss.item()
+
+        # counted_= collision_with_objects or (not low_quality_grasp and not collision_with_objects) or np.random.random() > 0.95
+        # if counted_:
+        objects_collision_statistics.update_confession_matrix(object_collision_label.detach(), object_collision_pred.detach())
+
+    return object_collision_loss,True
+
 def gripper_object_collision_loss(gripper_target_pose, gripper_target_point,pc,objects_mask,prediction_,objects_collision_statistics,visualize=False):
     with torch.no_grad():
 
@@ -251,18 +273,19 @@ def gripper_quality_loss(gripper_target_pose, gripper_target_point,pc,prediction
         T_d, width, distance = pose_7_to_transformation(gripper_target_pose.detach(), gripper_target_point.detach())
         collision,low_quality_grasp= grasp_collision_detection(T_d, width, pc,with_allowance=True, visualize=visualize,floor_elevation_=floor_elevation_)
 
-    bin_collision_label = torch.zeros_like(prediction_[0]) if collision or low_quality_grasp  else torch.ones_like(prediction_[0])
-    bin_collision_pred=prediction_[0]
+    label = torch.zeros_like(prediction_[0]) if collision or low_quality_grasp  else torch.ones_like(prediction_[0])
+    pred=prediction_[0]
 
 
-    if visualize: print(f'bin collision (label ={bin_collision_label}, prediction= {bin_collision_pred})')
+    if visualize: print(f'bin collision (label ={label}, prediction= {pred})')
+
     # bin_collision_loss=bce_loss(bin_collision_pred, bin_collision_label)
-    bin_collision_loss=binary_smooth_l1(bin_collision_pred,bin_collision_label)
+    loss=bce_loss(pred,label)
     with torch.no_grad():
-        bin_collision_statistics.loss=bin_collision_loss.item()
+        bin_collision_statistics.loss=loss.item()
 
         # counted_= collision_with_bin or (not low_quality_grasp and not collision_with_bin) or np.random.random() > 0.95
         # if counted_:
-        bin_collision_statistics.update_confession_matrix(bin_collision_label.detach(),torch.clamp( bin_collision_pred,0,1).detach())
+        bin_collision_statistics.update_confession_matrix(label.detach(),torch.clamp( pred,0,1).detach())
 
-    return bin_collision_loss,True
+    return loss,True

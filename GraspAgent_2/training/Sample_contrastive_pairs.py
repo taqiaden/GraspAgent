@@ -14,15 +14,15 @@ max_n = 50
 print = custom_print
 
 def check_valid_pair(c_, s_, f_, q_,annealing_factor,prediction_uniqeness):
-    if sum(s_) > 0:
-        if s_[1] == 0 and c_[1] == 0 and f_[1] > 0 and q_[1] > 0.5:
+    # if sum(s_) > 0:
+    #     if s_[1] == 0 and c_[1] == 0 and f_[1] > 0 and q_[1] > 0.5:
+    #         return True, 1, 1
+    #     else:
+    #         return False,  0, 0
+    if  sum(c_) > 0:
+        if c_[1] == 0 and f_[1] > 0. and q_[1] > 0.5 and c_[0]>0 and s_[1]==0:
             return True, 1, 1
-        else:
-            return False,  0, 0
-    elif sum(s_) == 0 and sum(c_) > 0:
-        if c_[1] == 0 and f_[1] > 0. and q_[1] > 0.5 and c_[0]>0:
-            return True, 1, 1
-        elif c_[0] == 0 and f_[0] > 0. and q_[0] > 0.5 and c_[1]>0:
+        elif c_[0] == 0 and f_[0] > 0. and q_[0] > 0.5 and c_[1]>0 and s_[0]==0:
             return False, 1, -1
 
             # if np.random.rand()<prediction_uniqeness*annealing_factor**2:
@@ -32,16 +32,16 @@ def check_valid_pair(c_, s_, f_, q_,annealing_factor,prediction_uniqeness):
         else:
             return False,  0, 0
 
-    elif sum(s_) == 0 and sum(c_) == 0:
-        if (f_[1] - f_[0] > 0.) and q_[1] > 0.5:
+    if sum(c_) == 0:
+        if (f_[1] - f_[0] > 0.) and q_[1] > 0.5 and s_[1]==0:
             relative_firmness = (abs(f_[1] - f_[0]) / (f_[1] + f_[0]))
             if relative_firmness**2<np.random.rand(): return False,  0,0
             return True, relative_firmness, 1
-        elif (f_[0] - f_[1] > 0.) and q_[0] > 0.5:
+        elif (f_[0] - f_[1] > 0.) and q_[0] > 0.5 and s_[0]==0:
             relative_firmness = (abs(f_[1] - f_[0]) / (f_[1] + f_[0]))
             # return True, relative_firmness, -1
 
-            if np.random.rand() < prediction_uniqeness*annealing_factor**2:
+            if np.random.rand() < prediction_uniqeness*annealing_factor:
                 return True,   relative_firmness, -1
             else:
                 return False, 0, 0
@@ -162,6 +162,9 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
     coords = torch.nonzero(mask, as_tuple=False)
 
     t = 0
+
+    sampler_samples=0
+
     while True:
         if t > n: break
 
@@ -188,6 +191,7 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
 
         if k==1:
             superior_A_model_moving_rate.update(0.)
+            sampler_samples+=1
         elif k==-1:
             superior_A_model_moving_rate.update(1.)
 
@@ -242,9 +246,9 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
         t += 1
 
     if counter== batch_size:
-        return True, pairs, sampling_centroid
+        return True, pairs, sampling_centroid,sampler_samples
     else:
-        return False, pairs, sampling_centroid
+        return False, pairs, sampling_centroid,sampler_samples
 
 
 def sample_contrastive_pairs1d(  pc,  bin_mask, gripper_pose_PW, gripper_pose_ref_PW,

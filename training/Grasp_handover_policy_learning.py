@@ -5,15 +5,13 @@ from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
 from check_points.check_point_conventions import ModelWrapper
 from dataloaders.grasp_handover_dl import DemonstrationsDataset, SeizePolicyDataset, GraspDataset
-from lib.IO_utils import load_pickle, save_pickle
-from lib.Multible_planes_detection.plane_detecttion import cache_dir, bin_planes_detection
+from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2,online_data, demonstrations_data
-from lib.depth_map import depth_to_point_clouds, transform_to_camera_frame
+from lib.depth_map import depth_to_point_clouds_torch,transform_to_camera_frame_torch
 from lib.image_utils import view_image
 from lib.loss.D_loss import binary_smooth_l1, binary_l1
 from lib.report_utils import progress_indicator
-from lib.sklearn_clustering import dbscan_clustering
 from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_handover_policy_module_key
 from models.action_net import action_module_key, ActionNet
 from records.training_satatistics import TrainingTracker, MovingRate
@@ -53,17 +51,17 @@ class TrainPolicyNet:
 
         '''initialize statistics records'''
         self.gripper_quality_net_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_gripper_quality',
-                                                              track_label_balance=True, min_decay=0.005)
+                                                              track_label_balance=True)
         self.suction_quality_net_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_suction_quality',
-                                                              track_label_balance=True, min_decay=0.005)
+                                                              track_label_balance=True)
 
         self.gripper_quality_net_statistics_old = TrainingTracker(name=grasp_handover_policy_module_key + '_gripper_quality_old',
-                                                              track_label_balance=True, min_decay=0.005)
+                                                              track_label_balance=True)
         self.suction_quality_net_statistics_old = TrainingTracker(name=grasp_handover_policy_module_key + '_suction_quality_old',
-                                                              track_label_balance=True, min_decay=0.005)
+                                                              track_label_balance=True)
 
         self.demonstrations_statistics = TrainingTracker(name=grasp_handover_policy_module_key + '_demonstrations',
-                                                         track_label_balance=False, min_decay=0.005)
+                                                         track_label_balance=False)
 
         self.buffer = online_data2.load_pickle(buffer_file) if online_data2.file_exist(buffer_file) else PPOMemory()
 
@@ -74,7 +72,7 @@ class TrainPolicyNet:
         self.buffer_time_stamp = None
         self.data_tracker_time_stamp = None
 
-        self.gripper_sampling_rate = MovingRate('gripper_sampling_rate', min_decay=0.005)
+        self.gripper_sampling_rate = MovingRate('gripper_sampling_rate')
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
@@ -177,8 +175,8 @@ class TrainPolicyNet:
         pcs = []
         masks = []
         for j in range(depth.shape[0]):
-            pc, mask = depth_to_point_clouds(depth[j, 0].cpu().numpy(), camera)
-            pc = transform_to_camera_frame(pc, reverse=True)
+            pc, mask = depth_to_point_clouds_torch(depth[j, 0], camera)
+            pc = transform_to_camera_frame_torch(pc, reverse=True)
 
             pcs.append(pc)
             masks.append(mask)
@@ -255,8 +253,8 @@ class TrainPolicyNet:
             if bin_mask is None:
                 objects_masks.append(None)
                 continue
-            objects_mask_numpy = bin_mask <= 0.5
-            objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
+            objects_mask = bin_mask <= 0.5
+            # objects_mask = torch.from_numpy(objects_mask_numpy).cuda()
             objects_masks.append(objects_mask)
             objects_mask_pixel_form = torch.ones_like(depth[0:1])
             objects_mask_pixel_form[0, 0][masks[k]] = objects_mask_pixel_form[0, 0][masks[k]] * objects_mask
@@ -264,8 +262,8 @@ class TrainPolicyNet:
             if np.random.rand() > 0.5:
                 depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1], objects_mask_pixel_form,
                                                                     exponent=5.0)
-                pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0].cpu().numpy(), camera)
-                pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
+                pcs[k], masks[k] = depth_to_point_clouds_torch(depth[k, 0], camera)
+                pcs[k] = transform_to_camera_frame_torch(pcs[k], reverse=True)
 
         return depth,pcs, masks,objects_masks
 
@@ -277,8 +275,8 @@ class TrainPolicyNet:
             if np.random.rand() > 0.5:
                 depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1],
                                                                     exponent=5.0)
-                pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0].cpu().numpy(), camera)
-                pcs[k] = transform_to_camera_frame(pcs[k], reverse=True)
+                pcs[k], masks[k] = depth_to_point_clouds_torch(depth[k, 0], camera)
+                pcs[k] = transform_to_camera_frame_torch(pcs[k], reverse=True)
 
         return depth,pcs, masks
 
@@ -435,6 +433,8 @@ class TrainPolicyNet:
 
             depth, pcs, masks, objects_masks = self.objects_augmentation(depth, file_ids,
                                                                          cache_name='bin_planes2')
+
+
 
             '''zero grad'''
             self.model_wrapper.model.zero_grad()

@@ -1,10 +1,13 @@
+import math
+
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
+from GraspAgent_2.utils.model_init import init_orthogonal, scaled_init, init_weights_xavier, init_weights_he_normal, \
+    init_weights_xavier_normal
 from models.decoders import LayerNorm2D
-
 
 class ParameterizedSine(nn.Module):
     def __init__(self):
@@ -18,11 +21,11 @@ class ParameterizedSine(nn.Module):
         # print('theta=',self.theta)
 
         x=torch.sin(x+self.theta)*self.alpha
-        # print(x)
+        # print(f'alpha={self.alpha}, theta={self.theta}')
         return x
 
-class custom_att_1d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c,med_c=64, relu_negative_slope=0.,  activation=None):
+class att_1d(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c,relu_negative_slope=0.,  activation=None,use_sin=False,normalize=False):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
@@ -30,83 +33,7 @@ class custom_att_1d(nn.Module):
         else:
             activation_function = activation
 
-        self.key = nn.Sequential(
-            nn.Linear(in_c1, med_c),
-        ).to('cuda')
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-
-        self.value = nn.Sequential(
-            nn.Linear(in_c1, med_c),
-        ).to('cuda')
-
-        # self.query = nn.Sequential(
-        #     nn.Linear(in_c1, med_c),
-        # ).to('cuda')
-
-        # self.opening_mask = nn.Sequential(
-        #     nn.Linear(1, med_c),
-        # ).to('cuda')
-
-
-        self.implicit_transformation=nn.Sequential(
-            nn.Linear(7, med_c*med_c),
-        ).to('cuda')
-
-        self.d = nn.Sequential(
-            nn.Linear(med_c, 64),
-            activation_function,
-            nn.Linear(64, 32),
-            activation_function,
-            nn.Linear(32, out_c),
-        ).to('cuda')
-
-        self.med_c=med_c
-
-    def forward(self, key_value_input, query_input):
-
-        # T=query_input[...,0:6]
-        # w=query_input[...,6:]
-
-        T=self.implicit_transformation(query_input).unflatten(dim=-1,sizes=(self.med_c,self.med_c))
-        # d=self.translation(d)
-        # w=self.opening_mask(w)
-        # w = F.softmax(w,dim=-1)
-        # w = F.sigmoid(w*self.scale)
-
-        key = self.key(key_value_input)
-        value = self.value(key_value_input)
-        # query = self.query(key_value_input)
-
-        # print(value.shape)
-        # print(T.shape)
-
-        query=T@key_value_input.unsqueeze(-1)
-
-        query=(query.squeeze())#*w
-
-        # print(value.shape)
-        # exit()
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=-1, eps=1e-8)
-        value = F.softmax(value*self.scale,dim=-1)
-        # att_map = F.sigmoid(att_map*self.scale)
-
-        x = (att_map * value)
-
-        output = self.d(x)
-        return output
-
-class normalize_free_att_1d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c,med_c=64, relu_negative_slope=0.,  activation=None,use_sin=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
+        med_c=max(in_c1,in_c2)
 
         self.key = nn.Sequential(
             nn.Linear(in_c1, med_c),
@@ -122,370 +49,196 @@ class normalize_free_att_1d(nn.Module):
             nn.Linear(in_c2, med_c),
         ).to('cuda')
 
+        # self.gate = nn.Sequential(
+        #     nn.Linear(in_c2+in_c1, in_c1),
+        #     nn.Sigmoid()
+        # ).to('cuda')
+
         self.d = nn.Sequential(
-            nn.Linear(med_c, 64),
+            nn.Linear(med_c, 48),
+            nn.LayerNorm(48),
             ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(64, 32),
+            nn.Linear(48, out_c),
+            # nn.LayerNorm(48),
+            # ParameterizedSine() if use_sin else activation_function,
+            # nn.Linear(48, out_c),
+        ).to('cuda') if normalize else nn.Sequential(
+            nn.Linear(med_c, 48),
             ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(32, out_c),
+            nn.Linear(48, out_c),
+            # ParameterizedSine() if use_sin else activation_function,
+            # nn.Linear(32, out_c),
         ).to('cuda')
 
-        self.in_c1=in_c1
 
-    def forward(self, key_value_input, query_input):
 
-        key = self.key(key_value_input)
-        value = self.value(key_value_input)
-        query = self.query(query_input)
+    def forward(self, context, condition):
+
+        # context=self.gate(torch.cat([context,condition],dim=2))*context
+
+        key = self.key(context)
+        value = self.value(context)
+        query = self.query(condition)
 
         att_map = query * key
 
         att_map = F.normalize(att_map, p=2, dim=2, eps=1e-8)
-        att_map = F.softmax(att_map*self.scale,dim=2)
+        # att_map = F.softmax(att_map*self.scale,dim=2)
+        att_map = F.sigmoid(att_map)
 
         x = (att_map * value)
 
         output = self.d(x)
         return output
 
-class normalize_free_att_sins(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c):
-        super().__init__()
-
-
-        self.key = nn.Sequential(
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-
-        self.value = nn.Sequential(
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        self.query = nn.Sequential(
-            nn.Linear(in_c2, 64),
-        ).to('cuda')
-
-        self.d = nn.Sequential(
-            nn.Linear(64, 64),
-            ParameterizedSine(),
-            nn.Linear(64, 32),
-            ParameterizedSine(),
-            nn.Linear(32, out_c),
-        ).to('cuda')
-
-        self.in_c1=in_c1
-
-    def forward(self, key_value_input, query_input):
-        key = self.key(key_value_input)
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=2, eps=1e-8)
-        att_map = F.softmax(att_map*self.scale,dim=2)
-
-        x = (att_map * value)
-
-        output = self.d(x)
-        return output
-
-class normalized_att_1d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c,med_c=64, relu_negative_slope=0.,
-                 activation=None,use_sigmoid=False,):
+class att_2d(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sin=False,normalize=False):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
                 negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
         else:
             activation_function = activation
-        self.use_sigmoid=use_sigmoid
+
+        mid_c=max(in_c1,in_c2)
 
         self.key = nn.Sequential(
-            nn.Linear(in_c1, med_c),
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
-
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
-            nn.Linear(in_c1, med_c),
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
-        self.Q_LN = nn.LayerNorm([in_c2]).to('cuda')
         self.query = nn.Sequential(
-            nn.Linear(in_c2, med_c // 2),
-            nn.SiLU(),
-            nn.Linear(med_c // 2, med_c),
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
         ).to('cuda')
 
-        self.att = nn.Sequential(
-            nn.Linear(med_c, med_c//2),
-            nn.LayerNorm(med_c//2),
+
+        self.d = nn.Sequential(
+            nn.Conv2d(mid_c, 48, kernel_size=1),
+            LayerNorm2D(48),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Conv2d(48, 32, kernel_size=1),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
+
+        ).to('cuda') if normalize else nn.Sequential(
+            nn.Conv2d(mid_c, 48, kernel_size=1),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Conv2d(48, 32, kernel_size=1),
             activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
+        ).to('cuda')
+
+        self.initialize_()
+
+    def initialize_(self):
+        self.key.apply(init_weights_he_normal)
+        self.value.apply(init_weights_he_normal)
+        self.query.apply(init_weights_he_normal)
+        self.d.apply(init_weights_he_normal)
+
+    def forward(self, context, condition):
+        # context = self.gate(torch.cat([context, condition], dim=1)) * context
+
+        value = self.value(context)
+        query = self.query(condition)
+        key = self.key(context)
+
+        att_map = query * key
+
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+        att_map = F.sigmoid(att_map)
+
+
+        x = (att_map * value)
+
+        output = self.d(x)
+        return output
+
+
+
+
+class res_att_2d(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sin=False,normalize=False):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+
+        mid_c=max(in_c1,in_c2)
+
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.res = nn.Sequential(
-            nn.Linear(in_c1 + in_c2, 32, bias=False),
-            nn.LayerNorm(32),
-            activation_function,
+            nn.Conv2d(in_c1+in_c2, mid_c, kernel_size=1),
+            activation_function
         ).to('cuda')
 
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        ).to('cuda')
 
-        self.sig = nn.Sigmoid()
-
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
+        ).to('cuda')
 
         self.d = nn.Sequential(
-            nn.Linear(32+(med_c // 2), 64, bias=False),
-            nn.LayerNorm([64]),
-            activation_function,
-            nn.Linear(64, 32, bias=False),
-            nn.LayerNorm([32]),
-            activation_function,
-            nn.Linear(32, out_c),
-        ).to('cuda')
-
-        self.in_c1=in_c1
-
-    def forward(self, key_value_input, query_input):
-
-        '''residual'''
-        inputs = torch.cat([key_value_input, query_input], dim=-1)
-        res = self.res(inputs)
-
-        '''key value from input1'''
-        # key = self.key(normalized_key_value)
-        value = self.value(key_value_input)
-
-        query = self.query(query_input)
-
-
-        key = self.key(key_value_input)
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=-1, eps=1e-8)
-        if self.use_sigmoid:
-            att_map = F.sigmoid(att_map*self.scale)
-        else:
-            att_map = F.softmax(att_map,dim=-1)
-
-        x = (att_map * value)
-        x = self.att(x)
-
-        x = torch.cat([x, res], dim=-1)
-
-        output = self.d(x)
-        return output
-
-class normalize_free_att_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
-                 activation=None,use_sin=False,softmax_att=True,SN=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-
-        self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.ln=LayerNorm2D(64).to('cuda')
-        if SN:
-
-            self.d = nn.Sequential(
-                spectral_norm(nn.Conv2d(64, 64, kernel_size=1)),
-                ParameterizedSine() if use_sin else activation_function,
-                spectral_norm(nn.Conv2d(64, 32, kernel_size=1)),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1),
-            ).to('cuda')
-        else:
-            self.d = nn.Sequential(
-                nn.Conv2d(64, 64, kernel_size=1),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(64, 32, kernel_size=1),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1),
-            ).to('cuda')
-
-        self.softmax_att=softmax_att
-
-    def forward(self, key_value_input, query_input):
-        normalized_key_value_input=self.ln(key_value_input)
-
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-        key = self.key(normalized_key_value_input)
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        if self.softmax_att:
-            att_map = F.softmax(att_map*self.scale,dim=1)
-        else:
-            att_map = F.sigmoid(att_map*self.scale)
-
-        x = (att_map * value)
-
-        output = self.d(x)
-        return output
-
-class normalized_att_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,
-                 activation=None,use_sin=False,softmax_att=True):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-
-        self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.ln=LayerNorm2D(64).to('cuda')
-
-        self.d = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            LayerNorm2D(64),
+            nn.Conv2d(mid_c*2, mid_c, kernel_size=1),
+            LayerNorm2D(mid_c),
             ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(64, 32, kernel_size=1),
-            LayerNorm2D(32),
+            nn.Conv2d(mid_c, 32, kernel_size=1),
             ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
+            nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
+
+        ).to('cuda') if normalize else nn.Sequential(
+            nn.Conv2d(mid_c*2, mid_c, kernel_size=1),
+            ParameterizedSine() if use_sin else activation_function,
+            nn.Conv2d(mid_c, 32, kernel_size=1),
+            activation_function,
+            nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
         ).to('cuda')
 
-        self.softmax_att=softmax_att
+        self.initialize_()
 
-    def forward(self, key_value_input, query_input):
-        normalized_key_value_input=self.ln(key_value_input)
+    def initialize_(self):
+        self.key.apply(init_weights_he_normal)
+        self.value.apply(init_weights_he_normal)
+        self.query.apply(init_weights_he_normal)
+        self.d.apply(init_weights_he_normal)
 
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-        key = self.key(normalized_key_value_input)
+
+    def forward(self, context, condition):
+        # context = self.gate(torch.cat([context, condition], dim=1)) * context
+        res=self.res(torch.cat([context,condition],dim=1))
+        value = self.value(context)
+        query = self.query(condition)
+        key = self.key(context)
 
         att_map = query * key
 
         att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        if self.softmax_att:
-            att_map = F.softmax(att_map*self.scale,dim=1)
-        else:
-            att_map = F.sigmoid(att_map*self.scale)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+        att_map = F.sigmoid(att_map)
 
         x = (att_map * value)
 
-        output = self.d(x)
-        return output
-
-class custom_att_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0., drop_out_ratio=0.0,
-                 activation=None, use_sin=False, softmax_att=True, SN=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-
-        self.key = nn.Sequential(
-            LayerNorm2D(in_c1),
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            LayerNorm2D(in_c1),
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 64, kernel_size=1),
-        ).to('cuda')
-
-        # self.ln=LayerNorm2D(64).to('cuda')
-        if SN:
-
-            self.d = nn.Sequential(
-                spectral_norm(nn.Conv2d(64, 64, kernel_size=1)),
-                ParameterizedSine() if use_sin else activation_function,
-                spectral_norm(nn.Conv2d(64, 32, kernel_size=1)),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1),
-            ).to('cuda')
-        else:
-            self.d = nn.Sequential(
-                nn.Conv2d(64, 64, kernel_size=1),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(64, 32, kernel_size=1),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1),
-            ).to('cuda')
-
-        self.softmax_att = softmax_att
-
-    def forward(self, key_value_input, query_input):
-        # key_value_input=self.ln(key_value_input)
-
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-        key = self.key(key_value_input)
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        if self.softmax_att:
-            att_map = F.softmax(att_map * self.scale, dim=1)
-        else:
-            att_map = F.sigmoid(att_map * self.scale)
-
-        x = (att_map * value)
-
-        output = self.d(x)
-        return output
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-        key = self.key(key_value_input)
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        if self.softmax_att:
-            att_map = F.softmax(att_map*self.scale,dim=1)
-        else:
-            att_map = F.sigmoid(att_map*self.scale)
-
-        x = (att_map * value)
-
-        output = self.d(x)
+        output = self.d(torch.cat([x,res],dim=1))
         return output
 
 class film_fusion_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,
-                 activation=None,use_sin=False,normalize=False):
+    def __init__(self, in_c1, in_c2, out_c,mid_c=None, relu_negative_slope=0.,
+                 activation=None,use_sin=False,normalize=False,decode=True):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
@@ -493,281 +246,146 @@ class film_fusion_2d(nn.Module):
         else:
             activation_function = activation
 
-
+        if mid_c is None:mid_c=max(in_c1,in_c2)
         self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
-        self.film_gen = nn.Sequential(
-            nn.Conv2d(in_c2, 64*2, kernel_size=1),
-            # LayerNorm2D(64),
-            # nn.Conv2d(64, 64 * 2, kernel_size=1),
+        self.film_gen_ = nn.Sequential(
+            nn.Conv2d(in_c2, mid_c*2, kernel_size=1),
         ).to('cuda')
 
         self.gate = nn.Sequential(
-            nn.Conv2d(in_c2+in_c1, in_c1, kernel_size=1),
+            nn.Conv2d(in_c2, in_c1, kernel_size=1),
             nn.Sigmoid()
         ).to('cuda')
 
-        self.d =  nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            LayerNorm2D(64),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(64, 32, kernel_size=1),
-            LayerNorm2D(32),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
-        ).to('cuda') if normalize else  nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            # LayerNorm2D(64),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(64, 32, kernel_size=1),
-            # LayerNorm2D(32),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
-        ).to('cuda')
+        self.act =activation_function
 
-    def forward(self, key_value_input, query_input):
-        gate=self.gate(torch.cat([query_input,key_value_input],dim=1))
-        key_value_input=key_value_input*gate
+        if decode:
+            self.d =  nn.Sequential(
+                nn.Conv2d(mid_c, 48, kernel_size=1),
+                LayerNorm2D(48),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Conv2d(48, 32, kernel_size=1),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
 
-        x = self.value(key_value_input)
-        gamma,beta = self.film_gen(query_input).chunk(2,dim=1)
-        # key = self.key(key_value_input)
+            ).to('cuda') if normalize else  nn.Sequential(
+                nn.Conv2d(mid_c, 48, kernel_size=1),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Conv2d(48, 32, kernel_size=1),
+                activation_function,
+                nn.Conv2d(32, out_c, kernel_size=1).to('cuda')
+            ).to('cuda')
 
-        x=gamma*x+beta
+            self.decode=decode
 
 
-        output = self.d(x)
+
+
+    def forward(self, context_features, condition_features):
+        # context_features=self.ln(context_features)
+
+        gate = self.gate(condition_features)
+
+        context_features=context_features*gate
+
+        x = self.value(context_features)
+
+        gamma,beta = self.film_gen_(condition_features).chunk(2,dim=1)
+
+        new_context=(1+gamma)*x+beta
+        new_context=self.act(new_context)
+
+        output = self.d(new_context) if self.decode else new_context
+
         return output
+
+class LearnableSine(nn.Module):
+    """
+    Sine activation with learnable frequency parameter omega_0.
+
+    y = sin(omega_0 * x)
+    """
+
+    def __init__(self, init_omega_0=5.0):
+        super().__init__()
+        # omega_0 is a learnable parameter
+        self.omega_0_ =  nn.Parameter(torch.tensor(init_omega_0, dtype=torch.float32, device='cuda'), requires_grad=True)
+
+    def forward(self, x):
+        return torch.sin(self.omega_0_ * x)
+
 
 class film_fusion_1d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,
-                 activation=None,use_sin=False,normalize=False):
+    def __init__(self, in_c1, in_c2, out_c,mid_c=None, relu_negative_slope=0.,
+                 activation=None,use_sin=False,normalize=False,decode=True,with_gate=True,bias=True):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
                 negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
         else:
             activation_function = activation
-
-
+        if mid_c is None:mid_c=max(in_c1,in_c2)
         self.value = nn.Sequential(
-            nn.Linear(in_c1, 64),
+            nn.Linear(in_c1, mid_c),
         ).to('cuda')
 
-
-        self.film_gen = nn.Sequential(
-            nn.Linear(in_c2, 64*2),
+        self.film_gen_ = nn.Sequential(
+            nn.Linear(in_c2, mid_c*2),
+        ).to('cuda') if bias else nn.Sequential(
+            nn.Linear(in_c2, mid_c),
         ).to('cuda')
+
+        self.bias=bias
 
         self.gate = nn.Sequential(
-            nn.Linear(in_c2, 64),
+            nn.Linear(in_c2, in_c1),
             nn.Sigmoid()
-        ).to('cuda')
+        ).to('cuda') if with_gate else None
 
-        self.d = nn.Sequential(
-            nn.Linear(64, 64),
-            nn.LayerNorm(64),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(64, 32),
-            nn.LayerNorm(32),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(32, out_c),
-        ).to('cuda') if normalize else nn.Sequential(
-            nn.Linear(64, 64),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(64, 32),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Linear(32, out_c),
-        ).to('cuda')
+        # self.ln = nn.LayerNorm(64).to('cuda')
+        # if decode:
+        self.act =activation_function
 
-
-
-
-    def forward(self, key_value_input, query_input):
-        gate = self.gate(query_input)
-        key_value_input=key_value_input*gate
-
-        x = self.value(key_value_input)
-        gamma,beta = self.film_gen(query_input).chunk(2,dim=-1)
-
-        x=gamma*x+beta
+        self.decode=decode
+        if decode:
+            self.d = nn.Sequential(
+                nn.Linear(mid_c, 48),
+                nn.LayerNorm(48),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Linear(48, out_c),
+                # nn.LayerNorm(48),
+                # ParameterizedSine() if use_sin else activation_function,
+                # nn.Linear(48, out_c),
+            ).to('cuda') if normalize else nn.Sequential(
+                nn.Linear(mid_c, 48),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Linear(48, out_c),
+                # ParameterizedSine() if use_sin else activation_function,
+                # nn.Linear(32, out_c),
+            ).to('cuda')
 
 
-        output = self.d(x)
+    def forward(self, context, condition):
+        if self.gate is not None:
+            gate = self.gate(condition)
+            context=context*gate
+
+        x = self.value(context)
+        if self.bias:
+            gamma,beta = self.film_gen_(condition).chunk(2,dim=-1)
+            new_context=(1+gamma)*x+beta
+        else:
+            gamma = self.film_gen_(condition)
+            new_context = (1 + gamma) * x
+
+        new_context=self.act(new_context)
+
+        if not self.decode: return new_context
+
+        output = self.d(new_context)
         return output
-
-class normalize_free_res_att_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,
-                 activation=None,use_sigmoid=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-        self.use_sigmoid=use_sigmoid
-
-        # self.activation=activation
-        self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.att = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            activation_function,
-        ).to('cuda')
-
-        self.res = nn.Sequential(
-            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1),
-            activation_function,
-        ).to('cuda')
-
-
-        self.sig = nn.Sigmoid()
-
-
-        self.d = nn.Sequential(
-            nn.Conv2d(32+64, 64, kernel_size=1),
-            activation_function,
-            nn.Conv2d(64, 32, kernel_size=1),
-            activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
-        ).to('cuda')
-
-        self.in_c1=in_c1
-
-    def forward(self, key_value_input, query_input):
-
-        '''residual'''
-        inputs = torch.cat([key_value_input, query_input], dim=1)
-        res = self.res(inputs)
-
-
-        '''key value from input1'''
-        # key = self.key(normalized_key_value)
-        value = self.value(key_value_input)
-        query = self.query(query_input)
-        key = self.key(key_value_input)
-
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-
-        if self.use_sigmoid:
-            att_map = F.sigmoid(att_map)
-        else:
-            att_map = F.softmax(att_map*self.scale,dim=1)
-
-        x = (att_map * value)
-        x = self.att(x)
-
-        x = torch.cat([x, res], dim=1)
-
-        output = self.d(x)
-        return output
-
-class normalized_res_att_2d(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
-                 activation=None,use_sigmoid=False):
-        super().__init__()
-        if activation is None:
-            activation_function = nn.LeakyReLU(
-                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
-        else:
-            activation_function = activation
-        self.use_sigmoid=use_sigmoid
-
-        self.key = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1),
-        ).to('cuda')
-
-        self.Q_LN = LayerNorm2D(in_c2).to('cuda')
-        self.query = nn.Sequential(
-            nn.Conv2d(in_c2,  64, kernel_size=1),
-        ).to('cuda')
-
-        self.att = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            LayerNorm2D(64),
-            activation_function,
-        ).to('cuda')
-
-        self.res = nn.Sequential(
-            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
-            LayerNorm2D(32),
-            activation_function,
-        ).to('cuda')
-
-
-        self.sig = nn.Sigmoid()
-
-
-        self.d = nn.Sequential(
-            nn.Conv2d(32+64, 64, kernel_size=1,bias=False),
-            LayerNorm2D(64),
-            activation_function,
-            nn.Conv2d(64, 32, kernel_size=1,bias=False),
-            LayerNorm2D(32),
-            nn.Dropout2d(drop_out_ratio),
-            activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
-        ).to('cuda')
-
-        self.in_c1=in_c1
-
-    def forward(self, key_value_input, query_input):
-
-
-        '''residual'''
-        inputs = torch.cat([key_value_input, query_input], dim=1)
-        res = self.res(inputs)
-
-
-        '''key value from input1'''
-        # key = self.key(normalized_key_value)
-        value = self.value(key_value_input)
-
-        query = self.query(query_input)
-
-
-        key = self.key(key_value_input)
-        att_map = query * key
-
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-
-        if self.use_sigmoid:
-            att_map = F.sigmoid(att_map*self.scale)
-        else:
-            att_map = F.softmax(att_map,dim=1)
-
-
-        x = (att_map * value)
-        x = self.att(x)
-
-        x = torch.cat([x, res], dim=1)
-
-        output = self.d(x)
-        return output
-
-
-
 
 

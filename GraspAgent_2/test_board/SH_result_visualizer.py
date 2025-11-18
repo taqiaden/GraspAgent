@@ -213,7 +213,7 @@ class TrainGraspGAN:
         pi = progress_indicator('Begin new training round: ', max_limit=iterations)
         gripper_pose = None
         for i in range(iterations):
-            self.sh_env.set_new_scene()
+            # self.sh_env.set_new_scene()
             '''sample initial object pose'''
             obj_pose = [np.random.rand()-0.5, np.random.rand()-0.5, 0.]
             # obj_quat = [1, 0, 0, 0]

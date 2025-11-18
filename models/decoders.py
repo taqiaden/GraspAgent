@@ -512,7 +512,7 @@ class sine(nn.Module):
 
     def forward(self,x):
         # print(x)
-        print('scale=',self.w0)
+        # print('scale=',self.w0)
         x=torch.sin(x*self.w0)
         # print(x)
         return x

@@ -1,6 +1,9 @@
+import atexit
 import io
 import os
 import re
+import signal
+import threading
 import time
 
 import smbclient
@@ -8,10 +11,8 @@ import torch
 from colorama import Fore
 
 from Configurations.config import check_points_directory, check_points_extension
-from lib.IO_utils import save_data_to_server
+from lib.IO_utils import save_data_to_server, safe_save_to_smb
 from registration import camera
-
-
 
 def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
     if reverse==False:
@@ -31,7 +32,7 @@ def view_parameters_value(model,iterations=None):
         if iterations is not None:
             if iterations==i:break
         # print(name)
-        print((param.data).abs().max())
+        print(name,': ',(param.data).abs().max())
         i += 1
 
 def same_models(model1,model2):
@@ -74,16 +75,28 @@ def get_model_state(model):
         checkpoint_dict['state_dict'] = model.state_dict()
     return checkpoint_dict
 
+save_threads = []
+def async_safe_save(data, path):
+    t = threading.Thread(target=save_data_to_server, args=(data, path))
+    t.start()
+    save_threads.append(t)
+
+@atexit.register
+def wait_for_saves():
+    print("Waiting for pending saves to finish...")
+    for t in save_threads:
+        t.join()
 def export_model_state(model,path):
     checkpoint_dict = get_model_state(model)
 
     full_path=check_points_directory+path+check_points_extension
-    print(f'check points exported to: {full_path}')
-    # print('save check point to {}'.format(path))
+
     if os.path.isdir(check_points_directory):
+        print(f'check points exported to: {full_path}')
         torch.save(checkpoint_dict,full_path)
     else:
-        save_data_to_server(checkpoint_dict,full_path)
+        async_safe_save(checkpoint_dict,full_path)
+
 
 def get_model_time_stamp(path):
     full_path=check_points_directory+path+check_points_extension

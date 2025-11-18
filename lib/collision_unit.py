@@ -289,7 +289,7 @@ def fast_singularity_check_with_firmness_evaluation(width, T, points,floor_eleva
     points: Object points in the scene ： numpy_array (n*3)
     Note: the axis changed after the transformation, the z axis spans along the gripper thickness, and y is the gripper opening
     '''
-    if floor_elevation_ is None: floor_elevation_=floor_elevation
+    # if floor_elevation_ is None: floor_elevation_=floor_elevation
     # if not check_floor_collision:
     # points_shift_1=np.copy(points)
     # points_shift_1[:,-1]-=0.015
