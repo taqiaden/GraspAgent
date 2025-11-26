@@ -66,19 +66,18 @@ def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
 class GripperCollision(nn.Module):
     def __init__(self):
         super().__init__()
-        self.obj_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+        self.obj_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7+1, out_c=1,
                                                               relu_negative_slope=0.1, activation=None,
-                                                              drop_out_ratio=0.).to(
+                                                              drop_out_ratio=0.,use_sigmoid=False).to(
             'cuda')
 
         # add_spectral_norm_selective(self.obj_gripper_collision_)
 
 
-        self.bin_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+        self.bin_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7+1, out_c=1,
                                                               relu_negative_slope=0.1, activation=None,
-                                                              drop_out_ratio=0.).to(
+                                                              drop_out_ratio=0.,use_sigmoid=False).to(
             'cuda')
-
 
 
         # self.obj_gripper_collision_ =att_conv_normalized2(in_c1=64, in_c2=7, out_c=1,
@@ -114,9 +113,9 @@ def replace_instance_with_groupnorm(module, max_groups=8,affine=True):
 class ActionNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.01,activation=None,IN_affine=False).to('cuda')
-        # replace_instance_with_groupnorm(self, max_groups=8)
+        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+                                  relu_negative_slope=0.2,activation=None,IN_affine=False).to('cuda')
+        # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
 
@@ -131,11 +130,11 @@ class ActionNet(nn.Module):
         self.gripper_collision_ = GripperCollision()
 
 
-        self.suction_quality_ = att_res_conv_normalized(in_c1=64, in_c2=3, out_c=1,
-                                              relu_negative_slope=0.1,activation=None,drop_out_ratio=0.).to(
+        self.suction_quality_ = att_res_conv_normalized(in_c1=64, in_c2=3+1, out_c=1,
+                                              relu_negative_slope=0.1,activation=None,drop_out_ratio=0.,use_sigmoid=True).to(
             'cuda')
 
-        self.shift_affordance_ = att_res_conv_normalized(in_c1=64, in_c2=2, out_c=1,
+        self.shift_affordance_ = att_res_conv_normalized(in_c1=64, in_c2=2+1, out_c=1,
                                                relu_negative_slope=0.1,activation=None ,drop_out_ratio=0.,use_sigmoid=True).to(
             'cuda')
 
@@ -288,17 +287,17 @@ class ActionNet(nn.Module):
 
             return gripper_pose,griper_collision_classifier,approach
 
-    def forward(self, depth,approach1=None,approach2=None, detach_backbone=False):
+    def forward(self, depth,mask, detach_backbone=False):
         '''input standardization'''
-        depth = standardize_depth(depth)
+        depth = depth_standardization(depth,mask)
         batch_size=depth.shape[0]
-
+        input=torch.cat([depth,mask],dim=1)
         '''backbone'''
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(depth).detach()
+                features = self.back_bone(input).detach()
         else:
-            features = self.back_bone(depth)
+            features = self.back_bone(input)
 
         print('A max_features_output=',features.max().item(), ', min=',features.min().item(),', mean=',features.mean().item())
 
@@ -328,12 +327,12 @@ class ActionNet(nn.Module):
         # cuda_memory_report()
 
         '''gripper sampler and quality inference'''
-        gripper_pose = self.gripper_sampler1(features)
+        gripper_pose = self.gripper_sampler1(features,depth)
         gripper_pose_detached = gripper_pose.detach().clone()
         gripper_pose_detached[:, -2:] = torch.clip(gripper_pose_detached[:, -2:], 0., 1.)
         gripper_pose_detached[:,0:3] = F.normalize(gripper_pose_detached[:,0:3], dim=1)
         gripper_pose_detached[:,3:5] = F.normalize(gripper_pose_detached[:,3:5], dim=1)
-        griper_collision_classifier = self.gripper_collision_(features, gripper_pose_detached)
+        griper_collision_classifier = self.gripper_collision_(features, torch.cat([gripper_pose_detached,depth],dim=1))
 
         # cuda_memory_report()
 
@@ -342,13 +341,13 @@ class ActionNet(nn.Module):
 
         '''suction quality head'''
         normal_direction_detached = predicted_normal.detach().clone()
-        suction_quality_classifier = self.suction_quality_(features, normal_direction_detached)
+        suction_quality_classifier = self.suction_quality_(features, torch.cat([normal_direction_detached,depth],dim=1))
 
         # cuda_memory_report()
 
         '''shift affordance head'''
         # shift_query_features = torch.cat([normal_direction_detached, self.spatial_encoding], dim=1)
-        shift_affordance_classifier = self.shift_affordance_(features, self.spatial_encoding)
+        shift_affordance_classifier = self.shift_affordance_(features, torch.cat([self.spatial_encoding,depth],dim=1))
 
         '''sigmoid'''
         griper_collision_classifier = self.sigmoid(griper_collision_classifier)
@@ -365,3 +364,10 @@ class ActionNet(nn.Module):
         # background_class = reshape_for_layer_norm(background_class, camera=camera, reverse=True)
 
         return gripper_pose, predicted_normal, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class
+def depth_standardization(depth,mask):
+    mean_ = depth[mask].mean()
+
+    depth_ = (depth.clone() - mean_) / 30
+    depth_[~mask] = 0.
+
+    return depth_

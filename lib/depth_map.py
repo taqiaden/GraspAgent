@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 import torch
+torch_version = tuple(int(v) for v in torch.__version__.split('.')[:2])
 
 def transform_to_camera_frame(pc, reverse=False):
     a=-0.4*np.pi/180
@@ -169,12 +170,15 @@ def depth_to_mesh_grid(camera,normalize=True):
     if xymap is None:
         xmap = torch.arange(camera.width)
         ymap = torch.arange(camera.height)
-        xmap, ymap = torch.meshgrid(xmap, ymap)
+        if torch_version >= (1, 10):
+            xmap, ymap = torch.meshgrid(xmap, ymap, indexing='xy')
+        else:
+            ymap,xmap = torch.meshgrid(ymap,xmap)
 
         if normalize:
             xmap=xmap/camera.width
             ymap=ymap/camera.height
-        xymap=torch.stack([xmap,ymap]).to('cuda').transpose(1,2)
+        xymap=torch.stack([xmap,ymap]).to('cuda')#.transpose(1,2)
 
     return xymap
 
@@ -182,7 +186,11 @@ def depth_to_ordered_cloud(depth,camera):
     if torch.is_tensor(depth):
         xmap = torch.arange(camera.width, device=depth.device)
         ymap = torch.arange(camera.height, device=depth.device)
-        xmap, ymap = torch.meshgrid(xmap, ymap, indexing='xy')
+        if torch_version >= (1, 10):
+            xmap, ymap = torch.meshgrid(xmap, ymap, indexing='xy')
+        else:
+            ymap,xmap = torch.meshgrid(ymap,xmap)
+
         points_z = depth / camera.scale
         points_x = (xmap - camera.cx) * points_z / camera.fx
         points_y = (ymap - camera.cy) * points_z / camera.fy
@@ -219,7 +227,10 @@ def depth_to_ordered_cloud_torch(depth, camera):
     b, h, w = depth.shape
     xmap = torch.arange(w, device=depth.device).float()  # (W,)
     ymap = torch.arange(h, device=depth.device).float()  # (H,)
-    xmap, ymap = torch.meshgrid(xmap, ymap, indexing='xy')  # (H, W), (H, W)
+    if torch_version >= (1, 10):
+        xmap, ymap = torch.meshgrid(xmap, ymap, indexing='xy')
+    else:
+        ymap,xmap = torch.meshgrid(ymap,xmap)
 
     # Expand to batch and move to same device as depth
     xmap = xmap.unsqueeze(0).expand(b, -1, -1)  # (B, H, W)
@@ -280,22 +291,22 @@ def depth_to_point_clouds(depth, camera,rgb=None):
 
     return cloud,mask
 
-def depth_to_point_clouds_torch(depth, camera,rgb=None):
-    '''check camera intrinsic'''
-    assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
-
-    '''process point clouds'''
-    cloud = depth_to_ordered_cloud_torch(depth,camera)
-
-    '''assign colors'''
-    if rgb is  not None:
-        cloud=torch.cat([cloud,rgb],dim=-1)
-
-    '''remove points with zero depth'''
-    mask = cloud[:,:, 2] != 0
-    cloud = cloud[mask]
-
-    return cloud,mask
+# def depth_to_point_clouds_torch(depth, camera,rgb=None):
+#     '''check camera intrinsic'''
+#     assert(depth.shape[0] == camera.height and depth.shape[1] == camera.width), 'depth shape error! depth.shape = {}'.format(depth.shape)
+#
+#     '''process point clouds'''
+#     cloud = depth_to_ordered_cloud_torch(depth,camera)
+#
+#     '''assign colors'''
+#     if rgb is  not None:
+#         cloud=torch.cat([cloud,rgb],dim=-1)
+#
+#     '''remove points with zero depth'''
+#     mask = cloud[:,:, 2] != 0
+#     cloud = cloud[mask]
+#
+#     return cloud,mask
 
 def point_clouds_to_depth(pc, camera):
     depth_map = np.zeros([camera.height, camera.width])

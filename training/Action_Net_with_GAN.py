@@ -362,29 +362,11 @@ class TrainGraspGAN:
         gan = GANWrapper(action_module_with_GAN_key, ActionNet, D)
         gan.ini_models(train=True)
 
-        # '''decay LR'''
-        # # First, get the parameters of the backbone
-        # backbone_params = []
-        # rest_params = []
-        #
-        # for name, param in gan.generator.named_parameters():
-        #     if "back_bone" in name:  # New layers
-        #         print(name)
-        #         backbone_params.append(param)
-        #     else:  # Pretrained backbone
-        #         rest_params.append(param)
-        #
-        # # Create optimizer with two parameter groups
-        # gan.generator_optimizer = torch.optim.Adam([
-        #     {'params': backbone_params, 'lr': self.learning_rate/10},  # lower LR for backbone
-        #     {'params': rest_params}  # default LR (e.g., 1e-3)
-        # ], lr=self.learning_rate)
-        #
-        # gan.load_G_optimizer()
 
-        # gan.critic_adam_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999)
-        gan.critic_sgd_optimizer(learning_rate=self.learning_rate*5,momentum=0.)
-        gan.generator_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
+
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0., beta2=0.999)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*1,momentum=0.)
+        gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0., weight_decay_=0.)
 
         return gan
@@ -408,71 +390,13 @@ class TrainGraspGAN:
             print('bin mask generation error:', file_ids[0])
             print(error_message)
             return None, None
-    def compute_gradient_penalty(self,depth, gripper_pose, gripper_pose_ref,tracked_indexes,mask,lambda_gp=10.0):
-        """
-        Compute the gradient penalty for WGAN-GP.
-
-        Args:
-            D (nn.Module): Discriminator (Critic)
-            real_samples (torch.Tensor): Batch of real samples (B, C, H, W)
-            fake_samples (torch.Tensor): Batch of generated (fake) samples (B, C, H, W)
-            device (str): 'cuda' or 'cpu'
-            lambda_gp (float): Gradient penalty weight (default: 10.0)
-
-        Returns:
-            gradient_penalty (torch.Tensor): Scalar tensor representing the GP loss
-        """
-        indexes=[]
-        size=len(tracked_indexes)
-        for i in range(size):
-            indexes.append(tracked_indexes[i][0])
-
-        # Random weight for interpolation between real and fake samples
-        alpha = torch.rand_like(gripper_pose)
-        interpolated_poses = alpha * gripper_pose + (1 - alpha) * gripper_pose_ref
-
-        # Compute critic score for interpolated samples
-        with torch.no_grad():
-            depth_features=self.gan.critic.get_features(depth.clone())
-        depth_features= depth_features.permute(0, 2, 3, 1)[0, :, :, :][mask][indexes][:,:,None,None]
-        interpolated_poses = interpolated_poses.permute(0, 2, 3, 1)[0, :, :, :][mask][indexes][:,:,None,None]
-        interpolated_poses.requires_grad_(True)  # Enable gradient computation
-        depth_features.requires_grad_(True)
-        d_interpolates = self.gan.critic.att_block_(depth_features, interpolated_poses)
-
-        # print(d_interpolates)
-        # print(interpolated_poses)
-
-
-        # For single scalar output per sample, use outputs.sum()
-        # If D returns (B, 1), use `outputs` directly
-        fake = torch.ones_like(d_interpolates, device=depth.device)
-
-        # Compute gradients w.r.t. inputs
-        gradients = autograd.grad(
-            outputs=d_interpolates,
-            inputs=interpolated_poses,
-            grad_outputs=fake,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True
-        )[0]  # Output is a tuple; we need the first element
-
-        # Flatten gradients per sample and compute L2 norm
-        gradients = gradients.view(size, -1)
-        gradient_norm = gradients.norm(2, dim=1)
-
-        # Compute penalty: (||grad|| - 1)^2
-        gradient_penalty = lambda_gp * ((gradient_norm - 1) ** 2).mean()
-
-        return gradient_penalty
     def step_discriminator_learning(self, depth, pc, mask, bin_mask, gripper_pose, gripper_pose_ref,
                                     altered_objects_elevation, valid_pose_index, floor_elevation):
         '''self supervised critic learning'''
         with torch.no_grad():
             generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
             # depth_cat = depth.repeat(2, 1, 1, 1)
-        critic_score, margin_params = self.gan.critic(depth.clone(), generated_grasps_cat)
+        critic_score, margin_params = self.gan.critic(depth.clone(), generated_grasps_cat,mask[None,None,...])
 
         # cuda_memory_report()
 
@@ -592,7 +516,7 @@ class TrainGraspGAN:
                 if t == 0 and valid_pose_index is not None:
                     print(Fore.GREEN)
 
-                print(target_ref_pose.detach().cpu(), '--', target_generated_pose.detach().cpu(), 'pred=',
+                print(target_ref_pose.detach().cpu().numpy(), '--', target_generated_pose.detach().cpu().numpy(), 'pred=',
                       prediction_.item(), 'lable=', label_.item(), 'margin=', margin, 'c--', c_, 's--', s_,
                       'f--', f_, 'q--', q_)
 
@@ -606,8 +530,8 @@ class TrainGraspGAN:
                                                                                    dist_factor)
                 if counted:
                     firm_loss_counter += 1
-                    print(Fore.LIGHTGREEN_EX, target_ref_pose.detach().cpu(), '--',
-                          target_generated_pose.detach().cpu(), 'pred=', prediction_.item(), 'lable=', label_.item(),
+                    print(Fore.LIGHTGREEN_EX, target_ref_pose.detach().cpu().numpy(), '--',
+                          target_generated_pose.detach().cpu().numpy(), 'pred=', prediction_.item(), 'lable=', label_.item(),
                           'margin=', margin, 'c--', c_,
                           's--', s_,
                           'f--', f_, 'q--', q_, Fore.RESET)
@@ -668,7 +592,7 @@ class TrainGraspGAN:
             # loss=loss+gp
             # loss=((torch.clamp(inferiors.mean()-superiors+1,0.))*margins).sum()+((torch.clamp(inferiors-superiors.mean()+1,0.))*margins).sum()
 
-            loss=(torch.clamp(inferiors - superiors + margins, 0.)).mean()
+            loss=(torch.clamp(inferiors - superiors + margins, 0.)**1).mean()
             # loss=((torch.clamp(inferiors-superiors+margins,0.))).mean()
 
             # margins=torch.tensor(margin_lis).cuda()#*0.5
@@ -742,7 +666,7 @@ class TrainGraspGAN:
 
         generated_grasps_cat = torch.cat([gripper_pose, gripper_pose_ref], dim=0)
         # depth_cat = depth.repeat(2, 1, 1, 1)
-        critic_score, _ = self.gan.critic(depth.clone(), generated_grasps_cat, detach_backbone=True)
+        critic_score, _ = self.gan.critic(depth.clone(), generated_grasps_cat,mask[None,None,...], detach_backbone=True)
         pred_scores_ = critic_score.permute(0, 2, 3, 1)[0, :, :, 0][mask]
         ref_scores_ = critic_score.permute(0, 2, 3, 1)[1, :, :, 0][mask]
 
@@ -845,7 +769,7 @@ class TrainGraspGAN:
         # assert len(label_list)==batch_size, f'{len(label_list)},  {len(tracked_indexes)}'
         #
         # gripper_sampling_loss = (torch.clamp(label - pred+margins ,0.)).mean()#+direct_loss
-        gripper_sampling_loss = (torch.clamp(label - pred ,0.)).mean()#+direct_loss
+        gripper_sampling_loss = (torch.clamp(label - pred ,0.)**1).mean()#+direct_loss
 
         # gripper_sampling_loss = (((torch.clamp(label.mean() - pred +  1,0.))*margins).sum()+
         #                          ((torch.clamp(label - pred.mean() +  1,0.))*margins).sum())
@@ -1004,7 +928,7 @@ class TrainGraspGAN:
 
             '''generated grasps'''
             gripper_pose, suction_direction, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class = self.gan.generator(
-                depth.clone(), detach_backbone=True)
+                depth.clone(),mask[None,None,...], detach_backbone=True)
 
             # print(self.gan.generator.gripper_sampler.dist_biased_tanh.b.data)
             # # print(self.gan.generator.gripper_sampler.dist_biased_tanh.k.data)
@@ -1111,7 +1035,7 @@ class TrainGraspGAN:
                 if k > 0: valid_pose_index = None
                 with torch.no_grad():
                     gripper_pose,_,_,_,_,_ = self.gan.generator(
-                        depth.clone(), detach_backbone=True)  # [1,7,h,w]
+                        depth.clone(),mask[None,None,...], detach_backbone=True)  # [1,7,h,w]
 
                 gripper_pose_ref = self.pose_noisfication(gripper_pose, objects_mask, pc, bin_mask,
                                                           altered_objects_elevation, mask)
@@ -1134,7 +1058,7 @@ class TrainGraspGAN:
                     if not self.freeze_width: gripper_pose_ref[0, 6:7, pixels_A, pixels_B] = pose_7[6:7]
                     print(Fore.GREEN, 'inject label pose', Fore.RESET)
 
-                if i % int(200 / batch_size) == 0 and i != 0 and k == 0:
+                if i % int(600 / batch_size) == 0 and i != 0 and k == 0:
 
                     try:
                         self.export_check_points()
@@ -1182,7 +1106,7 @@ class TrainGraspGAN:
                 self.gan.generator.zero_grad(set_to_none=True)
                 # self.gan.critic.eval()
                 '''generated grasps'''
-                gripper_pose,predicted_normal, pred_griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class = self.gan.generator(depth.clone(), detach_backbone=freeze_backbone)
+                gripper_pose,predicted_normal, pred_griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class = self.gan.generator(depth.clone(),mask[None,None,...], detach_backbone=freeze_backbone)
 
                 suction_seal_loss ,gripper_collision_loss,shift_appealing_loss,background_detection_loss ,suction_sampling_loss =self.multi_head_loss( pc, depth, mask, file_ids, predicted_normal, pred_griper_collision_classifier,
                                 gripper_pose.detach().clone()
@@ -1336,14 +1260,14 @@ def train_N_grasp_GAN(n=1):
     # torch.autograd.set_detect_anomaly(True)
 
     for i in range(n):
-        # try:
+        try:
             cuda_memory_report()
             Train_grasp_GAN.initialize(n_samples=None)
             Train_grasp_GAN.begin()
-        # except Exception as e:
-        #     print(Fore.RED, str(e), Fore.RESET)
-        #     del Train_grasp_GAN
-        #     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
+        except Exception as e:
+            print(Fore.RED, str(e), Fore.RESET)
+            del Train_grasp_GAN
+            Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
 
     # del Train_grasp_GAN
 

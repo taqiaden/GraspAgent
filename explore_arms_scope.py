@@ -13,7 +13,6 @@ from Configurations.dynamic_config import counters_file_path, get_int, save_key
 from check_points.check_point_conventions import ModelWrapper
 from lib.ROS_communication import save_suction_data, ROS_communication_file, set_wait_flag, \
     deploy_gripper_grasp_command_, deploy_suction_grasp_command_, read_robot_feedback
-from lib.bbox import convert_angles_to_transformation_form
 from lib.dataset_utils import configure_smbclient, modality_pool
 from lib.grasp_utils import get_pose_matrixes
 from lib.math_utils import seeds

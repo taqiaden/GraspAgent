@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+
 from Configurations import config
 from Configurations.ENV_boundaries import knee_ref_elevation
 from lib.collision_unit import grasp_collision_detection
@@ -57,10 +59,10 @@ class Action():
         self.file_id=None
 
         '''pose'''
-        self.target_point=np.full((3),np.nan)
-        self.transformation=np.full((4,4),np.nan)
+        self.target_point=torch.full((3,), float('nan'), device='cuda')
+        self.transformation=torch.full((3,), float('nan'), device='cuda')
         self.width=None
-        self.shift_end_point=np.full((3),np.nan)
+        self.shift_end_point=torch.full((3,), float('nan'), device='cuda')
 
         '''quality'''
         self.is_executable=None

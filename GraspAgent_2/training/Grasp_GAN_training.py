@@ -635,10 +635,17 @@ class TrainGraspGAN:
             pi.step(i)
 
             with torch.no_grad():
+
+
                 pc, mask = depth_to_point_clouds(depth, camera)
                 mask.requires_grad_(False)
                 pc = transform_to_camera_frame_torch(pc, reverse=True).requires_grad_(False)
 
+                # print(pc.max(dim=0))
+                # print(pc.min(dim=0))
+                # print(pc.mean(dim=0))
+                #
+                # exit()
                 # depth=self.depth_standardization(depth,mask)#+torch.normal(mean=0.0, std=0.1, size=(1,),device='cuda')
                 # depth[~mask]=0.
 

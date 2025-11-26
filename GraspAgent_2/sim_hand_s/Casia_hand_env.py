@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import mujoco
 import numpy as np
 import torch
+from colorama import Fore
 from matplotlib import pyplot as plt
 
 from GraspAgent_2.training.sample_random_grasp import quat_between_batch
@@ -20,6 +21,10 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
         self.last_hand_geom_id=44
+
+        self.contact_pads_geom_ids=[[2,3,4],[16],[22,28,34,40]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
+
+        self.contact_pads_info()
 
     def decode_finger_ctrl(self,j1, j2, j3):
         # j form 0 to 1 represent open to close
@@ -44,130 +49,97 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         return True
 
-    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=1000,shake_intensity=0.05):
 
+    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.):
+        self.restore_simulation_state()
         if obj_pose is None: obj_pose=self.objects_poses
 
         in_scope = self.check_fingers_scope(hand_fingers)
+        if not in_scope: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
         # v2 = quat_rotate_vector(hand_quat, [0, 1, 0])
         # if v2[-1]<0:in_scope=False
 
-        if not in_scope:
-            return in_scope,None,None, None
-
-        hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+        # if not in_scope:
+        #     return in_scope,None,None, None
 
         # if not in_scope: return False, None, None,None,None
 
         self.d.time = 0.0
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
-
         self.d.qpos = hand_pos + hand_quat + self.default_finger_joints + obj_pose
-
-
-        delta=[0, 0, 0.001]
-
-        self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0],hand_fingers[1],hand_fingers[2])
-
         mujoco.mj_step(self.m, self.d)
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         if ini_contact_with_obj or ini_contact_with_floor:
             return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
+        # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
 
-        for i in range(iterations):
-            if i > 200:
-                if i < 600:
-                    self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
-                elif i == 600:
-                    final_contact_with_obj, contact_with_floor = self.check_hand_contact()
-                    if not final_contact_with_obj or contact_with_floor:
-                        return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
-                else:
-                    if shake_intensity is None: break
-                    if i % 6 == 0:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [shake_intensity, 0, 0]
-                    elif i % 6 == 1:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [-shake_intensity, 0, 0]
-                    elif i % 6 == 2:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, shake_intensity, 0]
-                    elif i % 6 == 3:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, -shake_intensity, 0]
-                    elif i % 6 == 4:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, shake_intensity]
-                    elif i % 6 == 5:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, -shake_intensity]
+        delta=[0, 0, 0.001]
+        self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0],hand_fingers[1],hand_fingers[2])
+        for i in range(300):
+            if 70 < i < 300:
+                self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
+            # elif i > 300:
+            #     if i == 301:
+            #         self.d.ctrl = self.decode_finger_ctrl(min(hand_fingers[0] + 0.3, 1), min(hand_fingers[1] + 0.3, 1),
+            #                                               min(hand_fingers[2] + 0.3, 1))
+            #     elif i == 351:
+            #         self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0], hand_fingers[1], hand_fingers[2])
 
             # for _ in range(20):
             mujoco.mj_step(self.m, self.d)
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success, contact_with_floor = self.check_hand_contact()
-        grasp_success=grasp_success and not contact_with_floor
+        grasp_success = self.check_valid_grasp(minimum_contact_points=2,report=False)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # if view:self.static_view(1000)
 
         return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor
-    def view_grasp(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=1000,shake_intensity=0.05):
 
 
+    def view_grasp(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=300,hard_level=0.   ):
+        self.restore_simulation_state()
         if obj_pose is None: obj_pose=self.objects_poses
 
         in_scope = self.check_fingers_scope(hand_fingers)
+        if not in_scope:hand_fingers = self.clip_fingers_to_scope(hand_fingers)
         # v2 = quat_rotate_vector(hand_quat, [0, 1, 0])
         # if v2[-1]<0:in_scope=False
 
-        if not in_scope:
-            return in_scope,None,None, None
-
-        hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+        # if not in_scope:
+        #     return in_scope,None,None, None
 
         # if not in_scope: return False, None, None,None,None
 
         self.d.time = 0.0
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
-
         self.d.qpos = hand_pos + hand_quat + self.default_finger_joints + obj_pose
-
-
-
-        delta=[0, 0, 0.001]
-
-        self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0],hand_fingers[1],hand_fingers[2])
-
         mujoco.mj_step(self.m, self.d)
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
-        if ini_contact_with_obj or ini_contact_with_floor:
-            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
+        # if ini_contact_with_obj or ini_contact_with_floor:
+        #     return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
+
+        # print(Fore.CYAN,f'initial d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
+        # print(Fore.CYAN,f'initial d.qpos[3:3+4] {self.d.qpos[3:3+4]}',Fore.RESET)
+
+        delta=[0, 0, 0.001]
+        self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0],hand_fingers[1],hand_fingers[2])
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
-            for i in range(iterations):
-                step_start = time.time()
-                if i > 200:
-                    if i < 600:
-                        self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
-                    elif i == 600:
-                        final_contact_with_obj, contact_with_floor = self.check_hand_contact()
-                        if not final_contact_with_obj or contact_with_floor:
-                            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
-                    else:
-                        if shake_intensity is None: break
-                        if i % 6 == 0:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [shake_intensity, 0, 0]
-                        elif i % 6 == 1:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [-shake_intensity, 0, 0]
-                        elif i % 6 == 2:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, shake_intensity, 0]
-                        elif i % 6 == 3:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, -shake_intensity, 0]
-                        elif i % 6 == 4:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, shake_intensity]
-                        elif i % 6 == 5:
-                            self.d.mocap_pos[0] = self.d.mocap_pos[0] + [0, 0, -shake_intensity]
+            for i in range(300):
 
-                # for _ in range(20):
+                step_start = time.time()
+
+                if 70 < i < 300:
+                    self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
+                # elif i>300:
+                #     if i==301:
+                #         self.d.ctrl = self.decode_finger_ctrl(min(hand_fingers[0]+0.3,1), min(hand_fingers[1]+0.3,1), min(hand_fingers[2]+0.3,1))
+                #     elif i==351:
+                #         self.d.ctrl = self.decode_finger_ctrl(hand_fingers[0], hand_fingers[1], hand_fingers[2])
+
                 mujoco.mj_step(self.m, self.d)
 
                 viewer.sync()
@@ -177,12 +149,13 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
 
-            # After stepping
-            # grasp_success = self.check_grasped_obj()
-            grasp_success, contact_with_floor = self.check_hand_contact()
-            grasp_success=grasp_success and not contact_with_floor
-            # if grasp_success:grasp_success= self.safety_fingers_check()
-            # if view:self.static_view(1000)
+        # After stepping
+        # grasp_success = self.check_grasped_obj()
+        grasp_success = self.check_valid_grasp(minimum_contact_points=2,report=True)
+        # if grasp_success:grasp_success= self.safety_fingers_check()
+        # print(Fore.CYAN,f'final d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
+        # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
+        self.static_view(1000)
 
         return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor
 
@@ -224,27 +197,29 @@ def sample_quat(size,f=0.5,ref_quat=None):
 if __name__ == "__main__":
     root_dir = os.getcwd()  # current working directory
 
-    env=CasiaHandEnv(root=root_dir + "/speed_hand/")
-    env.drop_new_obj(selected_index=4,obj_pose=[0,0.3,0.3],stablize=True)
+    env=CasiaHandEnv(root=root_dir + "/speed_hand/",max_obj_per_scene=1)
 
-    ctrl=env.decode_finger_ctrl(0.4,0.3,0.3)
+    env.view_geom_names_and_ids()
 
-    quats=torch.tensor([[-0.6158, -0.4537, -0.4368,  0.4734],
-        [-0.6693, -0.4956, -0.1204,  0.5403],
-        [-0.6459, -0.0662, -0.6466,  0.4004],
-        [-0.8496, -0.1894, -0.2858,  0.4009],
-        [-0.4868, -0.7319, -0.1575,  0.4501],
-        [-0.6590,  0.3402, -0.5439,  0.3926],
-        [-0.9456, -0.1891, -0.1925, -0.1819],
-        [-0.4197, -0.5396, -0.6315,  0.3659],
-        [-0.4647, -0.7757, -0.3662,  0.2197],
-        [-0.7395, -0.4858, -0.4521, -0.1130],
-        [-0.7997, -0.1255, -0.5555,  0.1903],
-        [-0.6791, -0.2213, -0.1831,  0.6755],
-        [-0.7517, -0.2235, -0.5994, -0.1604],
-        [-0.8950, -0.3196,  0.0016,  0.3112],
-        [-0.7221, -0.4825, -0.4406,  0.2273],
-        [-0.3770, -0.3841, -0.8245, -0.1746]], device='cuda:0')
+    ctrl=env.decode_finger_ctrl(-0.4,-0.3,-0.3)
+
+    quats=torch.tensor([[-0.2344, -0.8494, -0.4555,  0.1269],
+        [-0.3016, -0.1934, -0.2339,  0.9039],
+        [-0.0969, -0.5879,  0.2631,  0.7588],
+        [-0.8049, -0.3877, -0.2486, -0.3743],
+        [-0.3008, -0.4924, -0.8162,  0.0284],
+        [-0.6402, -0.1382, -0.6766, -0.3364],
+        [-0.4338, -0.5447, -0.0101,  0.7176],
+        [-0.5730, -0.6079, -0.2619,  0.4833],
+        [-0.8987, -0.2718,  0.0192,  0.3436],
+        [-0.4588, -0.8351,  0.1676,  0.2531],
+        [ 0.3250, -0.5898,  0.5647,  0.4771],
+        [-0.6829, -0.4359, -0.5847,  0.0414],
+        [ 0.1406, -0.1472, -0.8485,  0.4884],
+        [-0.2563, -0.8758, -0.0967,  0.3973],
+        [-0.2425, -0.9440,  0.1068, -0.1968],
+        [-0.7333, -0.1236, -0.3276,  0.5828]], device='cuda:0')
+
 
 
 
@@ -253,6 +228,8 @@ if __name__ == "__main__":
 
 
     for i in range(1000):
+        env.drop_new_obj(selected_index=i,obj_pose=[0, 0.3, 0.3], stablize=True)
+
         # quat = sample_quat(1,f=1.,ref_quat = torch.tensor([[1., 1., 0., 0.]],device='cuda'))[0].cpu().tolist()
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
         # print('delta= ', delta)
@@ -277,10 +254,13 @@ if __name__ == "__main__":
 
         # env.passive_viewer(pos=[0.0, 0.0, 0.3],quat=quat,ctrl=ctrl)
 
-        # quat = [.707, 0., 0.707, 0.]
+        quat = [.0, 0., 0., 1.]
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
         # print('delta= ', delta)
-        env.manual_view(pos=v2.tolist(), quat=quat)
+        env.check_collision( [0,0,0], quat, hand_fingers=None, view=True)
+        # env.manual_view(pos=v2.tolist(), quat=quat)
         # env.manual_view(pos=(v3).tolist(), quat=quat)
+        print(env.obj_xy_positions)
+        # env.get_scene_preception(view=True)
 
 

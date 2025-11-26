@@ -1,6 +1,5 @@
 import subprocess
 import smbclient.path
-
 from analytical_suction_sampler import estimate_suction_direction
 from explore_arms_scope import report_failed_gripper_path_plan, report_failed_suction_path_plan
 from lib.dataset_utils import online_data2
@@ -32,7 +31,6 @@ from Configurations.run_config import simulation_mode, \
 from Online_data_audit.process_feedback import save_grasp_sample, grasp_data_counter_key
 from check_points.check_point_conventions import GANWrapper, ModelWrapper, ActorCriticWrapper
 from lib.ROS_communication import deploy_action, read_robot_feedback, set_wait_flag
-from lib.bbox import convert_angles_to_transformation_form
 from lib.collision_unit import grasp_collision_detection
 from lib.custom_print import my_print
 from lib.depth_map import transform_to_camera_frame, depth_to_point_clouds
@@ -44,7 +42,7 @@ from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_hando
 from models.action_net import ActionNet, action_module_with_GAN_key
 from models.scope_net import scope_net_vanilla, gripper_scope_module_key, suction_scope_module_key
 from models.shift_policy_net import shift_policy_module_key, ShiftPolicyCriticNet, ShiftPolicyActorNet
-from pose_object import vectors_to_ratio_metrics
+from pose_object import vectors_to_ratio_metrics, pose_7_to_transformation
 from process_perception import get_side_bins_images, trigger_new_perception
 from records.training_satatistics import MovingRate
 from registration import camera
@@ -169,7 +167,6 @@ class GraspAgent():
 
     def rollback(self):
         self.gripper_collision_mask=None
-        self.gripper_poses_5 = None
         self.gripper_poses_7 = None
         self.gripper_grasp_mask = None
         self.suction_grasp_mask = None
@@ -550,8 +547,6 @@ class GraspAgent():
         # view_mask(self.voxel_pc,(self.suction_shift_mask>0.5))
         # view_mask(voxel_pc_,self.suction_shift_mask)
 
-        '''change gripper pose represntation'''
-        self.gripper_poses_5 = vectors_to_ratio_metrics(self.gripper_poses_7.clone())  # #3 angles, width, dist
 
         '''initialize the seize policy'''
         self.seize_policy = torch.zeros_like(self.clear_policy)
@@ -622,9 +617,6 @@ class GraspAgent():
             return
         self.gripper_grasp_mask = self.gripper_grasp_mask * torch.from_numpy(handed_object_mask).cuda()
         self.suction_grasp_mask *= False
-
-        '''change gripper pose represntation'''
-        self.gripper_poses_5 = vectors_to_ratio_metrics(self.gripper_poses_7.clone())  # #3 angles, width, dist
 
         '''initialize the seize policy'''
         self.seize_policy = torch.zeros_like(self.clear_policy)
@@ -896,11 +888,8 @@ class GraspAgent():
 
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
-        relative_pose_5 = self.gripper_poses_5[action_obj.point_index]
-        T_d, width, distance = convert_angles_to_transformation_form(relative_pose_5, target_point)
-
-
-
+        relative_pose_7 = self.gripper_poses_7[action_obj.point_index]
+        T_d, width, distance = pose_7_to_transformation(relative_pose_7, target_point)
 
         collision_intensity,low_quality_grasp = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
         collision_free=collision_intensity==0

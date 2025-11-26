@@ -298,6 +298,44 @@ def unit_metrics_to_real_scope(relative_pose_5):
     width=relative_pose_5[-1]
     width=np.clip(width,0.0,1)*config.width_scope
     return theta2,phi2,beta2,distance,width
+import torch
+
+def rotation_matrix_from_normal_target(normal: torch.Tensor, target_point: torch.Tensor):
+    """
+    normal: [3] tensor
+    target_point: [3] tensor
+    returns: [4,4] transformation matrix (rotation + translation)
+    """
+    v0 = torch.tensor([1.0, 0.0, 0.0], device=normal.device)
+
+    # Ensure normal is normalized
+    normal = normal / normal.norm()
+
+    # Compute rotation axis and angle
+    axis = torch.cross(v0, -normal)
+    axis_norm = axis.norm()
+    if axis_norm < 1e-8:  # v0 and -normal are collinear
+        R = torch.eye(3, device=normal.device)
+        if torch.dot(v0, -normal) < 0:
+            # 180 degree rotation
+            R = -R
+    else:
+        axis = axis / axis_norm
+        angle = torch.acos(torch.clamp(torch.dot(v0, -normal), -1.0, 1.0))
+
+        # Rodrigues' rotation formula
+        K = torch.tensor([[0, -axis[2], axis[1]],
+                          [axis[2], 0, -axis[0]],
+                          [-axis[1], axis[0], 0]], device=normal.device)
+        R = torch.eye(3, device=normal.device) + torch.sin(angle) * K + (1 - torch.cos(angle)) * (K @ K)
+
+    # Build homogeneous transformation
+    T = torch.eye(4, device=normal.device)
+    T[:3, :3] = R
+    T[:3, 3] = target_point
+    return T
+
+
 
 # def convert_angles_to_transformation_form(pose_7,center_point,approach=None):
 #     # shape of center_point is (3,)

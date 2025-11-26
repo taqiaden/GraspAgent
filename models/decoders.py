@@ -10,7 +10,20 @@ from registration import camera
 from visualiztion import view_features
 from torch.nn.utils import spectral_norm
 
+class ParameterizedSine(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.tensor(1., dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.theta = nn.Parameter(torch.tensor(0., dtype=torch.float32, device='cuda'), requires_grad=True)
 
+    def forward(self,x):
+        # print(x)
+        # print('alpha=',self.alpha)
+        # print('theta=',self.theta)
+
+        x=torch.sin(x+self.theta)*self.alpha
+        # print(f'alpha={self.alpha}, theta={self.theta}')
+        return x
 class res_block(nn.Module):
     def __init__(self,in_c,medium_c,out_c,Batch_norm=True,Instance_norm=False):
         super().__init__()
@@ -508,12 +521,13 @@ class LayerNorm2D(nn.Module):
 class sine(nn.Module):
     def __init__(self, w0=1.0):
         super().__init__()
-        self.w0 = nn.Parameter(torch.tensor(w0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.w = nn.Parameter(torch.tensor(1, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.w0=w0
 
     def forward(self,x):
         # print(x)
         # print('scale=',self.w0)
-        x=torch.sin(x*self.w0)
+        x=torch.sin(x*self.w*self.w0)
         # print(x)
         return x
 class att_res_conv_normalized(nn.Module):
@@ -531,6 +545,10 @@ class att_res_conv_normalized(nn.Module):
         self.key = nn.Sequential(
             nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
+
+        # self.bias = nn.Sequential(
+        #     nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+        # ).to('cuda')
         # self.LN = LayerNorm2D(in_c1).to('cuda')
         # self.LN = nn.Sequential(
         #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
@@ -603,16 +621,20 @@ class att_res_conv_normalized(nn.Module):
 
 
         key = self.key(key_value_input)
+        # bias=self.bias(key_value_input)
+
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # key = F.normalize(key, p=2, dim=1, eps=1e-8)
         att_map = query * key
 
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
         if self.use_sigmoid:
             att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-            att_map = F.sigmoid(att_map*self.scale)
+            att_map = F.sigmoid(att_map)
         else:
             att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-            att_map = F.softmax(att_map,dim=1)
+            att_map = F.softmax(att_map*self.scale,dim=1)
         # att_map = F.sigmoid(att_map*self.scale)
 
         # att_map=att_map.flatten(1,2)
@@ -620,7 +642,7 @@ class att_res_conv_normalized(nn.Module):
 
         # att_map = self.sig(att_map*self.scale)
 
-        x = (att_map * value)
+        x = (att_map * value)#+bias
         x = self.att(x)
 
         x = torch.cat([x, res], dim=1)
@@ -746,6 +768,8 @@ class att_conv_normalized2(nn.Module):
             nn.Conv2d(64, 64, kernel_size=1,bias=False),
         ).to('cuda')
 
+
+
         normalization=normalization if normalization is not None else LayerNorm2D
         # self.gate = nn.Sequential(
         #     nn.Conv2d(64, 64, kernel_size=1),
@@ -766,6 +790,10 @@ class att_conv_normalized2(nn.Module):
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
+        self.bias = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=1),
+        ).to('cuda') if not use_sin else None
+
         self.query = nn.Sequential(
             # nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
             # LayerNorm2D(32,elementwise_affine=False),
@@ -777,14 +805,15 @@ class att_conv_normalized2(nn.Module):
         self.d = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1,bias=False),
             nn.Dropout2d(0) if use_sin else normalization(64),
-            sine(10) if use_sin else activation_function,
+            ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(64, 32, kernel_size=1,bias=False),
             nn.Dropout2d(0) if use_sin else normalization(32),
-            sine(5) if use_sin else activation_function,
+            ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(32, out_c, kernel_size=1),
         ).to('cuda')
 
         self.in_c1=in_c1
+        self.use_sin=use_sin
 
     def forward(self, key_value_input, query_input):
         # key_value_input = self.LN(key_value_input)
@@ -801,20 +830,27 @@ class att_conv_normalized2(nn.Module):
 
 
         key = self.key(key_value_input)
+
+        bias=0 if self.bias is None else self.bias(key_value_input)
+
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # if self.use_sin: key = F.normalize(key, p=2, dim=1, eps=1e-8)
+
         att_map = query * key
 
+
+        # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        # att_map = F.softmax(att_map*self.scale,dim=1)
-        att_map = F.sigmoid(att_map*self.scale)
+        att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.sigmoid(att_map)
 
         # att_map=att_map.flatten(1,2)
         # att_map = F.softmax(att_map*self.scale,dim=1)
 
         # att_map = self.sig(att_map*self.scale)
 
-        x = (att_map * value)
+        x = (att_map * value)+bias
 
 
         output = self.d(x)
@@ -836,17 +872,11 @@ class att_conv_normalized_free2(nn.Module):
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
-
-        # self.gate = nn.Sequential(
+        # self.bias = nn.Sequential(
         #     nn.Conv2d(64, 64, kernel_size=1),
-        #     nn.Sigmoid()
         # ).to('cuda')
 
-        # self.ln = nn.Sequential(
-        #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
-        #     # LayerNorm2D(64),
-        #     activation_function,
-        # ).to('cuda')
+
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
@@ -862,6 +892,8 @@ class att_conv_normalized_free2(nn.Module):
         ).to('cuda')
 
 
+
+
         self.d = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
             # LayerNorm2D(64),
@@ -875,36 +907,31 @@ class att_conv_normalized_free2(nn.Module):
         self.in_c1=in_c1
 
     def forward(self, key_value_input, query_input):
-        # key_value_input = self.LN(key_value_input)
-        # normalized_key_value=self.activation(normalized_key_value)
-        # normalzied_query_input=self.Q_LN(query_input)
-        # query_input=self.Q_LN(query_input)
-        # key_value_input=self.ln(key_value_input)
+
 
         '''key value from input1'''
         # key = self.key(normalized_key_value)
         value = self.value(key_value_input)
-
         query = self.query(query_input)
-
-
         key = self.key(key_value_input)
+        # bias=self.bias(key_value_input)
+        # key = F.normalize(key, p=2, dim=1, eps=1e-8)
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
 
         att_map = query * key
+        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map=F.sigmoid(att_map)
         att_map = F.softmax(att_map*self.scale,dim=1)
-        # att_map = F.sigmoid(att_map*self.scale)
 
         # att_map=att_map.flatten(1,2)
         # att_map = F.softmax(att_map*self.scale,dim=1)
 
         # att_map = self.sig(att_map*self.scale)
 
-        x = (att_map * value)
+        x = (att_map * value)#+bias
 
 
         output = self.d(x)
@@ -1110,6 +1137,10 @@ class att_conv_normalized(nn.Module):
             # nn.Conv2d(in_c1, in_c1, kernel_size=1),
             ).to('cuda')
 
+        self.bias = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1, kernel_size=1),
+            ).to('cuda')
+
         self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
             # nn.Conv2d(in_c2, in_c1, kernel_size=1),
@@ -1136,11 +1167,14 @@ class att_conv_normalized(nn.Module):
 
     def forward(self, key_value_input, query_input):
 
-        key_value_input=self.LN(key_value_input)
+        # key_value_input=self.LN(key_value_input)
 
         value = self.value(key_value_input)
         query = self.query(query_input)
         key = self.key(key_value_input)
+        # bias=self.bias(key_value_input)
+
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
 
         # print(value[0,:,0,0:10])
         # print(query[0,:,0,0:10])
@@ -1149,13 +1183,13 @@ class att_conv_normalized(nn.Module):
 
         att_map =  query * key
 
-        att_map=att_map.unflatten(1,(8,self.in_c1//8))
+        # att_map=att_map.unflatten(1,(8,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map = F.softmax(att_map,dim=1)
-        att_map = F.sigmoid(att_map*self.scale)
+        att_map = F.sigmoid(att_map)
 
-        att_map=att_map.flatten(1,2)
+        # att_map=att_map.flatten(1,2)
 
 
         x = (att_map * value)

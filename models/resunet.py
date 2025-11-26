@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils import spectral_norm
 
 from lib.image_utils import view_image
 from lib.models_utils import number_of_parameters
@@ -65,6 +66,14 @@ class decoder_block(nn.Module):
         x = self.r(x)
         return x
 
+def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
+    for name, layer in model.named_children():
+        if isinstance(layer, layer_types):
+            setattr(model, name, spectral_norm(layer, name='weight'))
+        else:
+            add_spectral_norm_selective(layer, layer_types)
+    return model
+
 class res_unet(nn.Module):
     def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=None):
         super().__init__()
@@ -90,6 +99,15 @@ class res_unet(nn.Module):
         """ Output """
         # self.output = nn.Conv2d(64, 1, kernel_size=1, padding=0)
         # self.sigmoid = nn.Sigmoid()
+
+    def SN_on_encoder(self):
+        add_spectral_norm_selective(self.c11)
+        add_spectral_norm_selective(self.c12)
+        add_spectral_norm_selective(self.c13)
+        add_spectral_norm_selective(self.r2)
+        add_spectral_norm_selective(self.r3)
+        add_spectral_norm_selective(self.r4)
+
 
     def forward(self, inputs):
         """ Encoder 1 """

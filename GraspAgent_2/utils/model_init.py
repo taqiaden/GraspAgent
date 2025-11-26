@@ -2,7 +2,27 @@ import math
 
 from torch import nn
 
+def gan_init_with_norms(m):
+    # conv layers
+    if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+        if m.weight is not None:
+            m.weight.data.normal_(0.0, 0.02)
+        if m.bias is not None:
+            m.bias.data.zero_()
 
+    # instance norm
+    elif isinstance(m, (nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d)):
+        if m.weight is not None:
+            m.weight.data.fill_(1.0)
+        if m.bias is not None:
+            m.bias.data.zero_()
+
+    # layer norm
+    elif isinstance(m, nn.LayerNorm):
+        if m.weight is not None:
+            m.weight.data.fill_(1.0)
+        if m.bias is not None:
+            m.bias.data.zero_()
 def init_resunet(model, init_type='kaiming', a=0.01):
     """
     Initialize ResUNet with LeakyReLU

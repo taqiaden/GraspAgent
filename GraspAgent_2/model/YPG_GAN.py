@@ -240,18 +240,6 @@ def depth_standardization(depth,mask):
     depth_ = (depth.clone() - mean_) / 30
     depth_[~mask] = 0.
 
-    # print(depth.max())
-    # print(depth.min())
-    # print(depth.mean())
-    # print(depth.std())
-    #
-    # print()
-    # print(depth_.max())
-    # print(depth_.min())
-    # print(depth_.mean())
-    # print(depth_.std())
-    # exit()
-
     return depth_[None,None]
 
 
@@ -327,7 +315,7 @@ class YPG_G(nn.Module):
         # Gx, Gy = masked_sobel_gradients(depth_,mask)
 
         # encoded_depth=torch.cat([depth_,Gx, Gy,local_diff3,local_diff5,local_diff7],dim=1)
-        input=torch.cat([depth_,mask.float()],dim=1)
+        input=torch.cat([depth_,mask],dim=1)
 
         if detach_backbone:
             with torch.no_grad():
@@ -438,7 +426,7 @@ class YPG_D(nn.Module):
         #
         # encoded_depth=torch.cat([depth_,Gx, Gy,local_diff3,local_diff5,local_diff7],dim=1)
 
-        input = torch.cat([depth_, mask.float()], dim=1)
+        input = torch.cat([depth_, mask], dim=1)
 
         if detach_backbone:
             with torch.no_grad():
