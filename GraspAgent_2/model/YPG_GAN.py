@@ -2,7 +2,7 @@ from torch import nn
 import torch.nn.functional as F
 from GraspAgent_2.model.Backbones import PointNetA
 from GraspAgent_2.model.Decoders import ParameterizedSine, \
-    film_fusion_2d, film_fusion_1d, att_2d, att_1d, res_att_2d
+    film_fusion_2d, film_fusion_1d, ContextGate_2d, ContextGate_1d, res_ContextGate_2d
 from GraspAgent_2.model.utils import replace_activations, add_spectral_norm_selective
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
 from GraspAgent_2.utils.depth_processing import masked_sobel_gradients
@@ -38,7 +38,7 @@ class ParallelGripperPoseSampler2(nn.Module):
 
         # self.beta_decoder = normalize_free_att_sins(in_c1=128, in_c2=3, out_c=2).to(
         #     'cuda')
-        # self.beta_decoder = normalize_free_att_2d(in_c1=64, in_c2=3+1, out_c=2,
+        # self.beta_decoder = normalize_free_ContextGate_2d(in_c1=64, in_c2=3+1, out_c=2,
         #                                   relu_negative_slope=0., activation=nn.SiLU(),softmax_att=False,use_sin=True).to(
         #     'cuda')
         self.beta_decoder = film_fusion_2d(in_c1=64, in_c2=27+10, out_c=2,
@@ -117,7 +117,7 @@ class ParallelGripperPoseSampler(nn.Module):
 
         # self.beta_decoder = normalize_free_att_sins(in_c1=128, in_c2=3, out_c=2).to(
         #     'cuda')
-        # self.beta_decoder = normalize_free_att_2d(in_c1=64, in_c2=3+1, out_c=2,
+        # self.beta_decoder = normalize_free_ContextGate_2d(in_c1=64, in_c2=3+1, out_c=2,
         #                                   relu_negative_slope=0., activation=nn.SiLU(),softmax_att=False,use_sin=True).to(
         #     'cuda')
         self.beta_decoder_ = film_fusion_2d(in_c1=64, in_c2=1, out_c=2+3,
@@ -284,7 +284,7 @@ class YPG_G(nn.Module):
         # add_spectral_norm_selective(self.grasp_quality)
         # add_spectral_norm_selective(self.grasp_collision)
 
-        # self.background_detector =res_att_2d(in_c1=64, in_c2=1, out_c=1,
+        # self.background_detector =res_ContextGate_2d(in_c1=64, in_c2=1, out_c=1,
         #               relu_negative_slope=0.2, activation=None, normalize=False).to(
         #     'cuda')
         self.background_detector = nn.Sequential(

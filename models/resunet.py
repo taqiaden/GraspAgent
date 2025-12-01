@@ -65,7 +65,13 @@ class decoder_block(nn.Module):
         x = torch.cat([x, skip], axis=1)
         x = self.r(x)
         return x
-
+def get_auto_groupnorm(num_channels, max_groups=8,affine=True):
+    # Find the largest number of groups <= max_groups that divides num_channels
+    for g in reversed(range(1, max_groups + 1)):
+        if num_channels % g == 0:
+            return nn.GroupNorm(num_groups=g, num_channels=num_channels, affine=affine).to('cuda')
+    # fallback to LayerNorm behavior
+    return nn.GroupNorm(num_groups=1, num_channels=num_channels, affine=affine).to('cuda')
 def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
     for name, layer in model.named_children():
         if isinstance(layer, layer_types):
@@ -73,6 +79,14 @@ def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
         else:
             add_spectral_norm_selective(layer, layer_types)
     return model
+
+def replace_instance_with_groupnorm(module, max_groups=8,affine=True):
+    for name, child in module.named_children():
+        if isinstance(child, nn.InstanceNorm2d):
+            gn = get_auto_groupnorm(child.num_features, max_groups=max_groups,affine=affine)
+            setattr(module, name, gn)
+        else:
+            replace_instance_with_groupnorm(child, max_groups=max_groups)
 
 class res_unet(nn.Module):
     def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=None):
@@ -99,6 +113,9 @@ class res_unet(nn.Module):
         """ Output """
         # self.output = nn.Conv2d(64, 1, kernel_size=1, padding=0)
         # self.sigmoid = nn.Sigmoid()
+        self.relu_negative_slope=relu_negative_slope
+        self.activation=activation
+        self.scale=scale
 
     def SN_on_encoder(self):
         add_spectral_norm_selective(self.c11)
@@ -108,6 +125,22 @@ class res_unet(nn.Module):
         add_spectral_norm_selective(self.r3)
         add_spectral_norm_selective(self.r4)
 
+    def GN_on_decoder(self,max_groups=16):
+        self.d1 = decoder_block(512, 256,None,True,relu_negative_slope=self.relu_negative_slope,activation=self.activation,IN_affine=False,scale=self.scale).to('cuda')
+        self.d2 = decoder_block(256, 128,None,True,relu_negative_slope=self.relu_negative_slope,activation=self.activation,IN_affine=False,scale=self.scale).to('cuda')
+        self.d3 = decoder_block(128, 64,None,True,relu_negative_slope=self.relu_negative_slope,activation=self.activation,IN_affine=False,scale=self.scale).to('cuda')
+
+        replace_instance_with_groupnorm(self.d1, max_groups=max_groups)
+        replace_instance_with_groupnorm(self.d2, max_groups=max_groups)
+        replace_instance_with_groupnorm(self.d3, max_groups=max_groups)
+
+    def IN_on_decoder(self):
+        self.d1 = decoder_block(512, 256, None, True, relu_negative_slope=self.relu_negative_slope,
+                                activation=self.activation, IN_affine=False, scale=self.scale).to('cuda')
+        self.d2 = decoder_block(256, 128, None, True, relu_negative_slope=self.relu_negative_slope,
+                                activation=self.activation, IN_affine=False, scale=self.scale).to('cuda')
+        self.d3 = decoder_block(128, 64, None, True, relu_negative_slope=self.relu_negative_slope,
+                                activation=self.activation, IN_affine=False, scale=self.scale).to('cuda')
 
     def forward(self, inputs):
         """ Encoder 1 """

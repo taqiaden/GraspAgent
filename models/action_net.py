@@ -10,7 +10,7 @@ from Configurations.config import theta_scope, phi_scope
 from lib.cuda_utils import cuda_memory_report
 from lib.custom_activations import GripperGraspRegressor2, LGRelu
 from lib.models_utils import reshape_for_layer_norm, number_of_parameters
-from models.Grasp_GAN import GripperGraspSampler2, GripperGraspSampler3, GripperGraspSampler
+from models.Grasp_GAN import  GripperGraspSampler3, GripperGraspSampler
 from models.decoders import att_res_conv_normalized, LayerNorm2D, att_conv_LN_normalize_res, att_conv_LN, \
     att_conv_LN_normalize, att_conv_LN2, att_conv_LN3, att_conv_normalized, att_conv_normalized_free2, \
     att_conv_normalized2, att_res_conv_normalized_free
@@ -68,7 +68,7 @@ class GripperCollision(nn.Module):
         super().__init__()
         self.obj_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7+1, out_c=1,
                                                               relu_negative_slope=0.1, activation=None,
-                                                              drop_out_ratio=0.,use_sigmoid=False).to(
+                                                              drop_out_ratio=0.,use_sigmoid=True).to(
             'cuda')
 
         # add_spectral_norm_selective(self.obj_gripper_collision_)
@@ -76,7 +76,7 @@ class GripperCollision(nn.Module):
 
         self.bin_gripper_collision_ = att_res_conv_normalized(in_c1=64, in_c2=7+1, out_c=1,
                                                               relu_negative_slope=0.1, activation=None,
-                                                              drop_out_ratio=0.,use_sigmoid=False).to(
+                                                              drop_out_ratio=0.,use_sigmoid=True).to(
             'cuda')
 
 
@@ -115,6 +115,8 @@ class ActionNet(nn.Module):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0.2,activation=None,IN_affine=False).to('cuda')
+        # self.back_bone.SN_on_encoder()
+        # self.back_bone.IN_on_decoder()
         # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         self.spatial_encoding = depth_xy_spatial_data(batch_size=1)
         # self.spatial_encoding = reshape_for_layer_norm(self.spatial_encoding, camera=camera, reverse=False)
@@ -128,7 +130,6 @@ class ActionNet(nn.Module):
         # self.LN = LayerNorm2D(64).to('cuda')
 
         self.gripper_collision_ = GripperCollision()
-
 
         self.suction_quality_ = att_res_conv_normalized(in_c1=64, in_c2=3+1, out_c=1,
                                               relu_negative_slope=0.1,activation=None,drop_out_ratio=0.,use_sigmoid=True).to(

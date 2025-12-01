@@ -6,12 +6,15 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 
 from GraspAgent_2.model.CH_model import CH_model_key, CH_D, CH_G
+
 from GraspAgent_2.sim_hand_s.Casia_hand_env import CasiaHandEnv
+
 from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
 from GraspAgent_2.utils.Online_clustering import OnlingClustering
 from GraspAgent_2.utils.focal_loss import FocalLoss
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector
 from GraspAgent_2.utils.weigts_normalization import scale_all_weights, fix_weight_scales
+
 from Online_data_audit.data_tracker import gripper_grasp_tracker, DataTracker
 from check_points.check_point_conventions import GANWrapper
 from lib.IO_utils import custom_print
@@ -24,9 +27,12 @@ import torch
 
 iter_per_scene = 1
 
-batch_size = 2
+batch_size = 1
 freeze_G_backbone = False
 freeze_D_backbone = False
+
+max_G_norm=500
+max_D_norm=1
 
 hard_level_factor=0
 
@@ -83,6 +89,34 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0,eps
 
         return target_index
 
+
+def process_pose(target_point, target_pose, view=False):
+    target_pose_ = target_pose.clone()
+    target_point_ = np.copy(target_point)
+
+    quat = target_pose_[:4].cpu().tolist()
+
+    fingers = torch.clip(target_pose_[4:4+3],0,1).cpu().tolist()
+
+    transition = target_pose_[4+3:4+3+1].cpu().numpy() / 100
+    projected_transition = quat_rotate_vector(quat, [1, 0, 0])*transition[0]
+
+    # approach = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
+    # projected_transition = approach * transition
+
+    shifted_point = (target_point_ + projected_transition).tolist()
+
+    if view:
+        print()
+        print('quat: ',quat)
+        print('fingers: ',fingers)
+        print('transition: ',transition)
+        # print('projected_transition: ',projected_transition)
+        print('shifted_point: ',shifted_point)
+
+    return quat,fingers,shifted_point
+
+
 class TrainGraspGAN:
     def __init__(self, n_samples=None, epochs=1, learning_rate=5e-5):
 
@@ -123,6 +157,7 @@ class TrainGraspGAN:
         else: self.sampling_centroid = torch.tensor([0, 1, 0, 0, 0.5,0.5,0.5,  0.],
                                                         device='cuda')
         root_dir = os.getcwd()  # current working directory
+
 
         self.ch_env = CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=10)
 
@@ -175,8 +210,8 @@ class TrainGraspGAN:
         gan = GANWrapper(CH_model_key, CH_G, CH_D)
         gan.ini_models(train=True)
 
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999)
-        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*1,momentum=0.)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate,momentum=0.)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
 
@@ -224,17 +259,22 @@ class TrainGraspGAN:
             pred_ = gen_scores_[j].squeeze()
 
             c = 1
-            if k > 0 and (label - pred_) > 1:
-                print(Fore.LIGHTMAGENTA_EX, 'curriculum loss activated', Fore.RESET)
-                c = -1
-                margin = 0
+            # if k > 0 and (label - pred_) > 1:
+            #     print(Fore.LIGHTMAGENTA_EX, 'curriculum loss activated', Fore.RESET)
+            #     c = -1
+            #     margin = 0
 
-            loss+=(torch.clamp((pred_ - label) * k *c+ margin, 0.)**1  )/batch_size
+            loss+=(torch.clamp((pred_ - label) * k *c+ margin, 0.)**2  )/batch_size
             # loss+=l/batch_size
         # loss=self.RGAN_D_loss(pairs,gen_scores_,ref_scores_)
         loss.backward()
 
         self.critic_statistics.loss=loss.item()
+
+        '''GRADIENT CLIPPING'''
+        norm=torch.nn.utils.clip_grad_norm_(self.gan.critic.parameters(), max_norm=max_D_norm)
+        print(Fore.LIGHTGREEN_EX,f' D  norm : {norm}',Fore.RESET)
+
         self.gan.critic_optimizer.step()
 
         self.gan.critic.zero_grad()
@@ -435,13 +475,21 @@ class TrainGraspGAN:
               f'g_loss={gripper_sampling_loss.item()}',
               Fore.RESET)
 
-        loss = gripper_sampling_loss+gripper_collision_loss+gripper_quality_loss_*10
+        loss = gripper_sampling_loss*10+gripper_collision_loss+gripper_quality_loss_*10
 
         with torch.no_grad():
             self.gripper_sampler_statistics.loss = gripper_sampling_loss.item()
         # if abs(loss.item())>0.0:
         # try:
         loss.backward()
+
+        '''GRADIENT CLIPPING'''
+        params=list(self.gan.generator.back_bone.parameters()) + \
+         list(self.gan.generator.CH_PoseSampler.parameters())
+        norm=torch.nn.utils.clip_grad_norm_(params, max_norm=max_G_norm)
+        print(Fore.LIGHTGREEN_EX,f' G norm : {norm}',Fore.RESET)
+
+
         self.gan.generator_optimizer.step()
 
         self.gan.generator.zero_grad(set_to_none=True)
@@ -453,41 +501,14 @@ class TrainGraspGAN:
 
     def check_collision(self,target_point,target_pose,view=False):
         with torch.no_grad():
-            quat, fingers, shifted_point = self.process_pose(target_point, target_pose, view=view)
+            quat, fingers, shifted_point = process_pose(target_point, target_pose, view=view)
 
         return self.ch_env.check_collision(hand_pos=shifted_point,hand_quat=quat,hand_fingers=None,view=False)
-
-    def process_pose(self,target_point, target_pose, view=False):
-        target_pose_ = target_pose.clone()
-        target_point_ = np.copy(target_point)
-
-        quat = target_pose_[:4].cpu().tolist()
-
-        fingers = torch.clip(target_pose_[4:4+3],0,1).cpu().tolist()
-
-        transition = target_pose_[4+3:4+3+1].cpu().numpy() / 100
-
-        projected_transition = quat_rotate_vector(quat, [1, 0, 0])*transition[0]
-
-        # approach = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
-        # projected_transition = approach * transition
-
-        shifted_point = (target_point_ + projected_transition).tolist()
-
-        if view:
-            print()
-            print('quat: ',quat)
-            print('fingers: ',fingers)
-            print('transition: ',transition)
-            # print('projected_transition: ',projected_transition)
-            print('shifted_point: ',shifted_point)
-
-        return quat,fingers,shifted_point
 
     def evaluate_grasp(self, target_point, target_pose, view=False,hard_level=0):
 
         with torch.no_grad():
-            quat,fingers,shifted_point=self.process_pose(target_point, target_pose, view=view)
+            quat,fingers,shifted_point= process_pose(target_point, target_pose, view=view)
 
             in_scope, grasp_success, contact_with_obj, contact_with_floor = self.ch_env.check_graspness(
                 hand_pos=shifted_point, hand_quat=quat, hand_fingers=fingers,
@@ -521,20 +542,20 @@ class TrainGraspGAN:
         # max_ = grasp_quality.max()
         # min_ = grasp_quality.min()
         # grasp_quality = (grasp_quality - min_) / (max_ - min_)
-        def norm_(gamma ,expo_=1.0,min=0.01):
-            gamma = (gamma - gamma.min()) / (
-                    gamma.max() - gamma.min())
-            gamma = gamma ** expo_
-            gamma=torch.clamp(gamma,min)
-            return gamma
-        gamma_dive = norm_((1.001 - F.cosine_similarity(clipped_gripper_pose_PW,
-                                                        sampling_centroid[None, :], dim=-1) ) /2 ,1)
-        gamma_dive *= norm_((1.001 - F.cosine_similarity(gripper_pose_ref_PW,
-                                                        sampling_centroid[None, :], dim=-1) ) /2 ,1)
+        # def norm_(gamma ,expo_=1.0,min=0.01):
+        #     gamma = (gamma - gamma.min()) / (
+        #             gamma.max() - gamma.min())
+        #     gamma = gamma ** expo_
+        #     gamma=torch.clamp(gamma,min)
+        #     return gamma
+        # gamma_dive = norm_((1.001 - F.cosine_similarity(clipped_gripper_pose_PW,
+        #                                                 sampling_centroid[None, :], dim=-1) ) /2 ,1)
+        # gamma_dive *= norm_((1.001 - F.cosine_similarity(gripper_pose_ref_PW,
+        #                                                 sampling_centroid[None, :], dim=-1) ) /2 ,1)
 
         # selection_p = compute_sampling_probability(sampling_centroid, gripper_pose_ref_PW, gripper_pose_PW, pc, bin_mask,grasp_quality)
-        # selection_p = torch.rand_like(gripper_pose_PW[:, 0])
-        selection_p = gamma_dive ** (1/2) * self.tou + (1 - self.tou)*torch.rand_like(gamma_dive)
+        selection_p = torch.rand_like(gripper_pose_PW[:, 0])
+        # selection_p = gamma_dive ** (1/2) * self.tou + (1 - self.tou)*torch.rand_like(gamma_dive)
 
         avaliable_iterations = selection_mask.sum()
         if avaliable_iterations<3: return False, None,None,None
@@ -542,6 +563,7 @@ class TrainGraspGAN:
         n = int(min(max_n, avaliable_iterations))
 
         counter = 0
+        counter2=0
 
         sampler_samples=0
 
@@ -575,10 +597,12 @@ class TrainGraspGAN:
             #                                                                            target_generated_pose,
             #                                                                            view=False, shake_intensity=0.003)
 
-            if ref_success and not gen_success:
+            if ref_success and not gen_success and counter2<batch_size:
                 superior_A_model_moving_rate.update(0.)
-            elif gen_success and not ref_success:
+                counter2+=1
+            elif gen_success and not ref_success and counter2<batch_size:
                 superior_A_model_moving_rate.update(1.)
+                counter2+=1
 
             u=(1.001 - F.cosine_similarity(target_generated_pose,
                                          sampling_centroid, dim=0)) / 2
@@ -652,7 +676,10 @@ class TrainGraspGAN:
 
 
         depth = torch.from_numpy(depth).cuda()  # [600.600]
+        # torch.save(depth, 'depth_ch_tmp')
         floor_mask = torch.from_numpy(floor_mask).cuda()
+        # torch.save(floor_mask, 'floor_mask_ch_tmp')
+        # exit()
 
         latent_mask=(torch.rand_like(depth)>0.35).float()
 
@@ -672,7 +699,7 @@ class TrainGraspGAN:
                 grasp_quality=torch.clamp(grasp_quality_logits,0,1)
 
                 f =(1 - grasp_quality.detach()**1)
-                annealing_factor = f*self.grasp_quality_statistics.accuracy +self.tou*(1-self.grasp_quality_statistics.accuracy)
+                annealing_factor = self.tou*(f*self.grasp_quality_statistics.accuracy +(1-self.grasp_quality_statistics.accuracy))
                 print(f'mean_annealing_factor= {annealing_factor.mean()}, tou={self.tou}')
 
                 gripper_pose_ref = ch_pose_interpolation(gripper_pose, self.sampling_centroid,
@@ -815,6 +842,7 @@ class TrainGraspGAN:
 
 def train_N_grasp_GAN(n=1):
     lr = 1e-5
+
     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
     torch.cuda.empty_cache()
 

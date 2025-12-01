@@ -304,6 +304,7 @@ def ch_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor,quat
     assert ref_pose.shape[0]==1
 
     sampling_ratios = torch.clip(annealing_factor,0.0,1.0)
+    sampling_ratios[sampling_ratios>0.95]=1.
 
     sampled_pose = generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios=sampling_ratios.reshape(-1,1),quat_centers=quat_centers,finger_centers=finger_centers).reshape(600,600,8).permute(2,0,1)[None,...]
 
@@ -314,7 +315,7 @@ def ch_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor,quat
     f[dist2<dist1]*=-1
     sampled_pose[:,0:4]*=f
 
-    # sampling_ratios = 1/(1+((1-p)*torch.rand_like(ref_pose)) /(p*torch.rand_like(ref_pose)+1e-5))
+    sampling_ratios = 1/(1+((1-sampling_ratios)*torch.rand_like(ref_pose)) /(sampling_ratios*torch.rand_like(ref_pose)+1e-5))
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'

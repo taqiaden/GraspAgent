@@ -1,7 +1,7 @@
 import torch.nn.functional as F
-from GraspAgent_2.model.Decoders import normalize_free_att_sins, normalized_att_1d, \
-    normalize_free_att_2d, custom_att_1d, ParameterizedSine, normalize_free_att_1d, \
-    custom_att_2d, normalized_att_2d, normalize_free_res_att_2d, normalized_res_att_2d, film_fusion_2d, film_fusion_1d
+from GraspAgent_2.model.Decoders import normalize_free_att_sins, normalized_ContextGate_1d, \
+    normalize_free_ContextGate_2d, custom_ContextGate_1d, ParameterizedSine, normalize_free_ContextGate_1d, \
+    custom_ContextGate_2d, normalized_ContextGate_2d, normalize_free_res_ContextGate_2d, normalized_res_ContextGate_2d, film_fusion_2d, film_fusion_1d
 from GraspAgent_2.model.YPG_GAN import LearnableRBFEncoding2D, LearnableRBFEncoding1d
 from GraspAgent_2.model.conv_140 import ConvFeatureExtractor
 from GraspAgent_2.model.utils import replace_activations, add_spectral_norm_selective
@@ -26,7 +26,7 @@ class ParallelGripperPoseSampler(nn.Module):
 
         # self.beta_decoder = normalize_free_att_sins(in_c1=128, in_c2=3, out_c=2).to(
         #     'cuda')
-        # self.beta_decoder = normalize_free_att_2d(in_c1=64, in_c2=3+1, out_c=2,
+        # self.beta_decoder = normalize_free_ContextGate_2d(in_c1=64, in_c2=3+1, out_c=2,
         #                                   relu_negative_slope=0., activation=nn.SiLU(),softmax_att=False,use_sin=True).to(
         #     'cuda')
         # self.quat_mean = nn.Parameter(torch.tensor([.0,1.,0.,0.], dtype=torch.float32, device='cuda'), requires_grad=True).view(1,-1,1,1)
@@ -170,7 +170,7 @@ class SH_D(nn.Module):
                                   relu_negative_slope=0.2, activation=None, IN_affine=False).to('cuda')
         add_spectral_norm_selective(self.back_bone)
 
-        # self.att_block = normalize_free_att_2d(in_c1=64, in_c2=7+1, out_c=1,
+        # self.att_block = normalize_free_ContextGate_2d(in_c1=64, in_c2=7+1, out_c=1,
         #                                relu_negative_slope=0.2, activation=None,softmax_att=True).to('cuda')
         self.att_block = film_fusion_1d(in_c1=64, in_c2=10+100+10, out_c=1,
                                        relu_negative_slope=0.2, activation=None).to('cuda')

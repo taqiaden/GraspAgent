@@ -374,11 +374,15 @@ def calculate_zy_rotation_for_arrow(vec):
                 ])
     return Rz, Ry
 
-def get_arrow(end, origin=np.array([0, 0, 0]), scale=1):
+def get_arrow(end, origin, scale=1):
     assert(not np.all(end == origin))
     vec = end - origin
+
     size = np.sqrt(np.sum(vec**2))
     Rz, Ry = calculate_zy_rotation_for_arrow(vec)
+    # Rz=Rz.cpu().numpy()
+    # Ry=Ry.cpu().numpy()
+
     mesh = o3d.geometry.TriangleMesh.create_arrow(cone_radius=size/17.5 * scale,
         cone_height=size*0.2 * scale,
         cylinder_radius=size/30 * scale,

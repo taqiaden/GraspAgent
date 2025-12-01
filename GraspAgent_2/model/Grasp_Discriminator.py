@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from GraspAgent_2.model.Backbones import PointNetA
-from GraspAgent_2.model.Decoders import normalized_att_1d, normalize_free_att_1d, custom_att_1d
+from GraspAgent_2.model.Decoders import normalized_ContextGate_1d, normalize_free_ContextGate_1d, custom_ContextGate_1d
 from GraspAgent_2.model.conv_140 import ConvFeatureExtractor
 from GraspAgent_2.model.utils import add_spectral_norm_selective, replace_activations
 from GraspAgent_2.model.voxel_3d_conv import VoxelBackbone
@@ -16,7 +16,7 @@ class D(nn.Module):
         add_spectral_norm_selective(self.back_bone)
         replace_activations(self.back_bone, nn.ReLU, nn.LeakyReLU(0.01))
 
-        self.att_block = normalize_free_att_1d(in_c1=128, in_c2=in_c2 , out_c=1,med_c=128,
+        self.att_block = normalize_free_ContextGate_1d(in_c1=128, in_c2=in_c2 , out_c=1,med_c=128,
                                            relu_negative_slope=0.,activation=nn.SiLU()).to(
             'cuda')
         add_spectral_norm_selective(self.att_block)
@@ -59,7 +59,7 @@ class SubD(nn.Module):
         ).to('cuda')
         add_spectral_norm_selective(self.back_bone)
 
-        self.att_block = custom_att_1d(in_c1=64, in_c2=in_c2 , out_c=1,med_c=64,
+        self.att_block = custom_ContextGate_1d(in_c1=64, in_c2=in_c2 , out_c=1,med_c=64,
                                            relu_negative_slope=0.,activation=nn.SiLU()).to('cuda')
         add_spectral_norm_selective(self.att_block)
 

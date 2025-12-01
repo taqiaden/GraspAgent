@@ -148,9 +148,9 @@ class TrainGraspGAN:
 
         quat = target_pose_[:4].cpu().tolist()
 
-        fingers = target_pose_[4:-1].cpu().tolist()
+        fingers = torch.clip(target_pose_[4:4+3],0,1).cpu().tolist()
 
-        transition = target_pose_[4+3:].cpu().numpy() / 100
+        transition = target_pose_[4+3:4+3+1].cpu().numpy() / 100
 
         projected_transition = quat_rotate_vector(quat, [1, 0, 0])*transition[0]
 
@@ -241,7 +241,7 @@ class TrainGraspGAN:
         sampler_samples=0
 
         t = 0
-        while t < 3:
+        while t < 1:
             t += 1
 
             dist = MaskedCategorical(probs=selection_p, mask=selection_mask)
@@ -275,13 +275,13 @@ class TrainGraspGAN:
         for k in range(iter_per_scene):
 
             with torch.no_grad():
+                gripper_pose, grasp_quality_logits, grasp_collision_logits = self.gan.generator(
+                    depth[None, None, ...], ~floor_mask.view(1, 1, 600, 600), latent_mask[None, None, ...],
+                    detach_backbone=True)
 
-                gripper_pose, grasp_quality, grasp_collision = self.gan.generator(
-                    depth[None, None, ...],~floor_mask.view(1,1,600,600),latent_mask[None,None,...],detach_backbone=True)
+                grasp_collision=F.sigmoid(grasp_collision_logits)
 
-
-
-
+                grasp_quality = torch.clamp(grasp_quality_logits, 0, 1)
                 f = self.grasp_quality_statistics.accuracy * ((1 - grasp_quality.detach()) ** 2) + (
                             1 - self.grasp_quality_statistics.accuracy)
                 annealing_factor = self.tou * f

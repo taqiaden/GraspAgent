@@ -135,111 +135,6 @@ class GripperGraspSampler(nn.Module):
 
         return pose
 
-class GripperGraspSampler2(nn.Module):
-    def __init__(self):
-        super().__init__()
-        # self.approach_decoder = att_res_mlp_IN2(in_c1=64, in_c2=3 , out_c=3,
-        #                                    relu_negative_slope=0.,activation=activation).to(
-        #     'cuda')
-        # self.scale = nn.Parameter(torch.tensor(0.1, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.approach_gate=SpatialGate(64)
-        self.beta_gate=SpatialGate(64)
-        self.dist_width_gate=SpatialGate(64)
-
-        self.approach = nn.Sequential(
-            # LayerNorm2D(64),
-            nn.Conv2d(64, 32, kernel_size=1, bias=False),
-            LayerNorm2D(32),
-            # nn.Dropout2d(0.),
-            silu,
-            nn.Conv2d(32, 16, kernel_size=1, bias=False),
-            LayerNorm2D(16),
-            silu,
-            nn.Conv2d(16, 3, kernel_size=1),
-        ).to('cuda')
-
-
-        self.scale = nn.Parameter(torch.tensor(0.1, dtype=torch.float32, device='cuda'), requires_grad=True)
-
-        # self.approach = att_conv_LN(in_c1=64, in_c2=3 , out_c=2,
-        #                                    relu_negative_slope=0.,activation=mish).to(
-        #     'cuda')
-
-        self.beta_decoder = att_conv_normalized_free(in_c1=64, in_c2=3, out_c=2,
-                                                    relu_negative_slope=0., activation=silu).to(
-            'cuda')
-
-
-        self.dist_width_decoder = att_conv_normalized_free(in_c1=64, in_c2=3 + 2, out_c=2,
-                                              relu_negative_slope=0., activation=silu).to(
-            'cuda')
-
-
-        self.sig=nn.Sigmoid()
-
-        # self.decoder_mlp = nn.Sequential(
-        #     # LayerNorm2D(64),
-        #     nn.Conv2d(64+3, 64, kernel_size=1, bias=False),
-        #     LayerNorm2D(64),
-        #     tanh,
-        #     nn.Conv2d(64, 32, kernel_size=1, bias=False),
-        #     LayerNorm2D(32),
-        #     tanh,
-        #     nn.Conv2d(32, 4, kernel_size=1),
-        #     tanh
-        # ).to('cuda')
-        self.tanh=nn.Tanh()
-        self.sp=nn.Softplus()
-
-    def forward(self, representation_2d,  approach=None  ):
-        # representation_2d = reshape_for_layer_norm(representation_2d, camera=camera, reverse=True)
-        # if approach is not None:approach = reshape_for_layer_norm(approach, camera=camera, reverse=True)
-
-        # normalized_features=self.ln(representation_2d)
-        #
-        # approach=F.normalize(approach, dim=1).detach()
-        # approach_delta = self.approach_decoder(representation_2d,approach)
-        # print(self.scale)
-        # exit()
-
-        # print(approach)`
-        # print(approach_delta)
-
-
-        # approach=F.normalize(approach+self.scale*approach_delta, dim=1)
-        verticle=torch.zeros_like(representation_2d[:,0:3])
-        verticle[:,-1]+=1.
-        # approach=verticle
-
-        approach=self.approach(representation_2d)
-        approach=F.normalize(approach, dim=1)
-        approach=approach*self.scale+verticle
-        approach=F.normalize(approach, dim=1)
-        # ones_=torch.ones_like(approach[:,0:1])
-        # approach=torch.concatenate([approach,ones_],dim=1)
-        beta = self.beta_decoder(representation_2d,approach)
-        # beta=beta__approach[:,0:2]
-        # approach=beta__approach[:,2:]
-
-        # beta_dist_width=self.decoder_mlp(torch.cat([representation_2d,approach],dim=1))
-
-        beta = F.normalize(beta, dim=1)
-
-        # beta=beta_dist_width[:,0:2]
-        dist_width=self.dist_width_decoder(representation_2d,torch.cat([approach,beta],dim=1))
-
-
-        # beta=self.tanh(beta)
-        # dist=dist_width[:0:1]
-        # width=dist_width[:1:2]
-
-
-        # dist_width=(self.tanh(dist_width)+1)/2
-
-        pose = torch.cat([approach, beta,dist_width], dim=1)
-        # pose = reshape_for_layer_norm(pose, camera=camera, reverse=False)
-
-        return pose
 
 class SpatialGate(nn.Module):
     """Spatial attention gate to weight backbone features."""
@@ -311,6 +206,8 @@ class GripperGraspSampler3(nn.Module):
             'cuda')
         self.sig=nn.Sigmoid()
 
+
+
         # add_spectral_norm_selective(self.approach)
         # add_spectral_norm_selective(self.beta_decoder)
         # add_spectral_norm_selective(self.width)
@@ -333,21 +230,7 @@ class GripperGraspSampler3(nn.Module):
         self.softplus=nn.Softplus()
 
     def forward(self, representation_2d,  depth ):
-        # representation_2d = reshape_for_layer_norm(representation_2d, camera=camera, reverse=True)
-        # if approach is not None:approach = reshape_for_layer_norm(approach, camera=camera, reverse=True)
 
-        # normalized_features=self.ln(representation_2d)
-        #
-        # approach=F.normalize(approach, dim=1).detach()
-        # approach_delta = self.approach_decoder(representation_2d,approach)
-        # print(self.scale)
-        # exit()
-
-        # print(approach)`
-        # print(approach_delta)
-
-
-        # approach=F.normalize(approach+self.scale*approach_delta, dim=1)
         verticle=torch.zeros_like(representation_2d[:,0:3])
         verticle[:,-1]+=1.
         # approach=verticle
@@ -358,7 +241,7 @@ class GripperGraspSampler3(nn.Module):
         approach=F.normalize(approach, dim=1)
         # ones_=torch.ones_like(approach[:,0:1])
         # approach=torch.concatenate([approach,ones_],dim=1)
-        beta = self.beta_decoder(representation_2d,torch.cat([approach,depth],dim=1))
+        beta = self.beta_decoder(representation_2d,torch.cat([approach,depth],dim=1).detach())
         # beta=beta__approach[:,0:2]
         # approach=beta__approach[:,2:]
 
@@ -366,8 +249,8 @@ class GripperGraspSampler3(nn.Module):
         beta = F.normalize(beta, dim=1)
 
         # beta=beta_dist_width[:,0:2]
-        width=self.width(representation_2d,torch.cat([approach,beta,depth],dim=1))
-        dist=self.dist(representation_2d,torch.cat([approach,beta,width,depth],dim=1))
+        width=self.width(representation_2d,torch.cat([approach,beta,depth],dim=1).detach())
+        dist=self.dist(representation_2d,torch.cat([approach,beta,width,depth],dim=1).detach())
 
         # dist=self.softplus(dist)
         # width=1-self.softplus(-width)
@@ -546,28 +429,17 @@ def depth_standardization(depth,mask):
 class D(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=None,
+        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=True,
                                   relu_negative_slope=0.2,activation=None,IN_affine=False).to('cuda')
 
+        replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         # self.back_bone.SN_on_encoder()
+        # self.back_bone.GN_on_decoder()
 
-        # add_spectral_norm_selective(self.back_bone)
-
-        # replace_instance_with_groupnorm(self.back_bone,max_groups=16)
-
-        self.att_block = att_conv_normalized_free2(in_c1=64, in_c2=7+1 , out_c=1,
+        self.att_block_ = att_conv_normalized_free2(in_c1=64, in_c2=7+1 , out_c=1,
                                            relu_negative_slope=0.,activation=silu,drop_out_ratio=0.).to(
             'cuda')
 
-        # add_spectral_norm_selective(self.att_block)
-
-        # self.drop_out=nn.Dropout2d(0.1)
-
-        # self.sig=nn.Sigmoid()
-
-        # self.scaler_LN=LayerNorm2D(2, elementwise_affine=False).to('cuda')
-
-        # self.drop_out=nn.Dropout(0.5)
 
     def get_features(self,depth):
         depth = standardize_depth(depth)
@@ -590,37 +462,15 @@ class D(nn.Module):
         features=features.repeat(2,1,1,1)
         depth=depth.repeat(2,1,1,1)
 
-        # features=self.drop_out(features)
 
-        # view_features(features, hide_axis=True, reshape=False)
-        # features = reshape_for_layer_norm(features, camera=camera, reverse=False)
-        # pose = reshape_for_layer_norm(pose, camera=camera, reverse=False)
 
-        # features=self.drop_out(features)
+        print('D max_features_output=',features.max().item(), ', min=',features.min().item(),', abs mean=',features.abs().mean().item(),'mean=',features.mean().item())
 
-        # normalized_features = self.ln(features)
 
-        print('D max_features_output=',features.max().item(), ', min=',features.min().item(),', mean=',features.abs().mean().item())
-        # margin_params=self.margin_params(features)
-        # margin_params=self.sig(margin_params)
-        # # margin_params[margin_params>0.1]=1.
-        # view_features(depth, reshape=False)
-        # view_features(margin_params, reshape=False)
-        # angles=pose[:,0:5,...]
-        # scalers=pose[:,5:,...]
-        # scalers=self.scaler_LN(scalers)
-
-        # pose=torch.cat([angles,scalers],dim=1)
 
         '''decode'''
-        output= self.att_block(features,torch.cat([pose,depth],dim=1))
-        # output=self.mlp(torch.cat([features,pose],dim=1))
-        # output_plus= self.att_block_2(features.detach(),pose.detach())
+        output= self.att_block_(features,torch.cat([pose,depth],dim=1))
 
-        # output2= self.att_block_2(features,pose)
-        # output=self.scale*output+output2*self.scale2
-
-        # output = reshape_for_layer_norm(output, camera=camera, reverse=True)
 
         return output, None
 

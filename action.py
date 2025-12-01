@@ -4,6 +4,7 @@ import torch
 from Configurations import config
 from Configurations.ENV_boundaries import knee_ref_elevation
 from lib.collision_unit import grasp_collision_detection
+from lib.cuda_utils import cuda_memory_report
 from lib.custom_print import my_print
 from lib.mesh_utils import construct_gripper_mesh_2
 from lib.pc_utils import numpy_to_o3d
@@ -50,8 +51,8 @@ class Action():
         self.contact_with_container=None
 
         '''rl data'''
-        self.value=probs
-        self.prob=value
+        self.value=value
+        self.prob=probs
         self.reward=None
 
         self.is_synchronous=None
@@ -60,7 +61,7 @@ class Action():
 
         '''pose'''
         self.target_point=torch.full((3,), float('nan'), device='cuda')
-        self.transformation=torch.full((3,), float('nan'), device='cuda')
+        self.transformation=torch.full((4,4), float('nan'), device='cuda')
         self.width=None
         self.shift_end_point=torch.full((3,), float('nan'), device='cuda')
 
@@ -169,7 +170,7 @@ class Action():
 
     def get_gripper_mesh(self,color=None):
         if self.is_valid and self.use_gripper_arm:
-            mesh = construct_gripper_mesh_2(self.width, self.transformation)
+            mesh = construct_gripper_mesh_2(self.width.cpu().numpy(), self.transformation.cpu().numpy())
             mesh.paint_uniform_color([0.5, 0.9, 0.5]) if color is None else mesh.paint_uniform_color(color)
             return mesh
         else:
@@ -201,7 +202,9 @@ class Action():
     def get_approach_mesh(self):
         if self.is_valid and self.transformation is not None:
             arrow_emerge_point=self.target_point-self.approach*0.05
-            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=1.3)
+
+            arrow_mesh=get_arrow(end=self.target_point.cpu().numpy(),origin=arrow_emerge_point.cpu().numpy(),scale=1.3)
+
             return arrow_mesh
         else:
             return None
@@ -209,9 +212,9 @@ class Action():
     def get_approach_mesh2(self):
         if self.is_valid and self.transformation is not None:
             arrow_emerge_point=self.knee_extreme_point
-            legneth=np.linalg.norm(self.target_point-arrow_emerge_point)
+            legneth=np.linalg.norm(self.target_point.cpu().numpy()-arrow_emerge_point.cpu().numpy())
             print('Arrow knee point:',arrow_emerge_point,' Arrow legnth:',legneth)
-            arrow_mesh=get_arrow(end=self.target_point,origin=arrow_emerge_point,scale=0.3)
+            arrow_mesh=get_arrow(end=self.target_point.cpu().numpy(),origin=arrow_emerge_point.cpu().numpy(),scale=0.3)
             return arrow_mesh
         else:
             return None
@@ -268,7 +271,7 @@ class Action():
             pr.step_f()
             pr.print_(f'{self.action_name} using {self.arm_name} arm')
             if self.target_point is not None:
-                pr.print_(f'target point {self.target_point}')
+                pr.print_(f'target point {self.target_point}, props= {self.prob}')
 
             if self.robot_feedback is not None:
                 pr.print_(f'Robot feedback message : {self.robot_feedback}')

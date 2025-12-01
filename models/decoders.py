@@ -1,5 +1,8 @@
+import math
+
 import torch
 import torch.nn.functional as F
+from colorama import Fore
 from torch import nn
 
 from lib.cuda_utils import cuda_memory_report
@@ -546,25 +549,14 @@ class att_res_conv_normalized(nn.Module):
             nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
 
-        # self.bias = nn.Sequential(
-        #     nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
-        # ).to('cuda')
-        # self.LN = LayerNorm2D(in_c1).to('cuda')
-        # self.LN = nn.Sequential(
-        #     nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
-        #     LayerNorm2D(64),
-        #     activation_function,
-        # ).to('cuda')
-        # # self.routing=nn.Sequential(
-        # #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
-        # #     LayerNorm2D(in_c1),
-        # #     nn.ReLU()
-        # # ).to('cuda')
+
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
             nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
+
+
 
         self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
@@ -572,6 +564,8 @@ class att_res_conv_normalized(nn.Module):
             nn.SiLU(),
             nn.Conv2d(in_c1 // (bottle_neck_factor*2), in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
+
+
 
         self.att = nn.Sequential(
             nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
@@ -623,6 +617,9 @@ class att_res_conv_normalized(nn.Module):
         key = self.key(key_value_input)
         # bias=self.bias(key_value_input)
 
+        # key=key-key.mean(dim=1,keepdim=True)
+        # query=query-query.mean(dim=1,keepdim=True)
+
         # query = F.normalize(query, p=2, dim=1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
         att_map = query * key
@@ -630,10 +627,10 @@ class att_res_conv_normalized(nn.Module):
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
         if self.use_sigmoid:
-            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = F.sigmoid(att_map)
         else:
-            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = F.softmax(att_map*self.scale,dim=1)
         # att_map = F.sigmoid(att_map*self.scale)
 
@@ -762,31 +759,18 @@ class att_conv_normalized2(nn.Module):
             activation_function = activation
 
         self.key = nn.Sequential(
-            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
-            # LayerNorm2D(64),
-            # activation_function,
+
             nn.Conv2d(64, 64, kernel_size=1,bias=False),
         ).to('cuda')
 
 
 
         normalization=normalization if normalization is not None else LayerNorm2D
-        # self.gate = nn.Sequential(
-        #     nn.Conv2d(64, 64, kernel_size=1),
-        #     nn.Sigmoid()
-        # ).to('cuda')
 
-        self.ln = nn.Sequential(
-            nn.Conv2d(in_c1, 64, kernel_size=1, bias=False),
-            normalization(64),
-            activation_function,
-        ).to('cuda')
+
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
-            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
-            # LayerNorm2D(64),
-            # activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
@@ -795,12 +779,8 @@ class att_conv_normalized2(nn.Module):
         ).to('cuda') if not use_sin else None
 
         self.query = nn.Sequential(
-            # nn.Conv2d(in_c2, 32, kernel_size=1,bias=False),
-            # LayerNorm2D(32,elementwise_affine=False),
-            # activation_function,
             nn.Conv2d(in_c2, 64, kernel_size=1,bias=False),
         ).to('cuda')
-
 
         self.d = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1,bias=False),
@@ -816,45 +796,35 @@ class att_conv_normalized2(nn.Module):
         self.use_sin=use_sin
 
     def forward(self, key_value_input, query_input):
-        # key_value_input = self.LN(key_value_input)
-        # normalized_key_value=self.activation(normalized_key_value)
-        # normalzied_query_input=self.Q_LN(query_input)
-        # query_input=self.Q_LN(query_input)
-        # key_value_input=self.ln(key_value_input)
+
 
         '''key value from input1'''
-        # key = self.key(normalized_key_value)
         value = self.value(key_value_input)
 
         query = self.query(query_input)
-
 
         key = self.key(key_value_input)
 
         bias=0 if self.bias is None else self.bias(key_value_input)
 
-        query = F.normalize(query, p=2, dim=1, eps=1e-8)
-        # if self.use_sin: key = F.normalize(key, p=2, dim=1, eps=1e-8)
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # key = F.normalize(key, p=2, dim=1, eps=1e-8)
+        # key=key-key.mean(dim=1,keepdim=True)
+        # query=query-query.mean(dim=1,keepdim=True)
 
         att_map = query * key
 
-
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
-        # att_map = F.sigmoid(att_map)
         att_map = F.softmax(att_map*self.scale,dim=1)
         # att_map = F.sigmoid(att_map)
-
-        # att_map=att_map.flatten(1,2)
-        # att_map = F.softmax(att_map*self.scale,dim=1)
-
-        # att_map = self.sig(att_map*self.scale)
 
         x = (att_map * value)+bias
 
 
         output = self.d(x)
         return output
+
 class att_conv_normalized_free2(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
                  activation=None):
@@ -866,78 +836,130 @@ class att_conv_normalized_free2(nn.Module):
             activation_function = activation
 
         self.key = nn.Sequential(
-            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
-            # LayerNorm2D(64),
-            # activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
-        # self.bias = nn.Sequential(
-        #     nn.Conv2d(64, 64, kernel_size=1),
-        # ).to('cuda')
-
-
-
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+
         self.value = nn.Sequential(
-            # nn.Conv2d(in_c1, 64, kernel_size=1,bias=False),
-            # LayerNorm2D(64),
-            # activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
         self.query = nn.Sequential(
-            # LayerNorm2D(in_c2, elementwise_affine=False),
             nn.Conv2d(in_c2, 64, kernel_size=1),
         ).to('cuda')
 
-
-
-
         self.d = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
-            # LayerNorm2D(64),
+            LayerNorm2D(64),
             activation_function,
-            nn.Conv2d(64, 32, kernel_size=1),
-            # LayerNorm2D(32),
+            nn.Conv2d(64, 48, kernel_size=1),
+            LayerNorm2D(48),
             activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1),
+            nn.Conv2d(48, out_c, kernel_size=1),
         ).to('cuda')
 
         self.in_c1=in_c1
 
+
     def forward(self, key_value_input, query_input):
 
-
         '''key value from input1'''
-        # key = self.key(normalized_key_value)
         value = self.value(key_value_input)
         query = self.query(query_input)
         key = self.key(key_value_input)
+
+
+        # query=query-query.mean(dim=1,keepdim=True)
+
         # bias=self.bias(key_value_input)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
-        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
 
-        att_map = query * key
-        att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+        # key=key-key.mean(dim=1,keepdim=True)
+        # query=query-query.mean(dim=1,keepdim=True)
+
+        att_map = (query * key)
+
+        # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
         # att_map=F.sigmoid(att_map)
         att_map = F.softmax(att_map*self.scale,dim=1)
 
-        # att_map=att_map.flatten(1,2)
-        # att_map = F.softmax(att_map*self.scale,dim=1)
+        # s=att_map.max(dim=1)[0].mean().item()
+        # if s>0.95:
+        #     print(Fore.RED,f'Warning 1, saturated softmax : {s} ',Fore.RESET)
+        # else:
+        #     print(Fore.GREEN,s,Fore.RESET)
 
-        # att_map = self.sig(att_map*self.scale)
-
-        x = (att_map * value)#+bias
-
+        x = (att_map * value)
 
         output = self.d(x)
         return output
+class PixelAttentionMaskF(nn.Module):
+    def __init__(self, n, m, f, hidden=64):
+        super().__init__()
 
+        # Context and condition projections → hidden dim
+        self.context_proj   = nn.Conv2d(n, hidden, kernel_size=1)
+        self.condition_proj = nn.Conv2d(m, hidden, kernel_size=1)
 
+        # Value projection (condition → fused channels)
+        self.value_proj = nn.Conv2d(m, f, kernel_size=1)
+
+        # Now produce a *multi-channel mask* of size F
+        self.mask_proj = nn.Conv2d(hidden, f, kernel_size=1)
+
+    def forward(self, context, condition):
+        # context:   [B, N, H, W]
+        # condition: [B, M, H, W]
+
+        # Project both to hidden dim
+        C = self.context_proj(context)       # [B, hidden, H, W]
+        D = self.condition_proj(condition)   # [B, hidden, H, W]
+
+        # Interaction feature per pixel
+        attn_feat = torch.tanh(C * D)        # [B, hidden, H, W]
+
+        # Multi-channel attention mask
+        mask = torch.sigmoid(self.mask_proj(attn_feat))  # [B, F, H, W]
+
+        # Condition features projected to output channels
+        V = self.value_proj(condition)       # [B, F, H, W]
+
+        # Apply mask per channel
+        out = mask * V                       # [B, F, H, W]
+
+        return out, mask
+
+class PixelAttentionFuse(nn.Module):
+    def __init__(self, n, m, f, hidden=64):
+        super().__init__()
+        # Project each pixel vector
+        self.q_proj = nn.Conv2d(n, hidden, kernel_size=1)
+        self.k_proj = nn.Conv2d(m, hidden, kernel_size=1)
+        self.v_proj = nn.Conv2d(m, f, kernel_size=1)
+
+        self.scale = hidden ** -0.5
+
+    def forward(self, context, condition):
+        # context:   [B, N, H, W]
+        # condition: [B, M, H, W]
+
+        Q = self.q_proj(context)     # [B, hidden, H, W]
+        K = self.k_proj(condition)   # [B, hidden, H, W]
+        V = self.v_proj(condition)   # [B, F, H, W]
+
+        # Dot product attention per pixel:
+        # Treat each pixel independently
+        attn = (Q * K).sum(dim=1, keepdim=True) * self.scale        # [B,1,H,W]
+        attn = torch.sigmoid(attn)                                  # gating
+
+        # Fuse
+        out = attn * V                                              # [B,F,H,W]
+        return out
 class att_res_conv_normalized_free(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
                  activation=None,use_sigmoid=False,bottle_neck_factor=2):
@@ -2163,4 +2185,19 @@ class att_conv_LN_normalize_res(nn.Module):
 
         output = self.d(x)
         return output
+
+if __name__ == "__main__":
+    att = ContextConditionAttention(
+        m=64,
+        n=128,
+        d_model=256,
+        num_heads=8,
+        normalize=True,
+    )
+
+    context = torch.randn(2, 64, 32, 32)
+    condition = torch.randn(2, 128, 32, 32)
+
+    out = att(context, condition)
+    print(out.shape)  # [2, 256, 32, 32]
 

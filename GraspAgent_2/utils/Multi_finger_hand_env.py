@@ -118,7 +118,7 @@ class MojocoMultiFingersEnv():
         for obj in self.objects:
             if str(obj) in self.obj_dict:
                 self.obj_dict[str(obj)]=max(0.9*self.obj_dict[str(obj)]+.1*score,0.01)
-                print(f'test -----------------------------------{len(self.obj_dict)}---------------------,{obj}, {self.obj_dict[obj]}')
+                # print(f'test -----------------------------------{len(self.obj_dict)}---------------------,{obj}, {self.obj_dict[obj]}')
                 # if not len(self.obj_dict) <= self.object_nums_all:
                 #     for key, value in self.obj_dict.items():
                 #         print(f"Key: {key}, type: {type(key)}, Value: {value}, type: {type(value)}")
@@ -201,12 +201,7 @@ class MojocoMultiFingersEnv():
 
             self.prepare_obj_mesh(self.objects)
 
-            self.initiate_mojoco()
-            self.camera_id = None
-            self.renderer = None
-            self.intr=None
-            self.extr=None
-            self.ini_renderer()
+            self.initialize()
 
             new_poses=self.get_stable_object_pose(self.objects_poses,stablize=stablize)
             if new_poses is not None:
@@ -216,6 +211,14 @@ class MojocoMultiFingersEnv():
                 self.remove_all_objects()
 
         self.save_simulation_state()
+
+    def initialize(self):
+        self.initiate_mojoco()
+        self.camera_id = None
+        self.renderer = None
+        self.intr = None
+        self.extr = None
+        self.ini_renderer()
 
     def save_simulation_state(self):
         """Save complete simulation state"""

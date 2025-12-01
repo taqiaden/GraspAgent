@@ -258,7 +258,7 @@ class TrainGraspGAN:
         ref_pose[:, 5:, ...] = torch.clamp(ref_pose[:, 5:, ...], 0.01, 0.99)
 
         # p=max(self.moving_collision_rate.val,self.moving_out_of_scope.val,1-self.superior_A_model_moving_rate.val)**2.0
-        p = (1 - self.superior_A_model_moving_rate.val)**2  # **2.0
+        p = (1 - self.superior_A_model_moving_rate.val)#**2
         # if not altered_objects_elevation:
         #     ref_pose=ref_pose.permute(0, 2, 3, 1)
         #     correction_ratios_ = (2 * (1 / (1 + torch.rand_like(ref_pose[0,:,:,-2][mask] * (1 - p)) / (
@@ -282,7 +282,7 @@ class TrainGraspGAN:
         sampled_pose = self.generate_random_beta_dist_widh(ref_pose[:, 0, ...].numel())
         sampled_pose = reshape_for_layer_norm(sampled_pose, camera=camera, reverse=True)
 
-        print(Fore.CYAN, f'noisefication factor p={p}', Fore.RESET)
+        print(Fore.CYAN, f'Noise ratio p={p}', Fore.RESET)
 
         # sampling_ratios= (2*(1/(1+(torch.rand_like(ref_pose)*(1-p))/(torch.rand_like(ref_pose)*p))))#**2
         # sampling_ratios = torch.rand_like(ref_pose) * p
@@ -293,6 +293,8 @@ class TrainGraspGAN:
 
         sampled_pose[:, 3:5, ...] = F.normalize(sampled_pose[:, 3:5, ...], dim=1)
         sampled_pose[:, 0:3, ...] = F.normalize(sampled_pose[:, 0:3, ...], dim=1)
+
+        # sampled_pose[:, 5, ...]+=0.01
 
         sampled_pose[:, 5:, ...] = torch.clamp(sampled_pose[:, 5:, ...], 0.01, 0.99)
         return sampled_pose
@@ -363,8 +365,7 @@ class TrainGraspGAN:
         gan.ini_models(train=True)
 
 
-
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0., beta2=0.999)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*1,momentum=0.)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0., weight_decay_=0.)
@@ -437,7 +438,7 @@ class TrainGraspGAN:
                                                self.sampling_centroid[None, 3:5], dim=-1))/2,1)
 
 
-            gamma_firmness=torch.clamp(ref_gripper_pose2_[:,-2].detach().clone(),0.001,0.99)**0.3
+            # gamma_firmness=torch.clamp(ref_gripper_pose2_[:,-2].detach().clone(),0.001,0.99)**0.3
             gamma_rand=torch.rand_like(gamma_dive)
 
             gamma_dive=norm_(gamma_dive)
@@ -446,7 +447,7 @@ class TrainGraspGAN:
             d_gamma=norm_(1-torch.abs((pc[:,-1]-pc[~bin_mask][:,-1].min())/range),2.0)
 
 
-            selection_p = (gamma_dive *   gamma_rand * d_gamma*gamma_firmness) ** (1 / 4)
+            selection_p = (gamma_dive *   gamma_rand * d_gamma) ** (1 / 4)
 
 
             assert not torch.isnan(selection_p).any(), f'selection_p: {ref_gripper_pose2}'
@@ -517,8 +518,7 @@ class TrainGraspGAN:
                     print(Fore.GREEN)
 
                 print(target_ref_pose.detach().cpu().numpy(), '--', target_generated_pose.detach().cpu().numpy(), 'pred=',
-                      prediction_.item(), 'lable=', label_.item(), 'margin=', margin, 'c--', c_, 's--', s_,
-                      'f--', f_, 'q--', q_)
+                      prediction_.item(), 'lable=', label_.item())
 
                 if t == 0 and valid_pose_index is not None:
                     print(Fore.RESET)
@@ -532,9 +532,7 @@ class TrainGraspGAN:
                     firm_loss_counter += 1
                     print(Fore.LIGHTGREEN_EX, target_ref_pose.detach().cpu().numpy(), '--',
                           target_generated_pose.detach().cpu().numpy(), 'pred=', prediction_.item(), 'lable=', label_.item(),
-                          'margin=', margin, 'c--', c_,
-                          's--', s_,
-                          'f--', f_, 'q--', q_, Fore.RESET)
+                          Fore.RESET)
 
             if counted:
                 t = 1
@@ -592,7 +590,7 @@ class TrainGraspGAN:
             # loss=loss+gp
             # loss=((torch.clamp(inferiors.mean()-superiors+1,0.))*margins).sum()+((torch.clamp(inferiors-superiors.mean()+1,0.))*margins).sum()
 
-            loss=(torch.clamp(inferiors - superiors + margins, 0.)**1).mean()
+            loss=(torch.clamp(inferiors - superiors + margins, 0.)**2).mean()
             # loss=((torch.clamp(inferiors-superiors+margins,0.))).mean()
 
             # margins=torch.tensor(margin_lis).cuda()#*0.5
@@ -607,6 +605,10 @@ class TrainGraspGAN:
             loss.backward()
 
             self.critic_statistics.loss = loss.item()
+
+            norm = torch.nn.utils.clip_grad_norm_(self.gan.critic.parameters(), max_norm=1.)
+            print(Fore.LIGHTGREEN_EX, f' D  norm : {norm}', Fore.RESET)
+
             self.gan.critic_optimizer.step()
             self.gan.critic_optimizer.zero_grad(set_to_none=True)
             # if (loss_terms_counters[0] + loss_terms_counters[1] + loss_terms_counters[3] == batch_size) or (loss_terms_counters[2]*w2+loss_terms_counters[4]*w2==batch_size):
@@ -917,13 +919,14 @@ class TrainGraspGAN:
     def visualize(self, depth):
         with torch.no_grad():
             '''get parameters'''
-            pc, mask = depth_to_point_clouds(depth[0, 0].cpu().numpy(), camera)
-            pc = transform_to_camera_frame(pc, reverse=True)
+            pc, mask = depth_to_point_clouds(depth[0, 0], camera)
+            pc = transform_to_camera_frame_torch(pc, reverse=True)
 
             # downsampling_mask=np.random.random(pc.shape[0])>0.5
 
             elevation_mask = (pc[:, -1] < 0.15)  # & downsampling_mask
-            mask[mask] = (mask[mask]) & elevation_mask
+            cloned_mask=mask.clone()
+            mask[cloned_mask] = (mask[cloned_mask]) & elevation_mask
             pc = pc[elevation_mask]
 
             '''generated grasps'''
@@ -1134,6 +1137,10 @@ class TrainGraspGAN:
                 # if abs(loss.item())>0.0:
                 # try:
                 loss.backward()
+
+                norm = torch.nn.utils.clip_grad_norm_(self.gan.generator.parameters(), max_norm=5.0)
+                print(Fore.LIGHTGREEN_EX, f' G  norm : {norm}', Fore.RESET)
+
                 self.gan.generator_optimizer.step()
                 # self.ref_generator.optimizer.step()
                 # except Exception as e:
@@ -1252,7 +1259,6 @@ class TrainGraspGAN:
         self.suction_sampler_statistics.clear()
         self.background_detector_statistics.clear()
 
-
 def train_N_grasp_GAN(n=1):
     lr = 1e-5
     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
@@ -1260,14 +1266,14 @@ def train_N_grasp_GAN(n=1):
     # torch.autograd.set_detect_anomaly(True)
 
     for i in range(n):
-        try:
+        # try:
             cuda_memory_report()
             Train_grasp_GAN.initialize(n_samples=None)
             Train_grasp_GAN.begin()
-        except Exception as e:
-            print(Fore.RED, str(e), Fore.RESET)
-            del Train_grasp_GAN
-            Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
+        # except Exception as e:
+        #     print(Fore.RED, str(e), Fore.RESET)
+        #     del Train_grasp_GAN
+        #     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
 
     # del Train_grasp_GAN
 
