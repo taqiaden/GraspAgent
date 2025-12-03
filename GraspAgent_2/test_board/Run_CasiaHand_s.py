@@ -26,7 +26,6 @@ if __name__ == "__main__":
         point_cloud, floor_mask = ch_env.depth_to_pointcloud(depth.cpu().numpy(), ch_env.intr, ch_env.extr)
         floor_mask=torch.from_numpy(floor_mask).cuda()
 
-
         '''dense processing'''
         with torch.no_grad():
             grasp_pose, grasp_quality_logits, grasp_collision_logits = model(
@@ -35,6 +34,7 @@ if __name__ == "__main__":
             grasp_quality = torch.clamp(grasp_quality_logits, 0, 1).reshape(-1)
             objects_collision=F.sigmoid(grasp_collision_logits[0,0]).reshape(-1)
             floor_collision=F.sigmoid(grasp_collision_logits[0,1]).reshape(-1)
+            any_collision=F.sigmoid(grasp_collision_logits[0,2]).reshape(-1)
             grasp_pose=grasp_pose[0].permute(1, 2, 0).reshape(360000,8)
 
             selection_p=grasp_quality**2

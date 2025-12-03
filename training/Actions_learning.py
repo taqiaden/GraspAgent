@@ -59,7 +59,7 @@ def suction_sampler_loss(pc, target_normal,objects_mask, file_index):
     if os.path.exists(file_path):
         labels = load_pickle(file_path)
     else:
-        labels = estimate_suction_direction(pc,
+        labels = estimate_suction_direction(pc.cpu().numpy(),
                                             view=False)  # inference time on local computer = 1.3 s        if file_index is not None:
         file_path = cache_dir + cache_name + '/' + file_index + '.pkl'
         save_pickle(file_path, labels)

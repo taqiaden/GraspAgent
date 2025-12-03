@@ -185,7 +185,7 @@ class TrainingTracker:
         with torch.no_grad():
             TP_mask,FP_mask,FN_mask,TN_mask=self.confession_matrix.update_confession_matrix(label,prediction_,pivot_value)
             if self.label_balance_indicator is not None: self.update_label_balance_indicator(label)
-            if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(label)
+            if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
 
             instance_accuracy=(TP_mask.sum()+TN_mask.sum()).item()/(TP_mask.sum()+FP_mask.sum()+FN_mask.sum()+TN_mask.sum()).item()
             self.moving_accuracy = (1 - self.decay_rate) * self.moving_accuracy + self.decay_rate*instance_accuracy

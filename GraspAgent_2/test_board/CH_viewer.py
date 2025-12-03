@@ -259,6 +259,8 @@ class TrainGraspGAN:
             # print('ref')
             # ref_success ,ref_initial_collision= self.evaluate_grasp(target_point,target_ref_pose,view=True,shake_intensity=0.002)
             print('gen')
+            gen_success,gen_initial_collision = self.evaluate_grasp(target_point, target_generated_pose,view=False,hard_level=0.5)
+            print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,Fore.RESET )
             gen_success,gen_initial_collision = self.evaluate_grasp(target_point, target_generated_pose,view=True,hard_level=0.5)
             print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,Fore.RESET )
     def step(self,i):
@@ -281,7 +283,7 @@ class TrainGraspGAN:
 
                 grasp_collision=F.sigmoid(grasp_collision_logits)
 
-                grasp_quality = torch.clamp(grasp_quality_logits, 0, 1)
+                grasp_quality = F.sigmoid(grasp_quality_logits)
                 f = self.grasp_quality_statistics.accuracy * ((1 - grasp_quality.detach()) ** 2) + (
                             1 - self.grasp_quality_statistics.accuracy)
                 annealing_factor = self.tou * f

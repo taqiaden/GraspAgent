@@ -36,7 +36,7 @@ class ContextGate_1d(nn.Module):
 
         med_c=max(in_c1,in_c2)
 
-        self.key = nn.Sequential(
+        self.key_ = nn.Sequential(
             nn.Linear(in_c1, in_c1),
             nn.LayerNorm(in_c1),
             activation_function,
@@ -52,6 +52,14 @@ class ContextGate_1d(nn.Module):
             nn.Linear(in_c1, med_c),
         ).to('cuda')
 
+        self.gate = nn.Sequential(
+            # nn.Linear(in_c1, in_c1),
+            # nn.LayerNorm(in_c1),
+            # activation_function,
+            nn.Linear(in_c1, in_c1),
+            nn.Sigmoid(),
+        ).to('cuda')
+
         # self.gate = nn.Sequential(
         #     nn.Linear(in_c1, in_c1),
         #     nn.Sigmoid()
@@ -62,7 +70,10 @@ class ContextGate_1d(nn.Module):
         ).to('cuda')
 
         # self.bias = nn.Sequential(
-        #     nn.Linear(in_c1, med_c),
+        #     nn.Linear(in_c2, med_c),
+        #     nn.LayerNorm(in_c1),
+        #     activation_function,
+        #     nn.Linear(med_c, med_c),
         # ).to('cuda')
 
 
@@ -74,7 +85,7 @@ class ContextGate_1d(nn.Module):
         self.d = nn.Sequential(
             nn.Linear(med_c, 48),
             nn.LayerNorm(48),
-            ParameterizedSine() if use_sin else activation_function,
+            activation_function,
             nn.Linear(48, 32),
             nn.LayerNorm(32),
             activation_function,
@@ -88,12 +99,13 @@ class ContextGate_1d(nn.Module):
         ).to('cuda')
 
     def forward(self, context, condition):
-        # context=self.gate(context)*context
-        # context=context-context.mean()
+        context=self.gate(context)*context
 
-        key = self.key(context)
+
+        key = self.key_(context)
         value = self.value(context)
         query = self.query(condition)
+        # bias = self.query(condition)
 
         query = F.normalize(query, p=2, dim=-1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=2, eps=1e-8)
@@ -112,14 +124,14 @@ class ContextGate_1d(nn.Module):
         # att_map=F.sigmoid(att_map)
 
 
-        # s=att_map.max(dim=2)[0].mean().item()
-        # if s>0.95:
-        #     print(key.max(dim=2)[1])
-        #     print(query.max(dim=2)[1])
-        #
-        #     print(Fore.RED,f'Warning 1, saturated softmax : {s}, indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
-        # else:
-        #     print(Fore.GREEN,s,Fore.RESET)
+        s=att_map.max(dim=2)[0].mean().item()
+        if s>0.95:
+            print(key.max(dim=2)[1])
+            print(query.max(dim=2)[1])
+
+            print(Fore.RED,f'Warning 1, saturated softmax : {s}, indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
+        else:
+            print(Fore.GREEN,s,Fore.RESET)
         # att_map = F.sigmoid(att_map)
         # print('test------------att_map-------',att_map[0])
         # print('test------------v-------',value[0])
@@ -162,14 +174,17 @@ class ContextGate_2d(nn.Module):
         ).to('cuda')
 
         self.bias = nn.Sequential(
-            nn.Conv2d(in_c1, 16, kernel_size=1),
-            LayerNorm2D(16),
+            nn.Conv2d(in_c1+in_c2, mid_c //2, kernel_size=1),
+            LayerNorm2D(mid_c //2),
             activation_function,
-            nn.Conv2d(16, mid_c + in_c3, kernel_size=1),
+            nn.Conv2d(mid_c //2, mid_c , kernel_size=1),
         ).to('cuda') if not use_sin or bias else None
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            # LayerNorm2D(mid_c),
+            # activation_function,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
 
@@ -179,13 +194,14 @@ class ContextGate_2d(nn.Module):
             LayerNorm2D(48),
             activation_function,
             nn.Conv2d(48, 32, kernel_size=1),
+            LayerNorm2D(32),
             activation_function,
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda') if normalize else nn.Sequential(
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
             ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(48, 32, kernel_size=1),
-            activation_function,
+            ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda')
 
@@ -210,10 +226,9 @@ class ContextGate_2d(nn.Module):
         value = self.value(context)
         query = self.query(condition)
         key = self.key(context)
-        bias=0. if self.bias is None else self.bias(context)
-        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        bias=0. if self.bias is None else self.bias(torch.cat([context,condition],dim=1))
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
-
 
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
@@ -223,7 +238,7 @@ class ContextGate_2d(nn.Module):
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # if self.use_sin: att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        # att_map = F.sigmoid(att_map)
+        att_map = F.sigmoid(att_map)
         att_map = F.softmax(att_map,dim=1)
 
         # s=att_map.max(dim=1)[0].mean().item()
@@ -260,17 +275,19 @@ class res_ContextGate_2d(nn.Module):
 
         mid_c=max(in_c1,in_c2)
 
+        # self.l1=nn.Sequential(
+        #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
+        #     LayerNorm2D(in_c1),
+        #     activation_function,
+        # ).to('cuda')
+
         self.key = nn.Sequential(
-            nn.Conv2d(in_c1, in_c1, kernel_size=1),
-            LayerNorm2D(in_c1),
-            activation_function,
+
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.value = nn.Sequential(
-            # nn.Conv2d(in_c1, in_c1, kernel_size=1),
-            # LayerNorm2D(in_c1),
-            # activation_function,
+
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
         #
@@ -285,9 +302,10 @@ class res_ContextGate_2d(nn.Module):
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, mid_c, kernel_size=1),
-            nn.SiLU(),
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            nn.Conv2d(in_c2, mid_c//2, kernel_size=1),
+            # LayerNorm2D(mid_c//2 ),
+            activation_function,
+            nn.Conv2d(mid_c//2, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.res = nn.Sequential(
@@ -301,44 +319,41 @@ class res_ContextGate_2d(nn.Module):
             LayerNorm2D(mid_c//2),
             activation_function
         ).to('cuda')
+        c=int(2*(mid_c//2))
+
 
 
         self.d = nn.Sequential(
-            nn.Conv2d(mid_c+in_c3 , mid_c, kernel_size=1),
-            LayerNorm2D(mid_c),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(mid_c, 32, kernel_size=1),
+            nn.Conv2d(c + in_c3, mid_c // 2, kernel_size=1),
+            LayerNorm2D(mid_c // 2),
+            activation_function,
+            nn.Conv2d(mid_c // 2, mid_c // 2, kernel_size=1),
+            LayerNorm2D(mid_c // 2),
+            activation_function,
+            nn.Conv2d(mid_c // 2, 32, kernel_size=1),
             LayerNorm2D(32),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(32, out_c, kernel_size=1)
-        ).to('cuda') if normalize else nn.Sequential(
-            nn.Conv2d(mid_c+in_c3 , mid_c, kernel_size=1),
-            ParameterizedSine() if use_sin else activation_function,
-            nn.Conv2d(mid_c, 32, kernel_size=1),
             activation_function,
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda')
-
         self.use_sin=use_sin
 
 
-
     def forward(self, context, condition,additional_features=None):
-        # context=self.gate(context)*context
+        # context=self.l1(context)
 
         value = self.value(context)
         query = self.query(condition)
         key = self.key(context)
         res=self.res(torch.cat([context,condition],dim=1))
-        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
 
         att_map = query * key
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        # att_map = F.sigmoid(att_map)
-        att_map = F.softmax(att_map*self.scale,dim=1)
+        att_map = F.sigmoid(att_map)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
 
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95: print(Fore.RED,f'Warining 3, saturated softmax : {s}',Fore.RESET)
@@ -349,7 +364,8 @@ class res_ContextGate_2d(nn.Module):
         x=torch.cat([x,res],dim=1)
 
         if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
-        output = self.d(x)
+
+        output=self.d(x)
         return output
 
 class Grasp_ContextGate_2d(nn.Module):
@@ -506,9 +522,15 @@ class film_fusion_2d(nn.Module):
         ).to('cuda')
 
         self.film_gen_ = nn.Sequential(
-            nn.Conv2d(in_c2, mid_c*2, kernel_size=1),
+            nn.Conv2d(in_c2, mid_c , kernel_size=1),
+            LayerNorm2D(mid_c),
+            activation_function,
+            nn.Conv2d(mid_c, mid_c*2, kernel_size=1),
         ).to('cuda') if bias else nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            LayerNorm2D(mid_c),
+            activation_function,
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.bias=bias
@@ -521,6 +543,7 @@ class film_fusion_2d(nn.Module):
 
         self.gate = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            LayerNorm2D(mid_c),
             nn.Sigmoid()
         ).to('cuda') if gate else None
 
@@ -528,18 +551,19 @@ class film_fusion_2d(nn.Module):
 
         if decode:
             self.d =  nn.Sequential(
-                nn.Conv2d(mid_c+in_c3, 48, kernel_size=1),
+                nn.Conv2d(mid_c+in_c3, mid_c, kernel_size=1),
+                LayerNorm2D(mid_c),
+                ParameterizedSine() if use_sin else activation_function,
+                nn.Conv2d(mid_c, 48, kernel_size=1),
                 LayerNorm2D(48),
                 ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(48, 32, kernel_size=1),
-                ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1)
+                nn.Conv2d(48, out_c, kernel_size=1)
             ).to('cuda') if normalize else  nn.Sequential(
-                nn.Conv2d(mid_c+in_c3, 48, kernel_size=1),
+                nn.Conv2d(mid_c+in_c3, mid_c, kernel_size=1),
                 ParameterizedSine() if use_sin else activation_function,
-                nn.Conv2d(48, 32, kernel_size=1),
+                nn.Conv2d(mid_c, 48, kernel_size=1),
                 activation_function,
-                nn.Conv2d(32, out_c, kernel_size=1)
+                nn.Conv2d(48, out_c, kernel_size=1)
             ).to('cuda')
 
             self.decode=decode

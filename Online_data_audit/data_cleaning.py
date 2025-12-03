@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 
 from Configurations import config
 from label_unpack import LabelObj
-from lib.dataset_utils import online_data
+from lib.dataset_utils import online_data,online_data2
 from lib.models_utils import initialize_model_state
 from lib.report_utils import progress_indicator
 from lib.report_utils import progress_indicator as pi
@@ -16,6 +16,7 @@ from models.scope_net import scope_net_vanilla
 # from distfit import distfit
 
 online_data = online_data()
+online_data2 = online_data2()
 
 def track_samples_scope_score():
     indexes=online_data.get_indexes()
@@ -165,8 +166,50 @@ def get_skewed_normal_distribution(data):
     print('skewness: ',scipy.stats.skew(data))
     print('kurtosis: ',scipy.stats.kurtosis(data))
 
+def change_tensor_to_numpy():
+    file_indexes = online_data2.get_indexes()
+
+    progress_indicator = pi(f'total samples size = {len(file_indexes)}, progress:  ', len(file_indexes))
+    counter = 0
+    for i, target_file_index in enumerate(file_indexes):
+        '''get data'''
+        # depth=online_data.load_depth(target_file_index)
+        if not online_data.depth.exist(target_file_index):
+            depth = online_data2.depth.load_as_numpy(target_file_index)
+
+            print(isinstance(depth, torch.Tensor))
+            if isinstance(depth, torch.Tensor):
+                online_data2.depth.save_as_numpy(depth.cpu().numpy(), target_file_index)
+
+        '''update counter'''
+        counter += 1
+        progress_indicator.step(counter)
+
 if __name__ == '__main__':
-    rename_files()
-    clean_old_data_redundancy()
-    convert_all_point_clouds_to_depth()
+    # rename_files()
+    # clean_old_data_redundancy()
+    # convert_all_point_clouds_to_depth()
+
+    file_indexes = online_data2.get_indexes()
+
+    progress_indicator=pi(f'total samples size = {len(file_indexes)}, progress:  ',len(file_indexes))
+    counter=0
+    for i,target_file_index in enumerate(file_indexes):
+        '''get data'''
+        # depth=online_data.load_depth(target_file_index)
+        if not online_data.depth.exist(target_file_index):
+            depth = online_data2.depth.load_as_numpy(target_file_index)
+
+            if depth.ndim>2:
+                print(depth.shape)
+
+                online_data2.depth.save_as_numpy(depth.squeeze(), target_file_index)
+
+            # print(isinstance(depth, torch.Tensor))
+            # if isinstance(depth, torch.Tensor):
+            #     online_data2.depth.save_as_numpy(depth.cpu().numpy(),target_file_index)
+
+        '''update counter'''
+        counter+=1
+        progress_indicator.step(counter)
 

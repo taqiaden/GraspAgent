@@ -1,4 +1,5 @@
 import os
+import zipfile
 
 import torch
 import torch.nn.functional as F
@@ -88,7 +89,11 @@ class OnlingClustering():
 
     def load(self,inti_centers=None):
         if os.path.exists(self.save_path):
-            return torch.load(self.save_path).cuda()
+            try:
+                return torch.load(self.save_path).cuda()
+            except Exception as e:
+                print(Fore.RED,'failed to load clusters center , ',str(e),Fore.RESET)
+                return inti_centers
         else:
             return inti_centers
 

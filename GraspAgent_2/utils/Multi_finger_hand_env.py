@@ -212,6 +212,11 @@ class MojocoMultiFingersEnv():
 
         self.save_simulation_state()
 
+    def remove_obj(self):
+        if len(self.objects) >=1 :
+            print('Remove object ID: ', self.objects[0])
+            self.objects.popleft()
+            self.objects_poses = self.objects_poses[:-7]
     def initialize(self):
         self.initiate_mojoco()
         self.camera_id = None

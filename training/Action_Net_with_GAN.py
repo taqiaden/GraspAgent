@@ -1025,10 +1025,10 @@ class TrainGraspGAN:
             # view_features(reshape_for_layer_norm(objects_mask_pixel_form, camera=camera, reverse=False))
 
             '''Elevation-based augmentation'''
-            if np.random.rand() > 1.:
+            if np.random.rand() > 0.5:
                 depth = self.simulate_elevation_variations(depth, objects_mask_pixel_form, exponent=5.0)
                 pc, mask = depth_to_point_clouds(depth[0, 0], camera)
-                pc = transform_to_camera_frame(pc, reverse=True)
+                pc = transform_to_camera_frame_torch(pc, reverse=True)
                 altered_objects_elevation = True
             else:
                 altered_objects_elevation = False

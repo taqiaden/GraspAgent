@@ -259,26 +259,48 @@ def sample_closets_quat(base_quat,quat_centers,noise_rate=0.):
     closest_idx = torch.argmax(dots, dim=1)
     q_assigned = quat_centers[closest_idx]
 
+    random_quat=torch.randn_like(q_assigned)
     # if noise_rate > 0:
-    noise = torch.randn_like(q_assigned) * noise_rate
-    samples = q_assigned + noise
+    samples = q_assigned*(1-noise_rate) +   random_quat* noise_rate
 
     samples = F.normalize(samples, dim=-1)
 
     return samples
 
+def nearest_replace(x: torch.Tensor, y: torch.Tensor,noise_rate=0.) -> torch.Tensor:
+    """
+    x : [N, 3]  – query points
+    y : [M, 3]  – code-book
+    return : [N, 3] – for every row in x pick the closest row in y (L2)
+    """
+    # pairwise squared distances: [N, M]
+    dist = (x.unsqueeze(1) - torch.clip(y,0,1).unsqueeze(0)).pow(2).sum(dim=2)
+    # index of nearest neighbour in y for every x
+    idx = dist.argmin(dim=1)          # [N]
 
-def generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios=0.3,quat_centers=None,finger_centers=None):
+    result=y[idx]
+
+
+    result = result *(1-noise_rate) + noise_rate*(torch.randn_like(result)+0.5)
+
+    return result
+
+
+def generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios,quat_centers=None,finger_centers=None):
     size=ref_pose[:,  0].numel()
 
+
     base_quat=ref_pose[0,0:4].reshape(4,-1).T
+    base_fingers=ref_pose[0,4:4+3].reshape(3,-1).T
+    base_fingers=torch.clip(base_fingers,0,1)
+    base_transition=ref_pose[0,4+3:].reshape(1,-1).T
 
     # quat=torch.randn(size=(size,4),device='cuda')
     #
 
     if quat_centers is not None:
         # sampled_taxonomies=sample_mixed_tensors(quat_centers,size,smooth=False,noise_rate=0.1)
-        quat=sample_closets_quat(base_quat,quat_centers,noise_rate=noise_ratios)
+        quat=sample_closets_quat(base_quat,quat_centers,noise_rate=noise_ratios[:,0:4])
         # quat=sample_from_two(A=quat, B=sampled_taxonomies, ratio_of_A=0.1)
     else:
         quat = sample_ch_quat(size)
@@ -286,13 +308,16 @@ def generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios=0.3,quat_ce
     quat = F.normalize(quat, dim=-1)
 
     # fingers=beta_peak_intensity_tensor(n=size,c=3,data_range=[0,1],centers=torch.tensor([0.5,0.5,0.5],device='cuda'))
-    fingers=torch.rand((size,3),device='cuda')
+    # fingers=(torch.randn((size,3),device='cuda')+0.5)
     if finger_centers is not None:
-        sampled_fingers=sample_mixed_tensors(finger_centers,size,smooth=False,noise_rate=0.1)
-        fingers=sample_from_two(A=fingers, B=sampled_fingers, ratio_of_A=0.3)
+        fingers=nearest_replace(base_fingers, finger_centers, noise_rate = noise_ratios[:,4:4+3])
+        # sampled_fingers=sample_mixed_tensors(finger_centers,size,smooth=False,noise_rate=0.1)
+        # fingers=sample_from_two(A=fingers, B=sampled_fingers, ratio_of_A=0.3)
+    else:
+        fingers = (torch.randn((size, 3), device='cuda') + 0.5)
 
-    transition=beta_peak_intensity_tensor(n=size,c=1,data_range=[-1,1],centers=sampling_centroid[-1:],peak_intensity=5)
-
+    # transition=beta_peak_intensity_tensor(n=size,c=1,data_range=[-1,1],centers=sampling_centroid[-1:],peak_intensity=5)
+    transition=torch.randn((size,1),device='cuda')*noise_ratios[:,4+3:]+base_transition*(1-noise_ratios[:,4+3:])
     sampled_pose = torch.cat([quat, fingers, transition], dim=1)
 
     return sampled_pose
@@ -305,8 +330,10 @@ def ch_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor,quat
 
     sampling_ratios = torch.clip(annealing_factor,0.0,1.0)
     sampling_ratios[sampling_ratios>0.95]=1.
+    sampling_ratios1 = 1/(1+((1-sampling_ratios)*torch.rand_like(ref_pose)) /(sampling_ratios*torch.rand_like(ref_pose)+1e-5))[0].permute(1,2,0).view(-1,8)
+    sampling_ratios2 = 1/(1+((1-sampling_ratios)*torch.rand_like(sampling_ratios)) /(sampling_ratios*torch.rand_like(sampling_ratios)+1e-5))
 
-    sampled_pose = generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios=sampling_ratios.reshape(-1,1),quat_centers=quat_centers,finger_centers=finger_centers).reshape(600,600,8).permute(2,0,1)[None,...]
+    sampled_pose = generate_random_CH_poses(ref_pose,sampling_centroid,noise_ratios=sampling_ratios1,quat_centers=quat_centers,finger_centers=finger_centers).reshape(600,600,8).permute(2,0,1)[None,...]
 
     '''process quat sign'''
     dist1=signed_cosine_distance(sampled_pose[:,0:4],ref_pose[:,0:4])
@@ -315,15 +342,14 @@ def ch_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor,quat
     f[dist2<dist1]*=-1
     sampled_pose[:,0:4]*=f
 
-    sampling_ratios = 1/(1+((1-sampling_ratios)*torch.rand_like(ref_pose)) /(sampling_ratios*torch.rand_like(ref_pose)+1e-5))
 
-    sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
+    sampled_pose = sampled_pose * sampling_ratios2 + (1 - sampling_ratios2) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
 
     sampled_pose[:, :4] = F.normalize(sampled_pose[:, :4], dim=1)
 
-    '''clip fingers to scope'''
-    sampled_pose[:,4:4+3]=torch.clamp(sampled_pose[:,4:4+3],min=0.01,max=0.99)
+    # '''clip fingers to scope'''
+    # sampled_pose[:,4:4+3]=torch.clamp(sampled_pose[:,4:4+3],min=0.01,max=0.99)
 
 
     return sampled_pose

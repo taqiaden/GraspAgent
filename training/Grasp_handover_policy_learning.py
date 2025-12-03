@@ -3,17 +3,17 @@ import numpy as np
 import torch
 from Configurations.config import workers
 from Online_data_audit.data_tracker2 import DataTracker2
-from check_points.check_point_conventions import ModelWrapper
+from check_points.check_point_conventions import ModelWrapper, GANWrapper
 from dataloaders.grasp_handover_dl import DemonstrationsDataset, SeizePolicyDataset, GraspDataset
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection
 from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2,online_data, demonstrations_data
-from lib.depth_map import depth_to_point_clouds_torch,transform_to_camera_frame_torch
+from lib.depth_map import transform_to_camera_frame_torch, depth_to_point_clouds
 from lib.image_utils import view_image
 from lib.loss.D_loss import binary_smooth_l1, binary_l1
 from lib.report_utils import progress_indicator
 from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_handover_policy_module_key
-from models.action_net import action_module_key, ActionNet
+from models.action_net import action_module_key, ActionNet, action_module_with_GAN_key
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
 import random
@@ -167,15 +167,17 @@ class TrainPolicyNet:
         return data_loader
 
     def initialize_action_net(self):
-        actions_net = ModelWrapper(model=ActionNet(), module_key=action_module_key)
-        actions_net.ini_model(train=False)
-        self.action_net = actions_net.model
+
+
+        gan = GANWrapper(action_module_with_GAN_key, ActionNet)
+        gan.ini_generator(train=False)
+        self.action_net = gan.generator
 
     def get_point_clouds(self, depth):
         pcs = []
         masks = []
         for j in range(depth.shape[0]):
-            pc, mask = depth_to_point_clouds_torch(depth[j, 0], camera)
+            pc, mask = depth_to_point_clouds(depth[j, 0], camera)
             pc = transform_to_camera_frame_torch(pc, reverse=True)
 
             pcs.append(pc)
@@ -195,7 +197,8 @@ class TrainPolicyNet:
                 g_pix_A = gripper_pixel_index[j, 0]
                 g_pix_B = gripper_pixel_index[j, 1]
                 prediction = griper_grasp_quality_score[j, 0, g_pix_A, g_pix_B]
-                l = binary_smooth_l1(prediction, label)
+                # l = binary_smooth_l1(prediction, label)
+                l=bce_loss(prediction, label)
 
                 self.gripper_sampling_rate.update(1)
 
@@ -210,7 +213,9 @@ class TrainPolicyNet:
                 s_pix_A = suction_pixel_index[j, 0]
                 s_pix_B = suction_pixel_index[j, 1]
                 prediction = suction_grasp_quality_score[j, 0, s_pix_A, s_pix_B]
-                l = binary_smooth_l1(prediction, label)
+                # l = binary_smooth_l1(prediction, label)
+                l=bce_loss(prediction, label)
+
 
                 self.gripper_sampling_rate.update(0)
 
@@ -226,7 +231,7 @@ class TrainPolicyNet:
             bin_mask,floor_elevation = bin_planes_detection(pc, sides_threshold=0.005, floor_threshold=0.0015, view=False,
                                             file_index=str(file_id), cache_name=cache_name)
         except Exception as error_message:
-            print(file_id)
+            print('analytical_bin_mask error: ',file_id)
             print(error_message)
             bin_mask = None
         return bin_mask
@@ -261,8 +266,8 @@ class TrainPolicyNet:
             objects_mask_pixel_form = objects_mask_pixel_form > 0.5
             if np.random.rand() > 0.5:
                 depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1], objects_mask_pixel_form,
-                                                                    exponent=5.0)
-                pcs[k], masks[k] = depth_to_point_clouds_torch(depth[k, 0], camera)
+                                                                    exponent=2.0)
+                pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0], camera)
                 pcs[k] = transform_to_camera_frame_torch(pcs[k], reverse=True)
 
         return depth,pcs, masks,objects_masks
@@ -275,7 +280,7 @@ class TrainPolicyNet:
             if np.random.rand() > 0.5:
                 depth[k:k + 1] = self.simulate_elevation_variations(depth[k:k + 1],
                                                                     exponent=5.0)
-                pcs[k], masks[k] = depth_to_point_clouds_torch(depth[k, 0], camera)
+                pcs[k], masks[k] = depth_to_point_clouds(depth[k, 0], camera)
                 pcs[k] = transform_to_camera_frame_torch(pcs[k], reverse=True)
 
         return depth,pcs, masks
@@ -293,7 +298,7 @@ class TrainPolicyNet:
 
         with torch.no_grad():
             gripper_pose, normal_direction, _, _, _ \
-                , background_class = self.action_net(depth.clone())
+                , background_class = self.action_net(depth.clone(),torch.stack(masks)[:,None,...])
 
         griper_grasp_quality_score, suction_grasp_quality_score, handover_class = \
             self.model_wrapper.model(rgb, depth.clone(), gripper_pose, normal_direction)
@@ -302,6 +307,8 @@ class TrainPolicyNet:
         for j in range(b):
             if masks[j] is None: continue
             objects_mask = objects_masks[j]
+            random_mask=torch.randn_like(objects_mask.float())>0
+            objects_mask=objects_mask&objects_mask
             target_gripper_predictions = griper_grasp_quality_score[j, 0][masks[j]]
             target_suction_predictions = suction_grasp_quality_score[j, 0][masks[j]]
 
@@ -309,13 +316,13 @@ class TrainPolicyNet:
                 pass
             elif labels[j, 1] != -1:
                 '''No grasp points'''
-                demonstration_loss += (binary_l1(target_gripper_predictions[objects_mask],
-                                                 torch.zeros_like(target_gripper_predictions)[objects_mask])**2).mean()
+                demonstration_loss += (bce_loss(target_gripper_predictions[objects_mask],
+                                                 torch.zeros_like(target_gripper_predictions)[objects_mask])).mean()
                 # demonstration_loss += (binary_l1(target_suction_predictions[objects_mask], torch.ones_like(target_suction_predictions)[objects_mask])).mean()
             elif labels[j, 2] != -1:
                 '''No suction points'''
-                demonstration_loss += (binary_l1(target_suction_predictions[objects_mask],
-                                                 torch.zeros_like(target_suction_predictions)[objects_mask])**2).mean()
+                demonstration_loss += (bce_loss(target_suction_predictions[objects_mask],
+                                                 torch.zeros_like(target_suction_predictions)[objects_mask])).mean()
                 # demonstration_loss += (binary_l1(target_gripper_predictions[objects_mask], torch.ones_like(target_gripper_predictions)[objects_mask])).mean()
             elif labels[j, 3] != -1:
                 '''Priority to grasp'''
@@ -334,10 +341,10 @@ class TrainPolicyNet:
             elif labels[j, 6] != -1:
                 '''No grasp nor suction'''
                 demonstration_loss += (
-                    binary_l1(target_gripper_predictions[objects_mask],
+                    bce_loss(target_gripper_predictions[objects_mask],
                               torch.zeros_like(target_gripper_predictions)[objects_mask])).mean()
                 demonstration_loss += (
-                    binary_l1(target_suction_predictions[objects_mask],
+                    bce_loss(target_suction_predictions[objects_mask],
                               torch.zeros_like(target_suction_predictions)[objects_mask])).mean()
             else:
                 assert False, f'{labels}'
@@ -420,6 +427,8 @@ class TrainPolicyNet:
                 suction_pixel_index, gripper_score, \
                 suction_score, normal, used_gripper, used_suction, file_ids = seize_policy_batch
 
+
+
             rgb = rgb.cuda().float().permute(0, 3, 1, 2)
             depth = depth.cuda().float()
             pose_7 = pose_7.cuda().float()
@@ -433,7 +442,6 @@ class TrainPolicyNet:
 
             depth, pcs, masks, objects_masks = self.objects_augmentation(depth, file_ids,
                                                                          cache_name='bin_planes2')
-
 
 
             '''zero grad'''
@@ -461,7 +469,17 @@ class TrainPolicyNet:
                                              gripper_score, suction_score, used_gripper, used_suction,
                                              gripper_pixel_index, suction_pixel_index,self.gripper_quality_net_statistics,self.suction_quality_net_statistics)
 
-            loss = quality_loss
+            '''set grasp score for bin as zero'''
+            counter=0
+            bin_no_grasp_loss=0
+            for k in range(len(pcs)):
+                if objects_masks[k] is not None:
+                    bin_mask = ~objects_masks[k]
+                    pred=griper_grasp_quality_score[k,0][masks[k]]
+                    bin_no_grasp_loss+=bce_loss(pred[bin_mask], torch.zeros_like(pred[bin_mask])).mean()
+                    counter+=1
+
+            loss = quality_loss+bin_no_grasp_loss/max(1,counter)
 
             assert not torch.isnan(loss).any(), f'{loss}'
 
@@ -529,12 +547,12 @@ if __name__ == "__main__":
     train_action_net.initialize_model()
     wait = wi('Begin synchronized trianing')
     while True:
-        # try:
+        try:
             new_buffer, new_data_tracker = train_action_net.synchronize_buffer()
             for i in range(2):
                 train_action_net.train(max_size=10,batch_size=2)
 
-            # train_action_net.train_with_demonstrations(max_size=10,batch_size=2)
+            train_action_net.train_with_demonstrations(max_size=2,batch_size=2)
             for i in range(5):
                 train_action_net.partial_modality_train(max_size=10,batch_size=2)
 
@@ -543,5 +561,5 @@ if __name__ == "__main__":
             train_action_net.view_result()
             train_action_net.clear()
 
-        # except Exception as e:
-        #     print(str(e))
+        except Exception as e:
+            print(str(e))

@@ -2,6 +2,7 @@ import io
 import logging
 import math
 import os
+import pickle
 import re
 import sys
 from datetime import datetime
@@ -9,6 +10,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 import smbclient
+import torch
 
 from Configurations.config import ip_address, where_am_i
 from lib.image_utils import view_image
@@ -62,7 +64,19 @@ configure_smbclient()
 
 
 def custom_np_load(file_path):
-    return np.load(file_path, allow_pickle=True)
+    # try:
+    file=np.load(file_path, allow_pickle=True)
+    return file
+    # except:
+    #     print(file_path)
+    #     pass
+    # # with open(file_path, 'rb') as f:
+    # #     return pickle.load(f)
+    # print(file_path)
+    # with open(file_path, 'rb') as f:
+    #     file = pickle.load(f)  # exact same Python object you saved
+    # # file=torch.load(file_path).numpy()
+    # return file
 class modality_pool():
     def __init__(self,key_name,parent_dir,extension='npy',is_local=True):
         self.key_name=key_name

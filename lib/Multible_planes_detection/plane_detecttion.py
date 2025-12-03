@@ -263,12 +263,12 @@ def bin_planes_detection(pc,sides_threshold = 0.0035,floor_threshold=0.0015,edge
             detected_bin_tuple=load_pickle(file_path)
 
         else:
-            detected_bin_tuple=get_bin_planes_equations(pc, view=view)
+            detected_bin_tuple=get_bin_planes_equations(pc.cpu().numpy(), view=view)
             if file_index is not None:
                 file_path = cache_dir +cache_name+'/' +  file_index + '.pkl'
                 save_pickle(file_path, detected_bin_tuple)
     else:
-        detected_bin_tuple = get_bin_planes_equations(pc, view=view)
+        detected_bin_tuple = get_bin_planes_equations(pc.cpu().numpy(), view=view)
         if file_index is not None:
             file_path = cache_dir + cache_name+'/' + file_index + '.pkl'
             save_pickle(file_path, detected_bin_tuple)

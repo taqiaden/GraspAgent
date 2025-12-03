@@ -59,6 +59,38 @@ online_data2=online_data2()
 
 pr=my_print()
 
+def angle_between_vectors(v1, v2, eps=1e-8):
+    # v1, v2: (..., 3)
+    v1_n = v1 / (v1.norm(dim=-1, keepdim=True) + eps)
+    v2_n = v2 / (v2.norm(dim=-1, keepdim=True) + eps)
+    dot = torch.sum(v1_n * v2_n, dim=-1).clamp(-1.0, 1.0)
+    return torch.acos(dot)
+
+def vector_product(v1, v2):
+    return torch.cross(v1, v2, dim=-1)
+
+def rotation_matrix(angle, axis):
+    """
+    angle: scalar tensor
+    axis: (3,) tensor
+    returns: (4,4) rotation matrix
+    """
+    axis = axis / (axis.norm() + 1e-8)
+    x, y, z = axis
+    c = torch.cos(angle)
+    s = torch.sin(angle)
+    C = 1 - c
+
+    R = torch.tensor([
+        [c + x*x*C,     x*y*C - z*s, x*z*C + y*s],
+        [y*x*C + z*s, c + y*y*C,     y*z*C - x*s],
+        [z*x*C - y*s, z*y*C + x*s, c + z*z*C]
+    ], dtype=angle.dtype, device=angle.device)
+
+    T = torch.eye(4, dtype=angle.dtype, device=angle.device)
+    T[:3, :3] = R
+    return T
+
 def get_unflatten_index(flat_index, ori_size):
     res = len(ori_size)*[0]
     for i in range(len(ori_size)-1, -1, -1):
@@ -474,6 +506,7 @@ class GraspAgent():
             self.normals = suction_direction.squeeze().permute(1, 2, 0)[mask]  # [N,3]
 
         self.gripper_poses_7 = gripper_pose.squeeze().permute(1, 2, 0)[mask]
+        self.gripper_poses_7[:,5:]=torch.clip(self.gripper_poses_7[:,5:],0,1)
 
         '''target mask'''
         if activate_segmentation_queries and self.seg_mask.shape == background_class.shape:
@@ -498,6 +531,8 @@ class GraspAgent():
         q_value= self.shift_policy_critic(rgb_torch, self.depth.clone(), self.target_object_mask.float())
         griper_grasp_score, suction_grasp_score, handover_scores = \
             self.grasp_handover_policy_net(rgb_torch, self.depth.clone(), gripper_pose, suction_direction)
+
+
 
         '''alter policy dim'''
         q_value=q_value.repeat(1,4,1,1)
@@ -680,6 +715,7 @@ class GraspAgent():
         suction_grasp_score=torch.clamp(suction_grasp_score,0.,1.)
         handover_scores=torch.clamp(handover_scores,0.,1.)
 
+
         '''add exponent term'''
         if quality_exponent!=1.:
             griper_grasp_score=griper_grasp_score ** quality_exponent
@@ -714,17 +750,6 @@ class GraspAgent():
             background_class=self.background_manual_correction(background_class)
             # view_image(self.target_object_mask[0,0].cpu().numpy().astype(np.float64))
 
-            # view_mask(self.voxel_pc, background_class < 0.5)
-            # pc_2d=np.copy(self.voxel_pc)
-            # pc_2d[:,-1]=0.
-            # mask_b=background_class.cpu().numpy() < 0.5
-            # print(pc_2d[mask_b].shape)
-            # # view_mask(pc_2d, background_class < 0.5)
-            # colors = np.zeros_like(self.voxel_pc[mask_b])
-            # colors += [0.52, 0.8, 0.92]
-            # view_npy_open3d(self.voxel_pc[mask_b],color=colors, view_coordinate=False)
-            # view_npy_open3d(pc_2d[mask_b], view_coordinate=False)
-
         '''actions masks'''
         self.objects_mask=background_class<0.5
         # view_mask(self.voxel_pc, object_mask )
@@ -738,13 +763,17 @@ class GraspAgent():
         gripper_shift_reachablity_mask=gripper_shift_scope>gripper_reachablity_threshold
         suction_shift_reachablity_mask=suction_shift_scope>suction_reachablity_threshold
 
-        # view_mask(self.voxel_pc, self.objects_mask)
-        # view_mask(self.voxel_pc, gripper_quality_mask)
-        # view_mask(self.voxel_pc, seal_quality_mask)
+        '''Robust score processing'''
+        # dist=self.gripper_poses_7[:,5]
+        # mx=dist.max()
+        # mi=dist.min()
+        # dist=(dist-mi)/(mx-mi)
+        suction_grasp_score[~seal_quality_mask]=torch.clip(suction_grasp_score[~seal_quality_mask],max=0.01)
+        robust_suction_grasp_score = suction_grasp_score  * (1 - griper_grasp_score ** 2)
+        robust_griper_grasp_score=griper_grasp_score*(1-suction_grasp_score**2)#*dist
+        suction_grasp_score=robust_suction_grasp_score
+        griper_grasp_score=robust_griper_grasp_score
 
-        # self.handover_from_gripper_dense_processing(suction_grasp_score)
-        # self.handover_from_suction_dense_processing(griper_grasp_score)
-        # exit()
         if self.last_handover_action is not None :
             self.process_grasp_masks( gripper_grasp_reachablity_mask, gripper_quality_mask,
                                 suction_grasp_reachablity_mask
@@ -841,7 +870,7 @@ class GraspAgent():
         self.view_valid_actions_mask()
         if view_gripper_sampling:
             dense_grasps_visualization(self.voxel_pc, self.gripper_poses_7,
-                                       view_mask= self.gripper_grasp_mask,view_all=False,exclude_collision=True)
+                                       view_mask= self.gripper_grasp_mask  ,view_all=False,exclude_collision=True)
 
         # multi_mask_view(self.voxel_pc,[self.gripper_grasp_mask,self.suction_grasp_mask,self.gripper_shift_mask,self.suction_shift_mask])
         # view_mask(self.voxel_pc, self.gripper_grasp_mask, pivot=0.5)
@@ -897,6 +926,7 @@ class GraspAgent():
     def gripper_grasp_processing(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
         relative_pose_7 = self.gripper_poses_7[action_obj.point_index]
+        action_obj.parrelel_gripper_pose=relative_pose_7.clone()
         T_d, width, distance = pose_7_to_transformation(relative_pose_7, target_point)
 
         collision_intensity,low_quality_grasp = grasp_collision_detection(T_d, width, self.voxel_pc, visualize=False)
@@ -933,6 +963,15 @@ class GraspAgent():
         b = trimesh.transformations.vector_product(v0, -normal)
         T_d = trimesh.transformations.rotation_matrix(a, b)
         T_d[:3, 3] = target_point.T
+
+        ''''''
+        minus_normal = -normal
+
+        a = angle_between_vectors(v0, minus_normal)  # scalar
+        b = vector_product(v0, minus_normal)  # (3,)
+
+        T_d = rotation_matrix(a, b)  # (4,4)
+        T_d[:3, 3] = target_point
 
         action_obj.width=gripper_width_during_shift
         action_obj.transformation=T_d
@@ -1213,6 +1252,7 @@ class GraspAgent():
         if not first_action_obj.is_valid: return first_action_obj, second_action_obj
         deploy_action(first_action_obj)
         if second_action_obj.is_valid: deploy_action(second_action_obj)
+
 
     def run_robot(self,  first_action_obj:Action,second_action_obj:Action):
         pr.title('execute action')

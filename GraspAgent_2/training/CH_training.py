@@ -31,7 +31,7 @@ batch_size = 1
 freeze_G_backbone = False
 freeze_D_backbone = False
 
-max_G_norm=500
+max_G_norm=5
 max_D_norm=1
 
 hard_level_factor=0
@@ -164,7 +164,7 @@ class TrainGraspGAN:
         self.tou = 1
 
         self.quat_centers=OnlingClustering(key_name=CH_model_key+'_quat',number_of_centers=16,vector_size=4,decay_rate=0.01,is_quat=True,dist_threshold=0.77)
-        self.fingers_centers=OnlingClustering(key_name=CH_model_key+'_fingers',number_of_centers=9,vector_size=3,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
+        self.fingers_centers=OnlingClustering(key_name=CH_model_key+'_fingers',number_of_centers=8,vector_size=3,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
 
 
     def initialize(self, n_samples=None):
@@ -210,8 +210,8 @@ class TrainGraspGAN:
         gan = GANWrapper(CH_model_key, CH_G, CH_D)
         gan.ini_models(train=True)
 
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0)
-        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate,momentum=0.)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0.)
+        # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.,weight_decay_=0.)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
 
@@ -444,7 +444,7 @@ class TrainGraspGAN:
 
         for k in range(batch_size*2):
             '''grasp quality'''
-            gripper_target_index = balanced_sampling(torch.clip(grasp_quality_logits.detach(),0,1),
+            gripper_target_index = balanced_sampling(F.sigmoid(grasp_quality_logits.detach()),
                                                      mask=~floor_mask.detach(),
                                                      exponent=30.0,
                                                      balance_indicator=self.grasp_quality_statistics.label_balance_indicator)
@@ -489,6 +489,13 @@ class TrainGraspGAN:
         norm=torch.nn.utils.clip_grad_norm_(params, max_norm=max_G_norm)
         print(Fore.LIGHTGREEN_EX,f' G norm : {norm}',Fore.RESET)
 
+        params2 = list(self.gan.generator.back_bone2_.parameters()) + \
+                 list(self.gan.generator.grasp_quality.parameters())+ \
+                 list(self.gan.generator.grasp_collision.parameters())+ \
+                 list(self.gan.generator.grasp_collision2_.parameters())+ \
+                 list(self.gan.generator.grasp_collision3_.parameters())
+        norm = torch.nn.utils.clip_grad_norm_(params2, max_norm=float('inf'))
+        print(Fore.LIGHTGREEN_EX, f' G norm 2 : {norm}', Fore.RESET)
 
         self.gan.generator_optimizer.step()
 
@@ -650,9 +657,9 @@ class TrainGraspGAN:
             quat=superior_pose[0:4].clone()
 
             self.quat_centers.update(quat)
-            superior_pose[4:4 + 3]=torch.clip(superior_pose[4:4+3],0,1)
+            # superior_pose[4:4 + 3]=torch.clip(superior_pose[4:4+3],0,1)
             fingers=superior_pose[4:4+3].clone()
-            fingers=torch.clip(fingers,0,1)
+            # fingers=torch.clip(fingers,0,1)
             self.fingers_centers.update(fingers)
 
 
@@ -695,8 +702,8 @@ class TrainGraspGAN:
                 # print(torch.abs(gripper_pose[~floor_mask]).mean(dim=0))
                 # print(torch.abs(gripper_pose[floor_mask]).mean(dim=0))
                 # exit()
-                # grasp_quality=F.sigmoid(grasp_quality_logits)
-                grasp_quality=torch.clamp(grasp_quality_logits,0,1)
+                grasp_quality=F.sigmoid(grasp_quality_logits)
+                # grasp_quality=torch.clamp(grasp_quality_logits,0,1)
 
                 f =(1 - grasp_quality.detach()**1)
                 annealing_factor = self.tou*(f*self.grasp_quality_statistics.accuracy +(1-self.grasp_quality_statistics.accuracy))
@@ -725,7 +732,7 @@ class TrainGraspGAN:
                     self.ch_env.update_obj_info(0.1)
                     self.superior_A_model_moving_rate.update(0)
                     self.tou = 1 - self.superior_A_model_moving_rate.val
-                    self.ch_env.remove_all_objects()
+                    self.ch_env.remove_obj()
                     continue
                 else:
                     self.ch_env.update_obj_info(0.9)
