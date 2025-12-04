@@ -675,8 +675,12 @@ class MojocoMultiFingersEnv():
         self.d.mocap_pos[0] = pos
         self.d.mocap_quat[0] = quat
 
-        self.d.qpos = pos + quat + self.default_finger_joints+list(self.objects_poses)
+        self.d.qpos[0:7]=pos + quat
+
+        # self.d.qpos = pos + quat + self.default_finger_joints+list(self.objects_poses)
         k=3+4+len(self.default_finger_joints)
+        self.d.qpos[k:] = list(self.objects_poses)
+
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
@@ -685,7 +689,7 @@ class MojocoMultiFingersEnv():
 
             while viewer.is_running():
                 step_start = time.time()
-                self.d.qpos[k:]=list(self.objects_poses)
+                # self.d.qpos[k:]=list(self.objects_poses)
 
                 mujoco.mj_step(self.m, self.d)
 
@@ -702,6 +706,8 @@ class MojocoMultiFingersEnv():
         self.d.mocap_quat[0] = quat
 
         self.d.qpos = pos + quat + self.default_finger_joints +list(self.objects_poses)
+
+        self.d.ctrl *= 0
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1

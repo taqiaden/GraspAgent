@@ -20,13 +20,35 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
+        self.default_ctrl=self.decode_finger_ctrl(0.,0.,0.)
+
         self.last_hand_geom_id=44
 
         self.contact_pads_geom_ids=[[2,3,4],[16],[22,28,34,40]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
 
+        # self.intilize_finger_joints()
+
         # self.contact_pads_info()
 
-    def decode_finger_ctrl(self,j1, j2, j3):
+    def intilize_finger_joints(self):
+        self.initialize()
+
+        self.d.mocap_pos[0] = [0,0,0]
+        self.d.mocap_quat[0] = [1,0,0,0]
+        self.d.ctrl=self.default_ctrl
+
+        n_joints=len(self.default_finger_joints)
+        for i in range(10):
+            mujoco.mj_step(self.m, self.d)
+
+            f_joints=self.d.qpos[7:7+n_joints]
+            print(f_joints)
+
+        exit()
+
+
+
+    def  decode_finger_ctrl(self,j1, j2, j3):
         # j form 0 to 1 represent open to close
         j_th = 0.091 - j1 * 0.027
         j_fm = 0.091 - j2 * 0.037  # forefinger and midmiddle finger
@@ -200,9 +222,9 @@ if __name__ == "__main__":
 
     env=CasiaHandEnv(root=root_dir + "/speed_hand/",max_obj_per_scene=1)
 
-    env.view_geom_names_and_ids()
+    # env.view_geom_names_and_ids()
 
-    ctrl=env.decode_finger_ctrl(-0.4,-0.3,-0.3)
+    ctrl=env.decode_finger_ctrl(1.,1.,1.)
 
     quats=torch.tensor([[-0.5518, -0.3340, -0.0619,  0.7617],
         [ 0.0717, -0.9683,  0.1292,  0.2014],
@@ -220,9 +242,6 @@ if __name__ == "__main__":
         [-0.3917, -0.7099, -0.5677,  0.1428],
         [ 0.1041, -0.6481,  0.5042,  0.5611],
         [-0.4685, -0.5503,  0.3955,  0.5668]], device='cuda:0')
-
-
-
 
 
     # z=quaternion_pairwise_angular_distance(quats, eps=1e-7, degrees=True)
@@ -247,7 +266,7 @@ if __name__ == "__main__":
         # quat=combine_quaternions(quats[i], quats[i+1], 0.5, 0.5, eps=1e-8).cpu().tolist()
         # print(f'get {quat}')
         v2=quat_rotate_vector(quat, [1,0,0])
-        print(v2)
+        # print(v2)
         v2*=0.1
 
         v3=np.copy(v2)*2
@@ -260,8 +279,12 @@ if __name__ == "__main__":
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
         # print('delta= ', delta)
         # env.check_collision( [0,0,0], quat, hand_fingers=None, view=True)
-        env.manual_view(pos=[0,0,0], quat=quat)
-        # env.manual_view(pos=(v3).tolist(), quat=quat)
+        # env.passive_viewer(pos=[0,0,0], quat=quat,ctrl=ctrl)
+        env.manual_view(pos=(v3).tolist(), quat=quat)
+
+
+        print(env.d.qpos[7:])
+        print(env.d.ctrl)
         print(env.obj_xy_positions)
         # env.get_scene_preception(view=True)
 

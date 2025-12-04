@@ -308,7 +308,7 @@ class TrainPolicyNet:
             if masks[j] is None: continue
             objects_mask = objects_masks[j]
             random_mask=torch.randn_like(objects_mask.float())>0
-            objects_mask=objects_mask&objects_mask
+            objects_mask=objects_mask&random_mask
             target_gripper_predictions = griper_grasp_quality_score[j, 0][masks[j]]
             target_suction_predictions = suction_grasp_quality_score[j, 0][masks[j]]
 

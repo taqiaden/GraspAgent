@@ -25,14 +25,14 @@ from lib.rl.masked_categorical import MaskedCategorical
 from records.training_satatistics import TrainingTracker, MovingRate
 import torch
 
-iter_per_scene = 1
+iter_per_scene = 5
 
 batch_size = 1
 freeze_G_backbone = False
 freeze_D_backbone = False
 
-max_G_norm=5
-max_D_norm=1
+max_G_norm=500
+max_D_norm=100
 
 hard_level_factor=0
 
@@ -210,7 +210,7 @@ class TrainGraspGAN:
         gan = GANWrapper(CH_model_key, CH_G, CH_D)
         gan.ini_models(train=True)
 
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0.)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0., beta2=0.999,weight_decay_=0.)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.,weight_decay_=0.)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
@@ -484,8 +484,8 @@ class TrainGraspGAN:
         loss.backward()
 
         '''GRADIENT CLIPPING'''
-        params=list(self.gan.generator.back_bone.parameters()) + \
-         list(self.gan.generator.CH_PoseSampler.parameters())
+        params=list(self.gan.generator.back_bone_.parameters()) + \
+         list(self.gan.generator.CH_PoseSampler_.parameters())
         norm=torch.nn.utils.clip_grad_norm_(params, max_norm=max_G_norm)
         print(Fore.LIGHTGREEN_EX,f' G norm : {norm}',Fore.RESET)
 
@@ -706,8 +706,16 @@ class TrainGraspGAN:
                 # grasp_quality=torch.clamp(grasp_quality_logits,0,1)
 
                 f =(1 - grasp_quality.detach()**1)
-                annealing_factor = self.tou*(f*self.grasp_quality_statistics.accuracy +(1-self.grasp_quality_statistics.accuracy))
+                annealing_factor = self.tou+(1-self.tou)*f
                 print(f'mean_annealing_factor= {annealing_factor.mean()}, tou={self.tou}')
+
+                # if self.tou<0.55:
+                #     global batch_size
+                #     batch_size=2
+                #     global max_G_norm
+                #     global max_D_norm
+                #     max_G_norm = 5
+                #     max_D_norm = 1
 
                 gripper_pose_ref = ch_pose_interpolation(gripper_pose, self.sampling_centroid,
                                                          annealing_factor=annealing_factor,quat_centers=self.quat_centers.centers,finger_centers=self.fingers_centers.centers)  # [b,self.n_param,600,600]
@@ -733,7 +741,7 @@ class TrainGraspGAN:
                     self.superior_A_model_moving_rate.update(0)
                     self.tou = 1 - self.superior_A_model_moving_rate.val
                     self.ch_env.remove_obj()
-                    continue
+                    break
                 else:
                     self.ch_env.update_obj_info(0.9)
 

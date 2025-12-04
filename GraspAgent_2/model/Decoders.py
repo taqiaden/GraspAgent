@@ -37,9 +37,9 @@ class ContextGate_1d(nn.Module):
         med_c=max(in_c1,in_c2)
 
         self.key_ = nn.Sequential(
-            nn.Linear(in_c1, in_c1),
-            nn.LayerNorm(in_c1),
-            activation_function,
+            # nn.Linear(in_c1, in_c1),
+            # nn.LayerNorm(in_c1),
+            # activation_function,
             nn.Linear(in_c1, med_c),
         ).to('cuda')
 
@@ -99,7 +99,7 @@ class ContextGate_1d(nn.Module):
         ).to('cuda')
 
     def forward(self, context, condition):
-        context=self.gate(context)*context
+        # context=self.gate(context)*context
 
 
         key = self.key_(context)
@@ -158,9 +158,9 @@ class ContextGate_2d(nn.Module):
         mid_c=max(in_c1,in_c2)
 
         self.key = nn.Sequential(
-            nn.Conv2d(in_c1, in_c1, kernel_size=1),
-            LayerNorm2D(in_c1),
-            activation_function,
+            # nn.Conv2d(in_c1, in_c1, kernel_size=1),
+            # LayerNorm2D(in_c1),
+            # activation_function,
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
@@ -173,12 +173,15 @@ class ContextGate_2d(nn.Module):
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
-        self.bias = nn.Sequential(
-            nn.Conv2d(in_c1+in_c2, mid_c //2, kernel_size=1),
-            LayerNorm2D(mid_c //2),
-            activation_function,
-            nn.Conv2d(mid_c //2, mid_c , kernel_size=1),
-        ).to('cuda') if not use_sin or bias else None
+        # self.bias = nn.Sequential(
+        #     nn.Conv2d(in_c1+in_c2, mid_c //2, kernel_size=1),
+        #     LayerNorm2D(mid_c //2),
+        #     activation_function,
+        #     nn.Conv2d(mid_c //2, 32 , kernel_size=1),
+        #     LayerNorm2D(32),
+        #     activation_function,
+        #     nn.Conv2d(32, out_c, kernel_size=1),
+        # ).to('cuda') #if not use_sin or bias else None
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
@@ -226,7 +229,7 @@ class ContextGate_2d(nn.Module):
         value = self.value(context)
         query = self.query(condition)
         key = self.key(context)
-        bias=0. if self.bias is None else self.bias(torch.cat([context,condition],dim=1))
+        # bias=0. if self.bias is None else self.bias(torch.cat([context,condition],dim=1))
         query = F.normalize(query, p=2, dim=1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
 
@@ -238,16 +241,16 @@ class ContextGate_2d(nn.Module):
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # if self.use_sin: att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        att_map = F.sigmoid(att_map)
+        # att_map = F.sigmoid(att_map)
         att_map = F.softmax(att_map,dim=1)
 
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95: print(Fore.RED,f'Warning 2, saturated softmax : {s}',Fore.RESET)
 
 
-        x = (att_map * value)+bias
+        x = (att_map * value)#+bias
         if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
-        x = self.d(x)
+        x = self.d(x)#+bias
         # x = self.d2(x)
         return x
 

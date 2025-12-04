@@ -57,10 +57,10 @@ class ParallelGripperPoseSampler(nn.Module):
                                       relu_negative_slope=0.2, activation=None, use_sin=True,normalize=False).to(
             'cuda')
         self.transition_=ContextGate_2d(in_c1=64, in_c2=1+10, out_c=1,
-                                          relu_negative_slope=0.2, activation=None,use_sin=True,normalize=False).to(
+                                          relu_negative_slope=0.2, activation=None,use_sin=False,normalize=False).to(
             'cuda')
         self.fingers=ContextGate_2d(in_c1=64, in_c2=1+10+1, out_c=3,
-                                          relu_negative_slope=0.2, activation=None,use_sin=True,normalize=False).to(
+                                          relu_negative_slope=0.2, activation=None,use_sin=False,normalize=False).to(
             'cuda')
 
         self.depth_encoding=ScalerEncoding_2d(in_c=1)
@@ -110,11 +110,11 @@ class ParallelGripperPoseSampler(nn.Module):
         # quat_embedding=self.normalize_quat_embedding(quat_embedding)
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
-        transition=self.transition_(features,torch.cat([encoded_quat,depth], dim=1))
+        transition=self.transition_(features,torch.cat([encoded_quat,depth], dim=1).detach())
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
-        fingers= self.fingers(features, torch.cat([encoded_quat,transition,depth], dim=1))
+        fingers= self.fingers(features, torch.cat([encoded_quat,transition,depth], dim=1).detach())
 
 
         # fingers=F.sigmoid(fingers)
@@ -134,12 +134,12 @@ def depth_standardization(depth,mask):
 class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        self.back_bone_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0.2,activation=None,IN_affine=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.2)
-        self.back_bone.apply(init_weights_he_normal)
-        replace_instance_with_groupnorm(self.back_bone, max_groups=16)
+        self.back_bone_.apply(init_weights_he_normal)
+        replace_instance_with_groupnorm(self.back_bone_, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
 
@@ -152,8 +152,8 @@ class CH_G(nn.Module):
         # replace_instance_with_groupnorm(self.back_bone2, max_groups=32)
         # orthogonal_init_all(self.back_bone_2,gain=gain)
 
-        self.CH_PoseSampler = ParallelGripperPoseSampler()
-        gan_init_with_norms(self.CH_PoseSampler)
+        self.CH_PoseSampler_ = ParallelGripperPoseSampler()
+        gan_init_with_norms(self.CH_PoseSampler_)
         # self.CH_PoseSampler.apply(init_weights_he_normal)
 
 
@@ -242,10 +242,10 @@ class CH_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(input)#*scale
+                features = self.back_bone_(input)#*scale
                 # features2 = self.back_bone2_(input)#*scale
         else:
-            features = self.back_bone(input)#*scale
+            features = self.back_bone_(input)#*scale
             # features2 = self.back_bone2_(input)#*scale
 
         # features2=torch.cat([features2,scaled_depth_,depth_],dim=1)
@@ -256,7 +256,7 @@ class CH_G(nn.Module):
 
         depth_data=standarized_depth_
 
-        gripper_pose=self.CH_PoseSampler(features,depth_data)
+        gripper_pose=self.CH_PoseSampler_(features,depth_data)
 
         detached_gripper_pose=gripper_pose.detach().clone()
         quat = detached_gripper_pose[:, :4]
