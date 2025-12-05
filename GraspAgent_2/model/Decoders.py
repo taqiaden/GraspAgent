@@ -67,6 +67,7 @@ class ContextGate_1d(nn.Module):
 
         self.query = nn.Sequential(
             nn.Linear(in_c2, med_c),
+
         ).to('cuda')
 
         # self.bias = nn.Sequential(
@@ -120,18 +121,19 @@ class ContextGate_1d(nn.Module):
 
         # att_map = F.normalize(att_map, p=2, dim=2, eps=1e-8)
 
-        att_map=F.softmax(att_map*self.scale,dim=2)
-        # att_map=F.sigmoid(att_map)
+        # att_map=F.softmax(att_map*self.scale,dim=2)
+        att_map=F.sigmoid(att_map)
 
 
-        s=att_map.max(dim=2)[0].mean().item()
-        if s>0.95:
-            print(key.max(dim=2)[1])
-            print(query.max(dim=2)[1])
+        # s=att_map.max(dim=2)[0].mean().item()
+        # if s>0.95:
+        #     print(key.max(dim=2)[1])
+        #     print(query.max(dim=2)[1])
+        #
+        #     print(Fore.RED,f'Warning 1, saturated softmax : {s}, indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
+        # else:
+        #     print(Fore.LIGHTGREEN_EX,f'max of softmax : {s}, at indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
 
-            print(Fore.RED,f'Warning 1, saturated softmax : {s}, indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
-        else:
-            print(Fore.GREEN,s,Fore.RESET)
         # att_map = F.sigmoid(att_map)
         # print('test------------att_map-------',att_map[0])
         # print('test------------v-------',value[0])
@@ -204,7 +206,7 @@ class ContextGate_2d(nn.Module):
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
             ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(48, 32, kernel_size=1),
-            ParameterizedSine() if use_sin else activation_function,
+            activation_function,
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda')
 
@@ -241,11 +243,13 @@ class ContextGate_2d(nn.Module):
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # if self.use_sin: att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        # att_map = F.sigmoid(att_map)
-        att_map = F.softmax(att_map,dim=1)
+        att_map = F.sigmoid(att_map)
+        # att_map = F.softmax(att_map,dim=1)
 
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95: print(Fore.RED,f'Warning 2, saturated softmax : {s}',Fore.RESET)
+        # else:
+        #     print(Fore.LIGHTGREEN_EX, f'Max of softmax : {s}', Fore.RESET)
 
 
         x = (att_map * value)#+bias

@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from GraspAgent_2.model.CH_model import CH_model_key, CH_D, CH_G
+from GraspAgent_2.model.CH_model2 import CH_model_key, CH_D, CH_G
 from GraspAgent_2.sim_hand_s.Casia_hand_env import CasiaHandEnv
 from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
 from GraspAgent_2.utils.Online_clustering import OnlingClustering

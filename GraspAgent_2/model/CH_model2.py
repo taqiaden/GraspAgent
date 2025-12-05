@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 
 
-CH_model_key = 'CH_model'
+CH_model_key = 'CH_model2'
 
 class siren(nn.Module):
     def __init__(self, w0=1.0):
@@ -347,7 +347,7 @@ class ScalerEncoding_2d(nn.Module):
 class CH_D(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=True,
+        self.back_bone = res_unet(in_c=2+7, Batch_norm=None, Instance_norm=True,
                                   relu_negative_slope=0.2, activation=nn.Mish(), IN_affine=False).to('cuda')
         # self.back_bone.SN_on_encoder()
         replace_instance_with_groupnorm(self.back_bone, max_groups=16)
@@ -422,26 +422,26 @@ class CH_D(nn.Module):
         standarized_depth_=standarized_depth_.repeat(2,1,1,1)
         target_mask=target_mask.repeat(2,1,1,1)
 
-        # attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
-        # pose2=pose.clone()
-        # encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
-        # pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
-        # s=self.query(pose2)#.flatten(1,2)
-        # s = F.normalize(s, p=2, dim=-1, eps=1e-8)
-        # # s=F.softmax(s,dim=-1)
-        #
-        # attention_mask=attention_mask.repeat(1,7,1,1)
-        #
-        # i=0
-        # for pair in pairs:
-        #     index = pair[0]
-        #     h = index // 600
-        #     w = index % 600
-        #     # attention_mask[0, 0, h, w] = True
-        #     attention_mask[0, :, h, w] = s[i,0]
-        #     attention_mask[1, :, h, w] = s[i,1]
-        #
-        #     i+=1
+        attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
+        pose2=pose.clone()
+        encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
+        pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
+        s=self.query(pose2)#.flatten(1,2)
+        s = F.normalize(s, p=2, dim=-1, eps=1e-8)
+        # s=F.softmax(s,dim=-1)
+
+        attention_mask=attention_mask.repeat(1,7,1,1)
+
+        i=0
+        for pair in pairs:
+            index = pair[0]
+            h = index // 600
+            w = index % 600
+            # attention_mask[0, 0, h, w] = True
+            attention_mask[0, :, h, w] = s[i,0]
+            attention_mask[1, :, h, w] = s[i,1]
+
+            i+=1
 
 
         # depth_= depth_standardization(depth[0,0],target_mask[0,0])
@@ -457,7 +457,7 @@ class CH_D(nn.Module):
         #
         # encoded_depth = torch.cat([depth_, Gx, Gy, local_diff3, local_diff5, local_diff7], dim=1)
 
-        input = torch.cat([standarized_depth_, target_mask], dim=1)
+        input = torch.cat([standarized_depth_, target_mask,attention_mask], dim=1)
 
         depth_data=standarized_depth_
 

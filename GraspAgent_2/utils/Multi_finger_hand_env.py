@@ -152,12 +152,11 @@ class MojocoMultiFingersEnv():
         while True:
             if selected_index is None:
                 for j in range(1000):
-                    new_obj_id=self.sample_random_obj()
+                    new_obj_id,prob=self.sample_random_obj()
                     if new_obj_id not in self.objects: break
                 else: assert False
+                print('Newly added object ID: ', new_obj_id, ' prob: ',prob)
             else: new_obj_id=selected_index
-
-            print('Newly added object ID: ',new_obj_id)
 
             self.objects.append(new_obj_id)
 
@@ -302,13 +301,16 @@ class MojocoMultiFingersEnv():
 
     def sample_random_obj(self):
         idxs = sample(range(self.object_nums_all), 1)[0]
-        if len(self.obj_dict) == 0: return idxs
-        if str(idxs) not in self.obj_dict: return idxs
+        if len(self.obj_dict) == 0: return idxs,None
+        if str(idxs) not in self.obj_dict: return idxs,None
         # print(self.obj_dict,'----',idxs)
 
         keys = list(self.obj_dict.keys())
         weights = list(self.obj_dict.values())
         idxs = random.choices(keys, weights=weights, k=1)[0]
+
+        prob=self.obj_dict[idxs]
+
 
         # while True:
         #     if idxs not in self.obj_dict: break
@@ -316,7 +318,7 @@ class MojocoMultiFingersEnv():
         #     if p>np.random.random(): break
         #     idxs = sample(range(self.object_nums_all), self.obj_nums_in_scene)
 
-        return idxs
+        return idxs,prob
 
     def prepare_obj_mesh(self,idxs=None):
         tree = ET.parse(self.root+'/scene.xml')

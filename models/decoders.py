@@ -888,6 +888,8 @@ class att_conv_normalized_free2(nn.Module):
         # att_map=F.sigmoid(att_map)
         att_map = F.softmax(att_map*self.scale,dim=1)
 
+        # print(Fore.LIGHTGREEN_EX, f'max of softmax at indexes: {att_map.max(dim=1)}', Fore.RESET)
+
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95:
         #     print(Fore.RED,f'Warning 1, saturated softmax : {s} ',Fore.RESET)
