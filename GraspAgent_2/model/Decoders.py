@@ -35,30 +35,26 @@ class ContextGate_1d(nn.Module):
             activation_function = activation
 
         med_c=max(in_c1,in_c2)
+        med_c+=med_c%2
 
-        self.key_ = nn.Sequential(
-            # nn.Linear(in_c1, in_c1),
-            # nn.LayerNorm(in_c1),
-            # activation_function,
+
+        self.key = nn.Sequential(
             nn.Linear(in_c1, med_c),
+            activation_function,
+            nn.Linear(med_c, med_c),
+
+            # nn.Dropout1d(0.5)
         ).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
 
-        self.value = nn.Sequential(
-            # nn.Linear(in_c1, in_c1),
-            # nn.LayerNorm(in_c1),
-            # activation_function,
-            nn.Linear(in_c1, med_c),
+        self.gamma = nn.Sequential(
+            nn.Linear(med_c, med_c),
+        ).to('cuda')
+        self.beta = nn.Sequential(
+            nn.Linear(med_c, med_c),
         ).to('cuda')
 
-        self.gate = nn.Sequential(
-            # nn.Linear(in_c1, in_c1),
-            # nn.LayerNorm(in_c1),
-            # activation_function,
-            nn.Linear(in_c1, in_c1),
-            nn.Sigmoid(),
-        ).to('cuda')
 
         # self.gate = nn.Sequential(
         #     nn.Linear(in_c1, in_c1),
@@ -67,23 +63,14 @@ class ContextGate_1d(nn.Module):
 
         self.query = nn.Sequential(
             nn.Linear(in_c2, med_c),
-
+            activation_function,
+            # nn.Linear(med_c, med_c),
+            # activation_function,
         ).to('cuda')
 
-        # self.bias = nn.Sequential(
-        #     nn.Linear(in_c2, med_c),
-        #     nn.LayerNorm(in_c1),
-        #     activation_function,
-        #     nn.Linear(med_c, med_c),
-        # ).to('cuda')
-
-
-        # self.gate = nn.Sequential(
-        #     nn.Linear(in_c2+in_c1, in_c1),
-        #     nn.Sigmoid()
-        # ).to('cuda')
 
         self.d = nn.Sequential(
+            activation_function,
             nn.Linear(med_c, 48),
             nn.LayerNorm(48),
             activation_function,
@@ -92,6 +79,7 @@ class ContextGate_1d(nn.Module):
             activation_function,
             nn.Linear(32, out_c),
         ).to('cuda') if normalize else nn.Sequential(
+            activation_function,
             nn.Linear(med_c, 48),
             ParameterizedSine() if use_sin else activation_function,
             nn.Linear(48, 32),
@@ -99,57 +87,43 @@ class ContextGate_1d(nn.Module):
             nn.Linear(32, out_c),
         ).to('cuda')
 
+
     def forward(self, context, condition):
         # context=self.gate(context)*context
 
 
-        key = self.key_(context)
-        value = self.value(context)
-        query = self.query(condition)
-        # bias = self.query(condition)
+        key = self.key(context)
+        condition = self.query(condition)
+        # query = F.normalize(query, p=2, dim=-1, eps=1e-8)
+        condition = F.softmax(condition.unflatten(-1, (2, -1)) * self.scale, dim=1).flatten(-2, -1)
 
-        query = F.normalize(query, p=2, dim=-1, eps=1e-8)
-        # key = F.normalize(key, p=2, dim=2, eps=1e-8)
+        gamma = self.gamma(condition)
+        beta = self.beta(condition)
 
-        # print('test------------q-------',query[0])
+        x = gamma * key+beta
+        # att_map = F.normalize(att_map, p=2, dim=-1, eps=1e-8)
 
-        # key=key-key.mean(dim=-1,keepdim=True)
-        # query=query-query.mean(dim=-1,keepdim=True)
+        # scores=torch.softmax(att_map*self.scale/10, dim=-1)
+        # scores=torch.sigmoid(att_map)
 
-        att_map = query * key
-
-
-        # att_map = F.normalize(att_map, p=2, dim=2, eps=1e-8)
-
-        # att_map=F.softmax(att_map*self.scale,dim=2)
-        att_map=F.sigmoid(att_map)
-
-
-        # s=att_map.max(dim=2)[0].mean().item()
+        # s=scores.max(dim=-1)[0].mean().item()
         # if s>0.95:
-        #     print(key.max(dim=2)[1])
-        #     print(query.max(dim=2)[1])
+        #     print(Fore.RED,f'Warning 2, saturated softmax : {s}',Fore.RESET)
+        #     print(query.max(dim=-1)[1])
+        #     print(key.max(dim=-1)[1])
         #
-        #     print(Fore.RED,f'Warning 1, saturated softmax : {s}, indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
         # else:
-        #     print(Fore.LIGHTGREEN_EX,f'max of softmax : {s}, at indexes: {att_map.max(dim=2)[1]}',Fore.RESET)
+        #     print(Fore.LIGHTGREEN_EX, f'Max of softmax : {s}', Fore.RESET)
 
-        # att_map = F.sigmoid(att_map)
-        # print('test------------att_map-------',att_map[0])
-        # print('test------------v-------',value[0])
-
-        x = (att_map * value)#+bias
-        # print('test-------------------',x[0])
+        # x = (scores * value)
 
         output = self.d(x)
-        # print('test-------------------',output[0])
-
 
         return output
 
 class ContextGate_2d(nn.Module):
     def __init__(self, in_c1, in_c2, out_c,in_c3=0, relu_negative_slope=0.,
-                 activation=None,use_sin=False,normalize=False,bias=False):
+                 activation=None,use_sin=False,normalize=False):
         super().__init__()
         if activation is None:
             activation_function = nn.LeakyReLU(
@@ -158,35 +132,38 @@ class ContextGate_2d(nn.Module):
             activation_function = activation
 
         mid_c=max(in_c1,in_c2)
+        mid_c+=mid_c%2
 
         self.key = nn.Sequential(
             # nn.Conv2d(in_c1, in_c1, kernel_size=1),
             # LayerNorm2D(in_c1),
             # activation_function,
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+
         ).to('cuda')
 
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.value = nn.Sequential(
-            # nn.Conv2d(in_c1, in_c1, kernel_size=1),
-            # LayerNorm2D(in_c1),
-            # activation_function,
-            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        self.gamma = nn.Sequential(
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda')
+        self.beta = nn.Sequential(
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
         # self.bias = nn.Sequential(
-        #     nn.Conv2d(in_c1+in_c2, mid_c //2, kernel_size=1),
-        #     LayerNorm2D(mid_c //2),
-        #     activation_function,
-        #     nn.Conv2d(mid_c //2, 32 , kernel_size=1),
-        #     LayerNorm2D(32),
-        #     activation_function,
-        #     nn.Conv2d(32, out_c, kernel_size=1),
-        # ).to('cuda') #if not use_sin or bias else None
+        #     nn.Conv2d(in_c1, mid_c , kernel_size=1),
+        #     # LayerNorm2D(mid_c //2),
+        #     # activation_function,
+        #     # nn.Conv2d(mid_c //2, mid_c , kernel_size=1),
+        # ).to('cuda') if not use_sin else None
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            activation_function,
+
             # LayerNorm2D(mid_c),
             # activation_function,
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
@@ -195,18 +172,20 @@ class ContextGate_2d(nn.Module):
 
 
         self.d = nn.Sequential(
+            activation_function,
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
             LayerNorm2D(48),
             activation_function,
             nn.Conv2d(48, 32, kernel_size=1),
             LayerNorm2D(32),
-            activation_function,
+            ParameterizedSine(),
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda') if normalize else nn.Sequential(
+            activation_function,
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
             ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(48, 32, kernel_size=1),
-            activation_function,
+            ParameterizedSine() if use_sin else activation_function,
             nn.Conv2d(32, out_c, kernel_size=1)
         ).to('cuda')
 
@@ -226,33 +205,35 @@ class ContextGate_2d(nn.Module):
 
 
     def forward(self, context, condition,additional_features=None):
-        # context = self.gate(torch.cat([context, condition], dim=1)) * context
 
-        value = self.value(context)
-        query = self.query(condition)
+        condition = self.query(condition)
         key = self.key(context)
-        # bias=0. if self.bias is None else self.bias(torch.cat([context,condition],dim=1))
-        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # bias=0. if self.bias is None else self.bias(context)
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
+        condition = F.softmax(condition.unflatten(1, (2, -1)) * self.scale, dim=1).flatten(1, 2)
+
+        gamma = self.gamma(condition)
+        beta = self.beta(condition)
 
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
         # if self.use_sin: key = F.normalize(key, p=2, dim=1, eps=1e-8)
 
-        att_map = query * key
+        x = gamma * key+beta
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
         # if self.use_sin: att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        att_map = F.sigmoid(att_map)
-        # att_map = F.softmax(att_map,dim=1)
+        # att_map = F.sigmoid(att_map)
+        # att_map = torch.softmax(att_map,dim=1)#+0.1*att_map
 
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95: print(Fore.RED,f'Warning 2, saturated softmax : {s}',Fore.RESET)
         # else:
         #     print(Fore.LIGHTGREEN_EX, f'Max of softmax : {s}', Fore.RESET)
 
-
-        x = (att_map * value)#+bias
+        # x=x+bias
+        # x = (att_map * value)+bias
         if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
         x = self.d(x)#+bias
         # x = self.d2(x)
@@ -280,8 +261,8 @@ class res_ContextGate_2d(nn.Module):
         else:
             activation_function = activation
 
-        mid_c=max(in_c1,in_c2)
-
+        mid_c=max(in_c2,in_c1)
+        mid_c+=mid_c%2
         # self.l1=nn.Sequential(
         #     nn.Conv2d(in_c1, in_c1, kernel_size=1),
         #     LayerNorm2D(in_c1),
@@ -291,11 +272,25 @@ class res_ContextGate_2d(nn.Module):
         self.key = nn.Sequential(
 
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+
         ).to('cuda')
 
-        self.value = nn.Sequential(
+        # self.mid = nn.Sequential(
+        #
+        #     nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        #
+        # ).to('cuda')
 
-            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        self.gamma = nn.Sequential(
+
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda')
+
+        self.beta = nn.Sequential(
+
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
         #
         # self.gate = nn.Sequential(
@@ -309,32 +304,33 @@ class res_ContextGate_2d(nn.Module):
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, mid_c//2, kernel_size=1),
-            # LayerNorm2D(mid_c//2 ),
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
             activation_function,
-            nn.Conv2d(mid_c//2, mid_c, kernel_size=1),
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            # activation_function,
+            # LayerNorm2D(mid_c//2 ),
+            # activation_function,
+            # nn.Conv2d(mid_c//2, mid_c, kernel_size=1),
         ).to('cuda')
 
-        self.res = nn.Sequential(
-            nn.Conv2d(in_c1+in_c2, mid_c//2, kernel_size=1),
-            LayerNorm2D(mid_c//2),
-            activation_function
-        ).to('cuda')
+        # self.res = nn.Sequential(
+        #     nn.Conv2d(in_c1+in_c2, mid_c//2, kernel_size=1),
+        #     LayerNorm2D(mid_c//2),
+        #     activation_function
+        # ).to('cuda')
 
-        self.att = nn.Sequential(
-            nn.Conv2d(mid_c, mid_c//2, kernel_size=1),
-            LayerNorm2D(mid_c//2),
-            activation_function
-        ).to('cuda')
+        # self.att = nn.Sequential(
+        #     nn.Conv2d(mid_c, mid_c//2, kernel_size=1),
+        #     LayerNorm2D(mid_c//2),
+        #     activation_function
+        # ).to('cuda')
         c=int(2*(mid_c//2))
 
 
 
         self.d = nn.Sequential(
-            nn.Conv2d(c + in_c3, mid_c // 2, kernel_size=1),
-            LayerNorm2D(mid_c // 2),
             activation_function,
-            nn.Conv2d(mid_c // 2, mid_c // 2, kernel_size=1),
+            nn.Conv2d(mid_c + in_c3, mid_c // 2, kernel_size=1),
             LayerNorm2D(mid_c // 2),
             activation_function,
             nn.Conv2d(mid_c // 2, 32, kernel_size=1),
@@ -344,31 +340,39 @@ class res_ContextGate_2d(nn.Module):
         ).to('cuda')
         self.use_sin=use_sin
 
+        self.s = 1 / (mid_c ** 0.5)
+
 
     def forward(self, context, condition,additional_features=None):
         # context=self.l1(context)
 
-        value = self.value(context)
-        query = self.query(condition)
+        # gamma = self.gamma(context)
+        condition = self.query(condition)
         key = self.key(context)
-        res=self.res(torch.cat([context,condition],dim=1))
-        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # res=self.res(torch.cat([context,condition],dim=1))
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        condition = F.softmax(condition.unflatten(1, (2, -1)) * self.scale, dim=1).flatten(1, 2)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
+        gamma = self.gamma(condition)
+        beta = self.beta(condition)
 
-        att_map = query * key
+        x = gamma * key+beta
+        # att_map=self.mid(att_map)
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-        att_map = F.sigmoid(att_map)
-        # att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.sigmoid(att_map)
+        # print(att_map[0,:,0,0])
+        # exit()
+        # att_map = torch.softmax(att_map,dim=1)
 
         # s=att_map.max(dim=1)[0].mean().item()
         # if s>0.95: print(Fore.RED,f'Warining 3, saturated softmax : {s}',Fore.RESET)
 
-        x = (att_map * value)
-        x=self.att(x)
+        # x = (att_map * value)
+        # x=self.att(x)
 
-        x=torch.cat([x,res],dim=1)
+        # x=torch.cat([x,res],dim=1)
 
         if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
 
@@ -630,17 +634,25 @@ class film_fusion_1d(nn.Module):
             activation_function = activation
         if mid_c is None:mid_c=max(in_c1,in_c2)
         self.value = nn.Sequential(
-            nn.Linear(in_c1, in_c1),
-            nn.LayerNorm(in_c1),
-            activation_function,
+            # nn.Linear(in_c1, in_c1),
+            # nn.LayerNorm(in_c1),
+            # activation_function,
             nn.Linear(in_c1, mid_c),
         ).to('cuda')
 
-
+        # self.condition_proj_ = nn.Sequential(
+        #     nn.Linear(in_c2, mid_c ),
+        # ).to('cuda')
 
         self.film_gen_ = nn.Sequential(
+            # nn.Linear(in_c2, mid_c ),
+            # nn.LayerNorm(mid_c),
+            # activation_function,
             nn.Linear(in_c2, mid_c*2),
         ).to('cuda') if bias else nn.Sequential(
+            # nn.Linear(in_c2, mid_c),
+            # nn.LayerNorm(mid_c),
+            # activation_function,
             nn.Linear(in_c2, mid_c),
         ).to('cuda')
 
@@ -677,6 +689,8 @@ class film_fusion_1d(nn.Module):
 
     def forward(self, context, condition):
         context = self.value(context)
+        # condition=self.condition_proj_(condition)
+        # condition=F.normalize(condition,p=2,dim=-1,eps=1e-8)
 
         if self.gate is not None:
             gate = self.gate(context)

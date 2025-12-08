@@ -108,6 +108,8 @@ class MojocoMultiFingersEnv():
 
         self.contact_pads_geom_ids =None
 
+        self.last_hand_geom_id = self.m.ngeom - 1
+
 
 
 
@@ -443,16 +445,20 @@ class MojocoMultiFingersEnv():
 
         return contact_with_obj,contact_with_floor
 
-    def check_valid_grasp(self,margin=0,minimum_contact_points=2,report=False):
+    def check_valid_grasp(self,margin=0,minimum_contact_points=2):
         is_hand_geom= lambda x: x>=1 and x<=self.last_hand_geom_id
         contact_with_floor=False
+        self_collide=False
         n_contact=0
         # contacts = [] # store (pos, force)
         geom_groups=[0]*len(self.contact_pads_geom_ids)
         contains_id = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids)
         for i in range(self.d.ncon):
             c = self.d.contact[i]
-            if c.dist < margin and (is_hand_geom(c.geom1) + is_hand_geom(c.geom2) ==1) :
+            first_is_hand_point=is_hand_geom(c.geom1)
+            second_is_hand_point=is_hand_geom(c.geom2)
+
+            if c.dist < margin and (first_is_hand_point + second_is_hand_point ==1) :
 
                 if c.geom1==0 or c.geom2==0:
                     contact_with_floor=True
@@ -476,11 +482,14 @@ class MojocoMultiFingersEnv():
                         group_id=find_group(pad_geom_id,self.contact_pads_geom_ids)
                         geom_groups[group_id]+=1
                         n_contact+=1
+            elif c.dist < margin and first_is_hand_point and second_is_hand_point :
+                self_collide=True
+
 
         contacted_groups = sum(x > 0 for x in geom_groups)
         # if n_contact>0:
         #     print(Fore.LIGHTCYAN_EX,geom_groups,'--',contacted_groups,'---',n_contact,Fore.RESET)
-        return contacted_groups>=minimum_contact_points and not contact_with_floor
+        return contacted_groups>=minimum_contact_points and not contact_with_floor, contacted_groups,self_collide
 
 
 

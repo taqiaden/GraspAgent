@@ -197,16 +197,14 @@ class GripperGraspSampler3(nn.Module):
             'cuda')
 
 
-        self.width = att_conv_normalized2(in_c1=64, in_c2=3 + 2+1, out_c=1,
+        self.width = att_conv_normalized2(in_c1=64, in_c2=3 + 2+1, out_c=1*3,
                                               relu_negative_slope=0., activation=silu,normalization=norm_free).to(
             'cuda')
 
-        self.dist = att_conv_normalized2(in_c1=64, in_c2=3 + 2+1+1, out_c=1,
+        self.dist = att_conv_normalized2(in_c1=64, in_c2=3 + 2+1+1, out_c=1*3,
                                               relu_negative_slope=0., activation=silu,normalization=norm_free).to(
             'cuda')
         self.sig=nn.Sigmoid()
-
-
 
         # add_spectral_norm_selective(self.approach)
         # add_spectral_norm_selective(self.beta_decoder)
@@ -241,7 +239,7 @@ class GripperGraspSampler3(nn.Module):
         approach=F.normalize(approach, dim=1)
         # ones_=torch.ones_like(approach[:,0:1])
         # approach=torch.concatenate([approach,ones_],dim=1)
-        beta = self.beta_decoder(representation_2d,torch.cat([approach,depth],dim=1).detach())
+        beta = self.beta_decoder(representation_2d,torch.cat([approach,depth],dim=1))
         # beta=beta__approach[:,0:2]
         # approach=beta__approach[:,2:]
 
@@ -249,8 +247,11 @@ class GripperGraspSampler3(nn.Module):
         beta = F.normalize(beta, dim=1)
 
         # beta=beta_dist_width[:,0:2]
-        width=self.width(representation_2d,torch.cat([approach,beta,depth],dim=1).detach())
-        dist=self.dist(representation_2d,torch.cat([approach,beta,width,depth],dim=1).detach())
+        width=self.width(representation_2d,torch.cat([approach,beta,depth],dim=1))
+        width = F.normalize(width, p=2, dim=1).sum(dim=1, keepdim=True)
+
+        dist=self.dist(representation_2d,torch.cat([approach,beta,width,depth],dim=1))
+        dist = F.normalize(dist, p=2, dim=1).sum(dim=1, keepdim=True)
 
         # dist=self.softplus(dist)
         # width=1-self.softplus(-width)

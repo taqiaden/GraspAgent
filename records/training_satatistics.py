@@ -114,10 +114,14 @@ class MovingRate():
 
 
     def upload(self,initial_val):
-        self.moving_rate=get_float('moving_rate_',config_file=self.name,default=initial_val)
-        self.counter = get_float('counter_', config_file=self.name)
-        self.momentum = get_float('momentum_', config_file=self.name)
-        self.convergence = get_float('convergence_', config_file=self.name)
+        try:
+            self.moving_rate=get_float('moving_rate_',config_file=self.name,default=initial_val)
+            self.counter = get_float('counter_', config_file=self.name)
+            self.momentum = get_float('momentum_', config_file=self.name)
+            self.convergence = get_float('convergence_', config_file=self.name)
+        except Exception as e:
+            print(Fore.RED,f' Error when getting a moving rate of {self.name} : {str(e)}',Fore.RESET)
+            self.moving_rate=initial_val
 
     def view(self):
         self.moving_rate=truncate(self.moving_rate)

@@ -9,7 +9,7 @@ from GraspAgent_2.utils.model_init import init_weights_he_normal, gan_init_with_
 from GraspAgent_2.utils.positional_encoding import PositionalEncoding_2d, PositionalEncoding_1d,  \
     LearnableRBFEncoding2D, LearnableRBFEncoding1d
 from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d, sign_invariant_quat_encoding_2d
-from models.resunet import res_unet
+from models.resunet import res_unet, add_spectral_norm_selective
 import torch
 import torch.nn as nn
 
@@ -54,13 +54,13 @@ class ParallelGripperPoseSampler(nn.Module):
         #     'cuda')
 
         self.quat_ = ContextGate_2d(in_c1=64, in_c2= 1, out_c=4,
-                                      relu_negative_slope=0.2, activation=nn.Mish(), use_sin=False,normalize=True).to(
+                                      relu_negative_slope=0.2, activation=nn.Mish(), use_sin=False,normalize=False).to(
             'cuda')
-        self.transition_=ContextGate_2d(in_c1=64, in_c2=1+10, out_c=1,
-                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=True).to(
+        self.transition_=ContextGate_2d(in_c1=64, in_c2=1+10, out_c=1*3,
+                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=False).to(
             'cuda')
-        self.fingers=ContextGate_2d(in_c1=64, in_c2=1+10+1, out_c=3,
-                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=True).to(
+        self.fingers=ContextGate_2d(in_c1=64, in_c2=1+10+1, out_c=3*3,
+                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=False).to(
             'cuda')
 
         self.depth_encoding=ScalerEncoding_2d(in_c=1)
@@ -111,10 +111,13 @@ class ParallelGripperPoseSampler(nn.Module):
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
         transition=self.transition_(features,torch.cat([encoded_quat,depth], dim=1).detach())
+        transition=F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
         fingers= self.fingers(features, torch.cat([encoded_quat,transition,depth], dim=1).detach())
+        fingers=fingers.unflatten(1,(3,3))
+        fingers=F.normalize(fingers,p=2,dim=1).sum(dim=1)
 
 
         # fingers=F.sigmoid(fingers)
@@ -139,7 +142,7 @@ class CH_G(nn.Module):
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.2)
         self.back_bone_.apply(init_weights_he_normal)
-        replace_instance_with_groupnorm(self.back_bone_, max_groups=16)
+        # replace_instance_with_groupnorm(self.back_bone_, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
 
@@ -347,10 +350,11 @@ class ScalerEncoding_2d(nn.Module):
 class CH_D(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2+7, Batch_norm=None, Instance_norm=True,
-                                  relu_negative_slope=0.2, activation=nn.Mish(), IN_affine=False).to('cuda')
+        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=False,
+                                  relu_negative_slope=0.2, activation=None, IN_affine=False).to('cuda')
         # self.back_bone.SN_on_encoder()
-        replace_instance_with_groupnorm(self.back_bone, max_groups=16)
+        # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
+        # gan_init_with_norms(self.back_bone)
 
         # add_spectral_norm_selective(self.back_bone)
 
@@ -358,10 +362,11 @@ class CH_D(nn.Module):
 
         # gan_init_with_norms(self.back_bone)
 
-        self.att_block = ContextGate_1d(in_c1=64, in_c2=15, out_c=1,
-                                       relu_negative_slope=0.2, activation=nn.Mish(),normalize=True).to('cuda')
+        self.att_block_ = ContextGate_1d(in_c1=64, in_c2=15, out_c=1,
+                                       relu_negative_slope=0.2, activation=nn.Mish(),normalize=False).to('cuda')
+        # gan_init_with_norms(self.att_block_)
 
-        self.att_block.apply(init_weights_he_normal)
+        self.att_block_.apply(init_weights_he_normal)
 
         self.query = nn.Sequential(
             nn.Linear(14, 7),
@@ -419,29 +424,29 @@ class CH_D(nn.Module):
 
     def forward(self, depth, pose,pairs, target_mask, detach_backbone=False):
         standarized_depth_ = (depth.clone() - depth.mean()) * 100
-        standarized_depth_=standarized_depth_.repeat(2,1,1,1)
-        target_mask=target_mask.repeat(2,1,1,1)
+        # standarized_depth_=standarized_depth_.repeat(2,1,1,1)
+        # target_mask=target_mask.repeat(2,1,1,1)
 
-        attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
-        pose2=pose.clone()
-        encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
-        pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
-        s=self.query(pose2)#.flatten(1,2)
-        s = F.normalize(s, p=2, dim=-1, eps=1e-8)
-        # s=F.softmax(s,dim=-1)
-
-        attention_mask=attention_mask.repeat(1,7,1,1)
-
-        i=0
-        for pair in pairs:
-            index = pair[0]
-            h = index // 600
-            w = index % 600
-            # attention_mask[0, 0, h, w] = True
-            attention_mask[0, :, h, w] = s[i,0]
-            attention_mask[1, :, h, w] = s[i,1]
-
-            i+=1
+        # attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
+        # pose2=pose.clone()
+        # encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
+        # pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
+        # s=self.query(pose2)#.flatten(1,2)
+        # s = F.normalize(s, p=2, dim=-1, eps=1e-8)
+        # # s=F.softmax(s,dim=-1)
+        #
+        # attention_mask=attention_mask.repeat(1,7,1,1)
+        #
+        # i=0
+        # for pair in pairs:
+        #     index = pair[0]
+        #     h = index // 600
+        #     w = index % 600
+        #     # attention_mask[0, 0, h, w] = True
+        #     attention_mask[0, :, h, w] = s[i,0]
+        #     attention_mask[1, :, h, w] = s[i,1]
+        #
+        #     i+=1
 
 
         # depth_= depth_standardization(depth[0,0],target_mask[0,0])
@@ -457,7 +462,7 @@ class CH_D(nn.Module):
         #
         # encoded_depth = torch.cat([depth_, Gx, Gy, local_diff3, local_diff5, local_diff7], dim=1)
 
-        input = torch.cat([standarized_depth_, target_mask,attention_mask], dim=1)
+        input = torch.cat([standarized_depth_, target_mask], dim=1)
 
         depth_data=standarized_depth_
 
@@ -468,7 +473,6 @@ class CH_D(nn.Module):
         else:
             features = self.back_bone(input)#*scale
 
-        # features = torch.cat([features, scaled_depth_, depth_], dim=1)
 
 
 
@@ -483,11 +487,11 @@ class CH_D(nn.Module):
             feature_list.append(features[:,:,index])
             depth_data_list.append(depth_data[:,:,index])
 
-        # feature_list=torch.cat(feature_list,dim=0)[:,None,:].repeat(1,2,1) # n,2,64
-        # depth_data_list=torch.cat(depth_data_list,dim=0)[:,None,:].repeat(1,2,1) # n,2,64
+        feature_list=torch.cat(feature_list,dim=0)[:,None,:].repeat(1,2,1) # n,2,64
+        depth_data_list=torch.cat(depth_data_list,dim=0)[:,None,:].repeat(1,2,1) # n,2,64
 
-        feature_list = torch.stack(feature_list, dim=0)  # n,2,64
-        depth_data_list = torch.stack(depth_data_list, dim=0)  # n,2,64
+        # feature_list = torch.stack(feature_list, dim=0)  # n,2,64
+        # depth_data_list = torch.stack(depth_data_list, dim=0)  # n,2,64
 
         quat = pose[:,:, :4]
         fingers = pose[:,:, 4:4+3]
@@ -511,7 +515,7 @@ class CH_D(nn.Module):
 
 
         # output = self.att_block(feature_list, torch.cat([encoded_quat,fingers,transition,depth_data_list], dim=-1))
-        output = self.att_block( feature_list,condition)
+        output = self.att_block_( feature_list,condition)
 
         # output1 = self.f1( feature_list,encoded_quat)+feature_list
         # output2 = self.f2( output1,torch.cat([encoded_transition,depth_data_list], dim=-1))+output1

@@ -22,9 +22,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         self.default_ctrl=self.decode_finger_ctrl(0.,0.,0.)
 
-        self.last_hand_geom_id=44
-
-        self.contact_pads_geom_ids=[[2,3,4],[16],[22,28,34,40]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
+        self.contact_pads_geom_ids=[[2,3,4],[16],[23,30,37,44]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
 
         # self.intilize_finger_joints()
 
@@ -94,7 +92,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         mujoco.mj_step(self.m, self.d)
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         if ini_contact_with_obj or ini_contact_with_floor:
-            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
+            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None
         # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
 
         delta=[0, 0, 0.001]
@@ -113,12 +111,11 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             mujoco.mj_step(self.m, self.d)
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success = self.check_valid_grasp(minimum_contact_points=2,report=False)
+        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=1)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # if view:self.static_view(1000)
 
-        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor
-
+        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact,self_collide
 
     def view_grasp(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=300,hard_level=0.   ):
         self.restore_simulation_state()
@@ -140,6 +137,8 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.d.qpos = hand_pos + hand_quat + self.default_finger_joints + obj_pose
         self.d.ctrl *= 0
         mujoco.mj_step(self.m, self.d)
+        # self.static_view(1000)
+
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         # if ini_contact_with_obj or ini_contact_with_floor:
         #     return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
@@ -175,13 +174,13 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success = self.check_valid_grasp(minimum_contact_points=2,report=True)
+        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=1)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # print(Fore.CYAN,f'final d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
         # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
-        self.static_view(1000)
+        # self.static_view(1000)
 
-        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor
+        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact,self_collide
 
 def sample_quat(size,f=0.5,ref_quat=None):
     ref_quat = torch.tensor([[0., 1., 0., 0.]],device='cuda') if ref_quat is None else ref_quat
@@ -223,7 +222,7 @@ if __name__ == "__main__":
 
     env=CasiaHandEnv(root=root_dir + "/speed_hand/",max_obj_per_scene=1)
 
-    # env.view_geom_names_and_ids()
+    env.view_geom_names_and_ids()
 
     ctrl=env.decode_finger_ctrl(1.,1.,1.)
 

@@ -628,7 +628,7 @@ class att_res_conv_normalized(nn.Module):
         # att_map = F.sigmoid(att_map)
         if self.use_sigmoid:
             # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-            att_map = F.sigmoid(att_map)
+            att_map = torch.sigmoid(att_map)
         else:
             # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = F.softmax(att_map*self.scale,dim=1)
@@ -731,7 +731,7 @@ class att_res_conv_normalized2(nn.Module):
         # att_map = F.sigmoid(att_map)
         att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map = F.softmax(att_map,dim=1)
-        att_map = F.sigmoid(att_map*self.scale)
+        att_map = torch.sigmoid(att_map*self.scale)
 
         att_map=att_map.flatten(1,2)
 
@@ -837,19 +837,30 @@ class att_conv_normalized_free2(nn.Module):
 
         self.key = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
+            activation_function,
+            nn.Conv2d(64, 64, kernel_size=1),
+            # nn.Sigmoid()
         ).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
 
-        self.value = nn.Sequential(
+        self.gamma = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=1),
+        ).to('cuda')
+
+        self.beta = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, 64, kernel_size=1),
+            activation_function,
+            # nn.Conv2d(64, 64, kernel_size=1),
+            # activation_function,
         ).to('cuda')
 
         self.d = nn.Sequential(
+            activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
             LayerNorm2D(64),
             activation_function,
@@ -865,28 +876,29 @@ class att_conv_normalized_free2(nn.Module):
     def forward(self, key_value_input, query_input):
 
         '''key value from input1'''
-        value = self.value(key_value_input)
         query = self.query(query_input)
         key = self.key(key_value_input)
-
 
         # query=query-query.mean(dim=1,keepdim=True)
 
         # bias=self.bias(key_value_input)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
-        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        query = F.softmax(query.unflatten(1,(2,-1)) * self.scale, dim=1).flatten(1,2)
+
+        gamma = self.gamma(query)
+        beta = self.beta(query)
 
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
 
-        att_map = (query * key)
+        x = (gamma * key)+beta
 
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 
-        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
         # att_map = F.sigmoid(att_map)
         # att_map=F.sigmoid(att_map)
-        att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
 
         # print(Fore.LIGHTGREEN_EX, f'max of softmax at indexes: {att_map.max(dim=1)}', Fore.RESET)
 
@@ -896,7 +908,7 @@ class att_conv_normalized_free2(nn.Module):
         # else:
         #     print(Fore.GREEN,s,Fore.RESET)
 
-        x = (att_map * value)
+        # x = (att_map * value)
 
         output = self.d(x)
         return output
@@ -1054,7 +1066,7 @@ class att_res_conv_normalized_free(nn.Module):
         # att_map = F.sigmoid(att_map)
         if self.use_sigmoid:
             att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
-            att_map = F.sigmoid(att_map*self.scale)
+            att_map = torch.sigmoid(att_map*self.scale)
         else:
             att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = F.softmax(att_map,dim=1)
@@ -1211,7 +1223,7 @@ class att_conv_normalized(nn.Module):
         # att_map = F.sigmoid(att_map)
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
         # att_map = F.softmax(att_map,dim=1)
-        att_map = F.sigmoid(att_map)
+        att_map = torch.sigmoid(att_map)
 
         # att_map=att_map.flatten(1,2)
 

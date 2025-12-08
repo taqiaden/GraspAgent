@@ -5,7 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from GraspAgent_2.model.CH_model2 import CH_model_key, CH_D, CH_G
+from GraspAgent_2.model.CH_model import CH_model_key, CH_D, CH_G
 from GraspAgent_2.sim_hand_s.Casia_hand_env import CasiaHandEnv
 from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
 from GraspAgent_2.utils.Online_clustering import OnlingClustering
@@ -175,11 +175,11 @@ class TrainGraspGAN:
             quat,fingers,shifted_point=self.process_pose(target_point, target_pose, view=view)
 
             if view:
-                in_scope, grasp_success, contact_with_obj, contact_with_floor = self.ch_env.view_grasp(
+                in_scope, grasp_success, contact_with_obj, contact_with_floor,n_contact,self_collide = self.ch_env.view_grasp(
                     hand_pos=shifted_point, hand_quat=quat, hand_fingers=fingers,
                    view=view,hard_level=hard_level)
             else:
-                in_scope, grasp_success, contact_with_obj, contact_with_floor = self.ch_env.check_graspness(
+                in_scope, grasp_success, contact_with_obj, contact_with_floor,n_contact,self_collide = self.ch_env.check_graspness(
                     hand_pos=shifted_point, hand_quat=quat, hand_fingers=fingers,
                     view=view, hard_level=hard_level)
 
@@ -189,9 +189,9 @@ class TrainGraspGAN:
 
             if grasp_success is not None:
                 if grasp_success and not contact_with_obj and not contact_with_floor:
-                    return True and in_scope,initial_collision
+                    return True and in_scope,initial_collision,n_contact,self_collide
 
-        return False, initial_collision
+        return False, initial_collision,n_contact,self_collide
 
 
     def sample_contrastive_pairs(self,pc,  floor_mask, gripper_pose, gripper_pose_ref, grasp_quality ,grasp_collision):
@@ -259,10 +259,10 @@ class TrainGraspGAN:
             # print('ref')
             # ref_success ,ref_initial_collision= self.evaluate_grasp(target_point,target_ref_pose,view=True,shake_intensity=0.002)
             print('gen')
-            gen_success,gen_initial_collision = self.evaluate_grasp(target_point, target_generated_pose,view=False,hard_level=0.5)
-            print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,Fore.RESET )
-            gen_success,gen_initial_collision = self.evaluate_grasp(target_point, target_generated_pose,view=True,hard_level=0.5)
-            print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,Fore.RESET )
+            # gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=False)
+            # print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,n_contact,self_collide,Fore.RESET )
+            gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=True)
+            print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,n_contact,self_collide,Fore.RESET )
     def step(self,i):
         self.ch_env.drop_new_obj(stablize=np.random.random()>0.5)
 
@@ -332,7 +332,6 @@ def train_N_grasp_GAN(n=1):
         # Train_grasp_GAN.export_check_points()
         # exit()
         Train_grasp_GAN.begin(iterations=100)
-
 
 if __name__ == "__main__":
     train_N_grasp_GAN(n=10000)
