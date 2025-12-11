@@ -9,7 +9,7 @@ from torch.distributions import Categorical
 from Configurations.config import workers
 from Online_data_audit.data_tracker import gripper_grasp_tracker, DataTracker
 from analytical_suction_sampler import estimate_suction_direction
-from check_points.check_point_conventions import GANWrapper
+from check_points.check_point_conventions import GANWrapper, ModelWrapper
 from dataloaders.Grasp_GAN_dl import GraspGANDataset2
 from lib.IO_utils import custom_print, load_pickle, save_pickle
 from lib.Multible_planes_detection.plane_detecttion import bin_planes_detection, cache_dir
@@ -21,6 +21,7 @@ from lib.models_utils import reshape_for_layer_norm
 from lib.report_utils import progress_indicator
 from lib.rl.masked_categorical import MaskedCategorical
 from models.Grasp_GAN import  D
+from models.Grasp_handover_policy_net import GraspHandoverPolicyNet, grasp_handover_policy_module_key
 from models.action_net import action_module_with_GAN_key, ActionNet
 from records.training_satatistics import TrainingTracker, MovingRate
 from registration import camera
@@ -35,7 +36,7 @@ lock = FileLock("file.lock")
 max_samples_per_image = 1
 
 max_n = 50
-batch_size = 16
+batch_size = 4
 batch_size2=16
 freeze_backbone = False
 
@@ -214,6 +215,9 @@ class TrainGraspGAN:
         self.freeze_distance = False
         self.freeze_width = False
 
+        # self.policy = ModelWrapper(model=GraspHandoverPolicyNet(), module_key=grasp_handover_policy_module_key)
+        # self.policy.ini_model(train=False)
+
 
 
     def generate_random_beta_dist_widh(self, size):
@@ -296,7 +300,7 @@ class TrainGraspGAN:
 
         # sampled_pose[:, 5, ...]+=0.01
 
-        sampled_pose[:, 5:, ...] = torch.clamp(sampled_pose[:, 5:, ...], 0.01, 0.99)
+        sampled_pose[:, 5:, ...] = torch.clamp(sampled_pose[:, 5:, ...], 0.1, 0.99)
         return sampled_pose
 
     def initialize(self, n_samples=None):
@@ -364,8 +368,7 @@ class TrainGraspGAN:
         gan = GANWrapper(action_module_with_GAN_key, ActionNet, D)
         gan.ini_models(train=True)
 
-
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0.)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*1,momentum=0.)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0., weight_decay_=0.)

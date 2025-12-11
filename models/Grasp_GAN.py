@@ -438,9 +438,8 @@ class D(nn.Module):
         # self.back_bone.GN_on_decoder()
 
         self.att_block_ = att_conv_normalized_free2(in_c1=64, in_c2=7+1 , out_c=1,
-                                           relu_negative_slope=0.,activation=silu,drop_out_ratio=0.).to(
+                                           relu_negative_slope=0.1,activation=None,drop_out_ratio=0.).to(
             'cuda')
-
 
     def get_features(self,depth):
         depth = standardize_depth(depth)

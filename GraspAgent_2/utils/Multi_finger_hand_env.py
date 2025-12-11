@@ -61,7 +61,7 @@ def draw_point(viewer, pos, radius=0.02, rgba=[1, 0, 0, 1]):
 
 
 class MojocoMultiFingersEnv():
-    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,max_obj_per_scene=2):
+    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,max_obj_per_scene=2,key=""):
         super().__init__()
         '''
 
@@ -101,7 +101,7 @@ class MojocoMultiFingersEnv():
         self.last_hand_geom_id=None
 
 
-        self.dict_file_path=self.root+'/obj_data.json'
+        self.dict_file_path=self.root+'/'+key+'_obj_data.json'
         self.obj_dict= self.load_obj_dict()
 
         self.saved_state = None
@@ -109,10 +109,6 @@ class MojocoMultiFingersEnv():
         self.contact_pads_geom_ids =None
 
         self.last_hand_geom_id = self.m.ngeom - 1
-
-
-
-
 
         assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
@@ -195,7 +191,7 @@ class MojocoMultiFingersEnv():
 
             self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
 
-            if len(self.objects)>self.max_obj_per_scene:
+            while len(self.objects)>self.max_obj_per_scene:
                 print('Remove object ID: ',self.objects[0])
                 self.objects.popleft()
                 self.objects_poses=self.objects_poses[:-7]
@@ -452,7 +448,7 @@ class MojocoMultiFingersEnv():
         n_contact=0
         # contacts = [] # store (pos, force)
         geom_groups=[0]*len(self.contact_pads_geom_ids)
-        contains_id = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids)
+        is_contact_pad = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids)
         for i in range(self.d.ncon):
             c = self.d.contact[i]
             first_is_hand_point=is_hand_geom(c.geom1)
@@ -463,15 +459,11 @@ class MojocoMultiFingersEnv():
                 if c.geom1==0 or c.geom2==0:
                     contact_with_floor=True
                 else:
-                    contact_with_obj = True
                     pad_geom_id=None
-                    obj_geom_id=None
-                    if contains_id(c.geom1):
+                    if is_contact_pad(c.geom1):
                         pad_geom_id=c.geom1
-                        obj_geom_id=c.geom2
-                    elif contains_id(c.geom2):
+                    elif is_contact_pad(c.geom2):
                         pad_geom_id=c.geom2
-                        obj_geom_id=c.geom1
 
                     if pad_geom_id is not None:
                         # force = np.zeros(6)
@@ -483,13 +475,15 @@ class MojocoMultiFingersEnv():
                         geom_groups[group_id]+=1
                         n_contact+=1
             elif c.dist < margin and first_is_hand_point and second_is_hand_point :
-                self_collide=True
+                if find_group(c.geom1,self.contact_pads_geom_ids)!=find_group(c.geom2,self.contact_pads_geom_ids):
+                    '''check collision between groups'''
+                    self_collide=True
 
 
         contacted_groups = sum(x > 0 for x in geom_groups)
         # if n_contact>0:
         #     print(Fore.LIGHTCYAN_EX,geom_groups,'--',contacted_groups,'---',n_contact,Fore.RESET)
-        return contacted_groups>=minimum_contact_points and not contact_with_floor, contacted_groups,self_collide
+        return contacted_groups>=minimum_contact_points and not contact_with_floor and not self_collide, contacted_groups,self_collide
 
 
 
@@ -691,6 +685,7 @@ class MojocoMultiFingersEnv():
         # self.d.qpos = pos + quat + self.default_finger_joints+list(self.objects_poses)
         k=3+4+len(self.default_finger_joints)
         self.d.qpos[k:] = list(self.objects_poses)
+        self.d.qpos[7:k] = self.default_finger_joints
 
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
@@ -700,7 +695,7 @@ class MojocoMultiFingersEnv():
 
             while viewer.is_running():
                 step_start = time.time()
-                # self.d.qpos[k:]=list(self.objects_poses)
+                self.d.qpos[k:]=list(self.objects_poses)
 
                 mujoco.mj_step(self.m, self.d)
 

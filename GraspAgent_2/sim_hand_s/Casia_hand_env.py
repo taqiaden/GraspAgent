@@ -1,3 +1,4 @@
+import math
 import os
 import time
 
@@ -11,18 +12,19 @@ from matplotlib import pyplot as plt
 from GraspAgent_2.training.sample_random_grasp import quat_between_batch
 from GraspAgent_2.utils.Multi_finger_hand_env import MojocoMultiFingersEnv
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_mul, bulk_quat_mul, quaternion_angular_distance, \
-    combine_quaternions, quaternion_pairwise_angular_distance
+    combine_quaternions, quaternion_pairwise_angular_distance, quat_between, \
+    quat_from_two_frames, transform_frame
 
 
 class CasiaHandEnv(MojocoMultiFingersEnv):
     def __init__(self,root,max_obj_per_scene=2):
-        super().__init__(root=root,max_obj_per_scene=max_obj_per_scene)
+        super().__init__(root=root,max_obj_per_scene=max_obj_per_scene,key='CasiaHand_s')
 
         self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
         self.default_ctrl=self.decode_finger_ctrl(0.,0.,0.)
 
-        self.contact_pads_geom_ids=[[2,3,4],[16],[23,30,37,44]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
+        self.contact_pads_geom_ids=[[2,3,4],[11,17,22,23],[25,31,36,37,39,45,50,51,53,59,64,65,67,73,78,79]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
 
         # self.intilize_finger_joints()
 
@@ -111,7 +113,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             mujoco.mj_step(self.m, self.d)
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=1)
+        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=2)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # if view:self.static_view(1000)
 
@@ -174,7 +176,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=1)
+        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=2)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # print(Fore.CYAN,f'final d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
         # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
@@ -224,7 +226,7 @@ if __name__ == "__main__":
 
     env.view_geom_names_and_ids()
 
-    ctrl=env.decode_finger_ctrl(1.,1.,1.)
+    ctrl=env.decode_finger_ctrl(.5,.5,.5)
 
     quats=torch.tensor([[-0.5518, -0.3340, -0.0619,  0.7617],
         [ 0.0717, -0.9683,  0.1292,  0.2014],
@@ -249,7 +251,7 @@ if __name__ == "__main__":
 
 
     for i in range(1000):
-        env.drop_new_obj(selected_index=i,obj_pose=[0, 0.3, 0.3], stablize=True)
+        # env.drop_new_obj(selected_index=i,obj_pose=[0, 0.3, 0.3], stablize=True)
 
         # quat = sample_quat(1,f=1.,ref_quat = torch.tensor([[1., 1., 0., 0.]],device='cuda'))[0].cpu().tolist()
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
@@ -262,28 +264,44 @@ if __name__ == "__main__":
         # print(z)
         # env.passive_viewer(pos=[0.0, 0.0, 0.3],quat=quats[i].cpu().tolist(),ctrl=ctrl)
         # env.passive_viewer(pos=[0.0, 0.0, 0.3],quat=quats[i+1].cpu().tolist(),ctrl=ctrl)
-        #
+
         # quat=combine_quaternions(quats[i], quats[i+1], 0.5, 0.5, eps=1e-8).cpu().tolist()
         # print(f'get {quat}')
-        v2=quat_rotate_vector(quat, [1,0,0])
-        # print(v2)
-        v2*=0.1
+        quat = [1.0, 0., 0., 0.]
+        angle_rad = math.radians(30)  # convert degrees → radians
+        cos_30 = math.cos(angle_rad)
+        sin_30 = math.sin(angle_rad)
 
-        v3=np.copy(v2)*2
-        v3[-1]+=0.2
-        v2[-1]+=0.2
+        quat=quat_from_two_frames(v1=np.array([1.,0.,0.]),u1=np.array([0.,1.,0.]),v2=np.array([0.,sin_30,-cos_30]),u2=np.array([0.,cos_30,sin_30])).tolist()
+        print(quat)
+
+        # transform_frame()
+
+        v2=quat_rotate_vector(quat, [cos_30,-sin_30,0])
+        print(v2)
+        v2*=0
+
+        # v3=np.copy(v2)*2
+        # v3[-1]+=0.2
+        # v2[-1]+=0.2
 
         # env.passive_viewer(pos=[0.0, 0.0, 0.3],quat=quat,ctrl=ctrl)
 
-        # quat = [.0, 0., 0., 1.]
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
         # print('delta= ', delta)
         # env.check_collision( [0,0,0], quat, hand_fingers=None, view=True)
         # env.passive_viewer(pos=[0,0,0], quat=quat,ctrl=ctrl)
-        env.manual_view(pos=(v3).tolist(), quat=quat)
+        # while True:
+        env.manual_view(pos=[0,0,0.3], quat=quat)
+            # for i in range(3):
+            #     k=7+i
+            #     print(f'----joint {i+1}')
+            #     print(env.d.qpos[k:k+1])
+            #     print(env.d.qpos[k+3:3+k+1])
+            #     print(env.d.qpos[k+6:6+k+1])
+            #     print(env.d.qpos[k+9:9+k+1])
+            #     print(env.d.qpos[k+12:12+k+1])
 
-
-        print(env.d.qpos[7:])
         print(env.d.ctrl)
         print(env.obj_xy_positions)
         # env.get_scene_preception(view=True)

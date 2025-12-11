@@ -19,7 +19,7 @@ subprocess.run(["bash", './bash/pass_command.sh', "5"])
 parser = argparse.ArgumentParser()
 # parser.add_argument("--text-prompt", default="plate. stapler. banana. apple. box. shampoo.
 # small ball.")
-parser.add_argument("--text-prompt", default="banana.  ")
+parser.add_argument("--text-prompt", default="medicine. drug.")
 parser.add_argument("--placement-bin", default="s") # (g) means place the object ath the parallel gripper side bin while (s) means place the object at the suction side
 
 args = parser.parse_args()
@@ -27,8 +27,7 @@ grasp_agent = GraspAgent()
 
 '''test code'''
 # grasp_agent.last_handover_action=Action()
-# grasp_agent.last_handover_action.gripper_at_home_position=False
-# grasp_agent.gripper_arm_at_home=False
+# grasp_agent.last_handover_action.suction_at_home_position=False
 
 grasp_agent.print_report()
 grasp_agent.buffer.trim_uncompleted_episodes()
@@ -37,13 +36,12 @@ trigger_new_perception()
 
 while True:
     img_suction_pre, img_grasp_pre,img_main_pre = get_side_bins_images()
-
     with torch.no_grad():
         '''get modalities'''
         depth=get_scene_depth()
         rgb=get_scene_RGB()
         grasp_agent.inputs(depth, rgb,args)
-        if activate_segmentation_queries:
+        if activate_segmentation_queries and grasp_agent.last_handover_action is None:
             # args.text_prompt=input('Enter object/s name/s to be found.')
             grasp_agent.publish_segmentation_query(args)
             grasp_agent.retrieve_segmentation_mask()
@@ -53,7 +51,7 @@ while True:
         '''infer dense action value pairs'''
         grasp_agent.sample_masked_actions()
         grasp_agent.report_current_scene_metrics()
-        grasp_agent.view_predicted_normals()
+        # grasp_agent.view_predicted_normals()
 
         while True:
             grasp_agent.dense_view(view_gripper_sampling=True)
@@ -61,8 +59,11 @@ while True:
             '''make decision'''
             while True:
                 first_action_obj,second_action_obj=grasp_agent.pick_action()
-                # grasp_agent.actions_view(first_action_obj,second_action_obj)
-                break # comment out if you need to visualize all actions one by one
+                grasp_agent.actions_view(first_action_obj,second_action_obj)
+                # r=input('To execute the action press Y')
+                # if r.lower()=="y":
+                break # comment out to visualize all actions one by one
+
             if first_action_obj is not None and not simulation_mode:
                 '''execute action/s'''
                 grasp_agent.deploy_action_metrics(first_action_obj,second_action_obj)
@@ -86,6 +87,7 @@ while True:
                 new_state_is_avaliable=grasp_agent.process_feedback(first_action_obj,second_action_obj, img_grasp_pre, img_suction_pre,img_main_pre)
                 if new_state_is_avaliable: break
             else:
+                trigger_new_perception()
                 break
             '''clear dense data'''
         grasp_agent.rollback()

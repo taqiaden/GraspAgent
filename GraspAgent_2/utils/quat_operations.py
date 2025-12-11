@@ -63,7 +63,80 @@ def random_quaternion():
     ])
     return q  # (x, y, z, w) convention
 
+def quat_mul(q1, q2):
+    # Hamilton product
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array([
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2
+    ])
 
+def quat_conj(q):
+    w, x, y, z = q
+    return np.array([w, -x, -y, -z])
+
+def rotate_vec(q, v):
+    vq = np.array([0.0, *v])
+    return quat_mul(quat_mul(q, vq), quat_conj(q))[1:]
+
+def transform_frame(v, u, q):
+    v_new = rotate_vec(q, v)
+    u_new = rotate_vec(q, u)
+    return v_new, u_new
+
+def quat_from_two_frames(v1, u1, v2, u2):
+    def nrm(x):
+        return x / np.linalg.norm(x)
+
+    # Build orthonormal frame A (source)
+    xA = nrm(v1)
+    yA = nrm(u1 - np.dot(u1, xA) * xA)
+    zA = np.cross(xA, yA)
+    A = np.column_stack((xA, yA, zA))
+
+    # Build orthonormal frame B (target)
+    xB = nrm(v2)
+    yB = nrm(u2 - np.dot(u2, xB) * xB)
+    zB = np.cross(xB, yB)
+    B = np.column_stack((xB, yB, zB))
+
+    # Rotation from A to B
+    R = B @ A.T
+    t = np.trace(R)
+
+    # Convert rotation matrix to quaternion (stable)
+    q = np.zeros(4)
+    if t > 0:
+        s = 0.5 / np.sqrt(t + 1.0)
+        q[0] = 0.25 / s
+        q[1] = (R[2,1] - R[1,2]) * s
+        q[2] = (R[0,2] - R[2,0]) * s
+        q[3] = (R[1,0] - R[0,1]) * s
+    else:
+        i = np.argmax([R[0,0], R[1,1], R[2,2]])
+        if i == 0:
+            s = 2.0 * np.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+            q[0] = (R[2,1] - R[1,2]) / s
+            q[1] = 0.25 * s
+            q[2] = (R[0,1] + R[1,0]) / s
+            q[3] = (R[0,2] + R[2,0]) / s
+        elif i == 1:
+            s = 2.0 * np.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+            q[0] = (R[0,2] - R[2,0]) / s
+            q[1] = (R[0,1] + R[1,0]) / s
+            q[2] = 0.25 * s
+            q[3] = (R[1,2] + R[2,1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+            q[0] = (R[1,0] - R[0,1]) / s
+            q[1] = (R[0,2] + R[2,0]) / s
+            q[2] = (R[1,2] + R[2,1]) / s
+            q[3] = 0.25 * s
+
+    return q / np.linalg.norm(q)
 def quat_between(v_from, v_to):
     v_from = v_from / torch.norm(v_from)
     v_to = v_to / torch.norm(v_to)
@@ -103,7 +176,7 @@ def quat_rotate_vector(q, v):
 
     return v_rot
 
-def sign_invariant_quat_encoding_1d(q):
+def sign_invariant_quat_encoding_1d(q,normalzie=True):
     """
     Sign-invariant encoding for a batch of quaternion sets.
 
@@ -116,7 +189,7 @@ def sign_invariant_quat_encoding_1d(q):
                  Sign-invariant quadratic features per quaternion.
     """
     # Normalize quaternions along the last dimension
-    q = F.normalize(q, dim=-1)
+    if normalzie:q = F.normalize(q, dim=-1)
 
     qw, qx, qy, qz = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
 
@@ -157,7 +230,37 @@ def bulk_quat_mul(q1, q2):
 
     return torch.stack([w, x, y, z], dim=1)
 
-def sign_invariant_quat_encoding_2d(q):
+def expmap_to_quat_1d(v):
+    theta = torch.norm(v, dim=-1, keepdim=True).clamp_min(1e-8)
+    half = 0.5 * theta
+    w = torch.cos(half)
+    imag = v / theta * torch.sin(half)
+    q = torch.cat([w, imag], dim=-1)
+    # canonicalize w ≥ 0
+    sign = torch.where(q[..., :1] >= 0, 1.0, -1.0)
+    return q * sign
+
+def expmap_to_quat_map_2d(v):
+    """
+    v: tensor of shape [B, 3, H, W]
+    returns: quaternion map [B, 4, H, W] with w >= 0
+    """
+
+    # vector norm over channel dimension (the 3D vector)
+    theta = torch.norm(v, dim=1, keepdim=True).clamp_min(1e-8)  # [B,1,H,W]
+
+    half = 0.5 * theta
+    w = torch.cos(half)                                          # [B,1,H,W]
+
+    imag = v / theta * torch.sin(half)                           # [B,3,H,W]
+
+    q = torch.cat([w, imag], dim=1)                              # [B,4,H,W]
+
+    # Canonicalize so w >= 0
+    sign = torch.where(q[:, :1] >= 0, 1.0, -1.0)                 # [B,1,H,W]
+    return q * sign
+
+def sign_invariant_quat_encoding_2d(q,normalzie=True):
     """
     Sign-invariant encoding for quaternion tensors.
 
@@ -170,7 +273,7 @@ def sign_invariant_quat_encoding_2d(q):
                  Rotation-invariant (sign-invariant) feature map.
     """
     # Normalize quaternions to unit length
-    q = F.normalize(q, dim=1)
+    if normalzie:q = F.normalize(q, dim=1)
 
     qw, qx, qy, qz = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
 

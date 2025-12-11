@@ -88,6 +88,9 @@ class MovingRate():
     def val(self):
         return self.moving_rate
 
+    def __call__(self, *args, **kwargs):
+        return self.moving_rate
+
     def update(self,value):
         with torch.no_grad():
             self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate*value

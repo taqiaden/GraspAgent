@@ -89,13 +89,14 @@ def deploy_handover_rotate_command( angle=np.pi/2):
 def deploy_gripper_grasp_command_( T,width,angle=0.):
     pre_mat = adjust_final_matrix(T, x_correction=-0.23)
     end_mat = adjust_final_matrix(T, x_correction=-0.169)
+
     save_gripper_data(end_mat, width, gripper_grasp_data_path)
     save_gripper_data(pre_mat, width, gripper_pre_grasp_data_path)
     angle = np.array(angle)
     np.save(handover_rotation_data_path, angle)
 
 def deploy_gripper_grasp_command( action,angle=0.):
-    deploy_gripper_grasp_command_(T=action.transformation, width=action.real_width, angle=angle)
+    deploy_gripper_grasp_command_(T=action.transformation.cpu().numpy(), width=action.real_width, angle=angle)
 
 def deploy_suction_grasp_command_( T,angle=0.0):
     pre_mat = adjust_final_matrix(T, x_correction=-0.25)
@@ -106,23 +107,24 @@ def deploy_suction_grasp_command_( T,angle=0.0):
     np.save(handover_rotation_data_path, angle)
 
 def deploy_suction_grasp_command( action,angle=0.0):
-    deploy_suction_grasp_command_(action.transformation, angle=angle)
+    deploy_suction_grasp_command_(action.transformation.cpu().numpy(), angle=angle)
 
 def deploy_gripper_shift_command( action):
-    pre_mat=adjust_final_matrix(action.transformation, x_correction=-0.23)
-    end_mat = action.transformation
+    pre_mat=adjust_final_matrix(action.transformation.cpu().numpy(), x_correction=-0.23)
+    end_mat = action.transformation.cpu().numpy()
 
     if action.contact_with_container:
         print('add safety gap to avoid friction during shift')
         end_mat = shift_a_distance(end_mat,  -0.003)
-    else: end_mat = shift_a_distance(end_mat,  +0.006)
+    else: end_mat = shift_a_distance(end_mat,  +0.003)
     end_mat=adjust_final_matrix(end_mat, x_correction=-0.169)
 
-    shift_end_mat = np.copy(action.transformation)
+    shift_end_mat = np.copy(action.transformation.cpu().numpy())
     shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
 
-    if action.contact_with_container:shift_end_mat=shift_a_distance(shift_end_mat, -0.007)
-    else: shift_end_mat=shift_a_distance(shift_end_mat, +0.003)
+    if action.contact_with_container:
+        shift_end_mat=shift_a_distance(shift_end_mat, -0.007)
+    else: shift_end_mat=shift_a_distance(shift_end_mat, +0.00)
     shift_end_mat=adjust_final_matrix(shift_end_mat, x_correction=-0.169)
 
     save_gripper_data(pre_mat, action.real_width, gripper_pre_shift_data_path)
@@ -130,14 +132,14 @@ def deploy_gripper_shift_command( action):
     save_gripper_data(shift_end_mat, action.real_width, gripper_end_shift_data_path)
 
 def deploy_suction_shift_command( action):
-    pre_mat = adjust_final_matrix(action.transformation, x_correction=-0.25)
-    end_mat=action.transformation
+    pre_mat = adjust_final_matrix(action.transformation.cpu().numpy(), x_correction=-0.25)
+    end_mat=action.transformation.cpu().numpy()
     if action.contact_with_container:
         print('add safety gap to avoid friction during shift')
         end_mat = shift_a_distance(end_mat,  -0.011)
     else: end_mat = shift_a_distance(end_mat,  -0.003)
     end_mat = adjust_final_matrix(end_mat, x_correction=-0.184)
-    shift_end_mat = np.copy(action.transformation)
+    shift_end_mat = np.copy(action.transformation.cpu().numpy())
     shift_end_mat[0:3, 3] = action.shift_end_point.cpu().numpy()
     if action.contact_with_container:shift_end_mat=shift_a_distance(shift_end_mat,- 0.017)
     else: shift_end_mat=shift_a_distance(shift_end_mat,- 0.007)
@@ -160,6 +162,7 @@ def save_gripper_data(end_effecter_mat, grasp_width, file_path):
     xyz = end_effecter_mat[:3, 3]
 
     grasp_data = np.array([xyz[0], xyz[1], xyz[2], wxyz[1], wxyz[2], wxyz[3], wxyz[0], grasp_width])
+
     np.save(file_path, grasp_data)
 def set_wait_flag():
     with open(config.home_dir + ROS_communication_file, 'w') as f:

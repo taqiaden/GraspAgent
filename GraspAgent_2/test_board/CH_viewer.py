@@ -43,6 +43,32 @@ generator_expo = 1.0
 m = 0.2
 
 
+def process_pose(target_point, target_pose, view=False):
+    target_pose_ = target_pose.clone()
+    target_point_ = np.copy(target_point)
+
+    quat = target_pose_[:4].cpu().tolist()
+
+    fingers = torch.clip(target_pose_[4:4 + 3], 0, 1).cpu().tolist()
+
+    transition = target_pose_[4 + 3:4 + 3 + 1].cpu().numpy() / 100
+    projected_transition = quat_rotate_vector(quat, [0.866, -0.5, 0]) * transition[0]
+
+    # approach = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
+    # projected_transition = approach * transition
+
+    shifted_point = (target_point_ + projected_transition).tolist()
+
+    if view:
+        print()
+        print('quat: ', quat)
+        print('fingers: ', fingers)
+        print('transition: ', transition)
+        # print('projected_transition: ',projected_transition)
+        print('shifted_point: ', shifted_point)
+
+    return quat, fingers, shifted_point
+
 
 class TrainGraspGAN:
     def __init__(self, n_samples=None, epochs=1, learning_rate=5e-5):
@@ -135,44 +161,10 @@ class TrainGraspGAN:
 
         return gan
 
-
-    def check_collision(self,target_point,target_pose,view=False):
-        with torch.no_grad():
-            quat, fingers, shifted_point = self.process_pose(target_point, target_pose, view=view)
-
-        return self.ch_env.check_collision(hand_pos=shifted_point,hand_quat=quat,hand_fingers=None,view=False)
-
-    def process_pose(self,target_point, target_pose, view=False):
-        target_pose_ = target_pose.clone()
-        target_point_ = np.copy(target_point)
-
-        quat = target_pose_[:4].cpu().tolist()
-
-        fingers = torch.clip(target_pose_[4:4+3],0,1).cpu().tolist()
-
-        transition = target_pose_[4+3:4+3+1].cpu().numpy() / 100
-
-        projected_transition = quat_rotate_vector(quat, [1, 0, 0])*transition[0]
-
-        # approach = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
-        # projected_transition = approach * transition
-
-        shifted_point = (target_point_ + projected_transition).tolist()
-
-        if view:
-            print()
-            print('quat: ',quat)
-            print('fingers: ',fingers)
-            print('transition: ',transition)
-            # print('projected_transition: ',projected_transition)
-            print('shifted_point: ',shifted_point)
-
-        return quat,fingers,shifted_point
-
     def evaluate_grasp(self, target_point, target_pose, view=False,hard_level=0):
 
         with torch.no_grad():
-            quat,fingers,shifted_point=self.process_pose(target_point, target_pose, view=view)
+            quat,fingers,shifted_point= process_pose(target_point, target_pose)
 
             if view:
                 in_scope, grasp_success, contact_with_obj, contact_with_floor,n_contact,self_collide = self.ch_env.view_grasp(
@@ -201,8 +193,9 @@ class TrainGraspGAN:
         grasp_quality=grasp_quality[0,0].reshape(-1)
         obj_collision=grasp_collision[0,0].reshape(-1)
         floor_collision=grasp_collision[0,1].reshape(-1)
-        selection_mask = (~floor_mask) & (floor_collision<0.5) & (obj_collision<0.5)
+        any_collision=grasp_collision[0,2].reshape(-1)
 
+        selection_mask = (~floor_mask) & (any_collision<0.5)
 
         gripper_pose_PW = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :].reshape(360000,self.n_param)
         clipped_gripper_pose_PW=gripper_pose_PW.clone()
@@ -229,7 +222,7 @@ class TrainGraspGAN:
         # selection_p = torch.rand_like(gripper_pose_PW[:, 0])
         # selection_p = gamma_dive**(1/2)
         selection_p=grasp_quality.clone()#*(1-obj_collision.clone())*(1-floor_collision.clone())
-        selection_p=torch.clip(selection_p,0.001)**2
+        selection_p=torch.clip(selection_p,0.001)**1
 
         avaliable_iterations = selection_mask.sum()
         if avaliable_iterations<3: return False, None,None,None
@@ -315,7 +308,6 @@ class TrainGraspGAN:
                 self.ch_env.update_obj_info(0.1)
 
         pi.end()
-
 
 
 def train_N_grasp_GAN(n=1):

@@ -8,7 +8,8 @@ from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
 from GraspAgent_2.utils.model_init import init_weights_he_normal, gan_init_with_norms
 from GraspAgent_2.utils.positional_encoding import PositionalEncoding_2d, PositionalEncoding_1d,  \
     LearnableRBFEncoding2D, LearnableRBFEncoding1d
-from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d, sign_invariant_quat_encoding_2d
+from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d, sign_invariant_quat_encoding_2d, \
+    expmap_to_quat_map_2d
 from models.resunet import res_unet, add_spectral_norm_selective
 import torch
 import torch.nn as nn
@@ -44,23 +45,23 @@ class ParallelGripperPoseSampler(nn.Module):
         # ).to('cuda')
 
         # self.quat = film_fusion_2d(in_c1=64, in_c2= 1, out_c=4,
-        #                               relu_negative_slope=0.2, activation=None, use_sin=False,bias=False).to(
+        #                               relu_negative_slope=0.1, activation=None, use_sin=False,bias=False).to(
         #     'cuda')
         # self.transition=film_fusion_2d(in_c1=64, in_c2=1+10, out_c=1,
-        #                                   relu_negative_slope=0.2, activation=nn.SiLU(),use_sin=False,bias=False).to(
+        #                                   relu_negative_slope=0.1, activation=nn.SiLU(),use_sin=False,bias=False).to(
         #     'cuda')
         # self.fingers_=film_fusion_2d(in_c1=64, in_c2=1+10+1, out_c=3,
-        #                                   relu_negative_slope=0.2, activation=None,use_sin=False,bias=False).to(
+        #                                   relu_negative_slope=0.1, activation=None,use_sin=False,bias=False).to(
         #     'cuda')
 
-        self.quat_ = ContextGate_2d(in_c1=64, in_c2= 1, out_c=4,
-                                      relu_negative_slope=0.2, activation=nn.Mish(), use_sin=True,normalize=False).to(
+        self.quat_ = ContextGate_2d(in_c1=64, in_c2= 1, out_c=3,
+                                      relu_negative_slope=0.1, activation=None, use_sin=False,normalize=False).to(
             'cuda')
-        self.transition_=ContextGate_2d(in_c1=64, in_c2=1+10, out_c=1*3,
-                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=False).to(
+        self.transition_=ContextGate_2d(in_c1=64, in_c2=1+4, out_c=1*3,
+                                          relu_negative_slope=0.1, activation=None,use_sin=False,normalize=False).to(
             'cuda')
-        self.fingers=ContextGate_2d(in_c1=64, in_c2=1+10+1, out_c=3*3,
-                                          relu_negative_slope=0.2, activation=nn.Mish(),use_sin=False,normalize=False).to(
+        self.fingers=ContextGate_2d(in_c1=64, in_c2=1+4+1, out_c=3+3,
+                                          relu_negative_slope=0.1, activation=None,use_sin=False,normalize=False).to(
             'cuda')
 
         self.depth_encoding=ScalerEncoding_2d(in_c=1)
@@ -68,7 +69,7 @@ class ParallelGripperPoseSampler(nn.Module):
         self.quat_encoding=ScalerEncoding_2d(in_c=10,shared=False,out=40)
 
         # self.fingers_scale = film_fusion_2d(in_c1=64, in_c2=32+32+11, out_c=32,
-        #                                   relu_negative_slope=0.2, activation=None,normalize=True,final_linear=False).to(
+        #                                   relu_negative_slope=0.1, activation=None,normalize=True,final_linear=False).to(
         #     'cuda')
 
 
@@ -103,21 +104,23 @@ class ParallelGripperPoseSampler(nn.Module):
     def forward(self, features,depth):
         # encoded_depth=self.depth_encoding(depth)
         quat = self.quat_(features,depth)
-        # quat = torch.where(quat[:, 0:1] < 0, -quat, quat)
+        quat=expmap_to_quat_map_2d(quat)
+        # quat = torch.where(quat[:,0:1] >= 0, quat, -quat)
         quat = F.normalize(quat, dim=1)
-        encoded_quat=sign_invariant_quat_encoding_2d(quat)
+        # encoded_quat=sign_invariant_quat_encoding_2d(quat)
         # encoded_quat=self.quat_encoding(encoded_quat)
         # quat_embedding=self.normalize_quat_embedding(quat_embedding)
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
-        transition=self.transition_(features,torch.cat([encoded_quat,depth], dim=1).detach())
+        transition=self.transition_(features,torch.cat([quat,depth], dim=1))
         transition=F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
-        fingers= self.fingers(features, torch.cat([encoded_quat,transition,depth], dim=1).detach())
-        fingers=fingers.unflatten(1,(3,3))
-        fingers=F.normalize(fingers,p=2,dim=1).sum(dim=1)
+        fingers= self.fingers(features, torch.cat([quat,transition,depth], dim=1))
+        fingers_scale=fingers[:,3:]
+        fingers=fingers[:,0:3]
+        fingers=F.normalize(fingers,p=2,dim=1)*F.normalize(fingers_scale,p=2,dim=1).sum(dim=1,keepdim=True)
 
 
         # fingers=F.sigmoid(fingers)
@@ -129,6 +132,7 @@ class ParallelGripperPoseSampler(nn.Module):
         pose = torch.cat([quat,fingers,transition], dim=1)
         # exit()
         return pose
+
 def depth_standardization(depth,mask):
     mean_ = depth[mask].mean()
     depth_ = (depth.clone() - mean_)*10
@@ -137,17 +141,17 @@ def depth_standardization(depth,mask):
 class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.2,activation=None,IN_affine=False).to('cuda')
+        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+                                  relu_negative_slope=0.1,activation=None,IN_affine=False).to('cuda')
 
-        # gain = torch.nn.init.calculate_gain('leaky_relu', 0.2)
-        self.back_bone_.apply(init_weights_he_normal)
+        # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
+        self.back_bone.apply(init_weights_he_normal)
         # replace_instance_with_groupnorm(self.back_bone_, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
 
         self.back_bone2_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.2, activation=nn.Mish(), IN_affine=False).to('cuda')
+                                  relu_negative_slope=0.1, activation=None, IN_affine=False).to('cuda')
         replace_instance_with_groupnorm(self.back_bone2_, max_groups=32)
         self.back_bone2_.apply(init_weights_he_normal)
 
@@ -155,36 +159,35 @@ class CH_G(nn.Module):
         # replace_instance_with_groupnorm(self.back_bone2, max_groups=32)
         # orthogonal_init_all(self.back_bone_2,gain=gain)
 
-        self.CH_PoseSampler_ = ParallelGripperPoseSampler()
-        gan_init_with_norms(self.CH_PoseSampler_)
+        self.CH_PoseSampler = ParallelGripperPoseSampler()
+        gan_init_with_norms(self.CH_PoseSampler)
         # self.CH_PoseSampler.apply(init_weights_he_normal)
 
 
         # gan_init_with_norms(self.CH_PoseSampler)
 
         # self.grasp_quality=film_fusion_2d(in_c1=64, in_c2=15, out_c=1,in_c3=3,
-        #                                       relu_negative_slope=0.2,activation=None,normalize=False,use_sin=False,bias=True,gate=True).to(
+        #                                       relu_negative_slope=0.1,activation=None,normalize=False,use_sin=False,bias=True,gate=True).to(
         #     'cuda')
         # self.grasp_collision = film_fusion_2d(in_c1=64, in_c2=12, out_c=3,
-        #                                       relu_negative_slope=0.2,activation=None,normalize=False,use_sin=False,bias=True,gate=True).to(
+        #                                       relu_negative_slope=0.1,activation=None,normalize=False,use_sin=False,bias=True,gate=True).to(
         #     'cuda')
 
         self.query = nn.Sequential(
             nn.Conv2d(14, 5, kernel_size=1),
         ).to('cuda')
 
-        self.grasp_quality=res_ContextGate_2d(in_c1=64, in_c2=15, out_c=1,in_c3=3,
-                                              relu_negative_slope=0.2,activation=nn.Mish(),normalize=True,use_sin=False).to(
+        self.grasp_quality=res_ContextGate_2d(in_c1=64, in_c2=9, out_c=1,in_c3=3,
+                                              relu_negative_slope=0.1,activation=None).to(
             'cuda')
-        self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
-                                              relu_negative_slope=0.2,activation=nn.Mish(),normalize=True,use_sin=False).to(
+        self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=6, out_c=1,
+                                              relu_negative_slope=0.1,activation=None).to(
             'cuda')
-        self.grasp_collision2_ = res_ContextGate_2d(in_c1=64, in_c2=12, out_c=1,in_c3=2,
-                                              relu_negative_slope=0.2,activation=nn.Mish(),normalize=True,use_sin=False).to(
+        self.grasp_collision2_ = res_ContextGate_2d(in_c1=64, in_c2=6, out_c=1,in_c3=2,
+                                              relu_negative_slope=0.1,activation=None).to(
             'cuda')
-
-        self.grasp_collision3_ = res_ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
-                                              relu_negative_slope=0.2,activation=nn.Mish(),normalize=True,use_sin=False).to(
+        self.grasp_collision3_ = res_ContextGate_2d(in_c1=64, in_c2=6, out_c=1,
+                                              relu_negative_slope=0.1,activation=None).to(
             'cuda')
         self.grasp_quality.apply(init_weights_he_normal)
         self.grasp_collision.apply(init_weights_he_normal)
@@ -198,7 +201,7 @@ class CH_G(nn.Module):
         self.quat_encoding=ScalerEncoding_2d(in_c=10,shared=False,out=40)
 
         # self.grasp_collision_ = Grasp_ContextGate_2d(in_c1=64, rotation_size=10, transition_size=2,fingers_size=0, out_c=2,
-        #                                       relu_negative_slope=0.2,activation=None,normalize=True,use_sin=False).to(
+        #                                       relu_negative_slope=0.1,activation=None,normalize=True,use_sin=False).to(
         #     'cuda')
 
         # self.grasp_collision_=nn.Sequential(
@@ -245,10 +248,10 @@ class CH_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone_(input)#*scale
+                features = self.back_bone(input)#*scale
                 # features2 = self.back_bone2_(input)#*scale
         else:
-            features = self.back_bone_(input)#*scale
+            features = self.back_bone(input)#*scale
             # features2 = self.back_bone2_(input)#*scale
 
         # features2=torch.cat([features2,scaled_depth_,depth_],dim=1)
@@ -259,7 +262,7 @@ class CH_G(nn.Module):
 
         depth_data=standarized_depth_
 
-        gripper_pose=self.CH_PoseSampler_(features,depth_data)
+        gripper_pose=self.CH_PoseSampler(features,depth_data)
 
         detached_gripper_pose=gripper_pose.detach().clone()
         quat = detached_gripper_pose[:, :4]
@@ -267,7 +270,7 @@ class CH_G(nn.Module):
         fingers=torch.clip(fingers,0,1)
         transition = detached_gripper_pose[:, 4 + 3:4+3+1]
 
-        encoded_quat = sign_invariant_quat_encoding_2d(quat)  # 10
+        # encoded_quat = sign_invariant_quat_encoding_2d(quat)  # 10
 
         # fingers2=self.fingers_encoding(fingers)
         # transition2=self.depth_encoding(transition)
@@ -280,8 +283,8 @@ class CH_G(nn.Module):
         # encoded_depth = self.pos_encoder(depth_data)  # 10
 
 
-        detached_gripper_pose=torch.cat([encoded_quat,fingers,transition,depth_data],dim=1)
-        detached_gripper_pose_without_fingers=torch.cat([encoded_quat,transition,depth_data],dim=1)
+        detached_gripper_pose=torch.cat([quat,fingers,transition,depth_data],dim=1)
+        detached_gripper_pose_without_fingers=torch.cat([quat,transition,depth_data],dim=1)
 
         # detached_gripper_pose=self.condition_encoder(detached_gripper_pose)
         # s=torch.cat([encoded_quat,fingers,transition],dim=1)
@@ -354,7 +357,7 @@ class CH_D(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=3, Batch_norm=None, Instance_norm=True,
-                                  relu_negative_slope=0.2, activation=None, IN_affine=False).to('cuda')
+                                  relu_negative_slope=0.1, activation=None, IN_affine=False).to('cuda')
         # self.back_bone.SN_on_encoder()
         replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         # gan_init_with_norms(self.back_bone)
@@ -365,8 +368,8 @@ class CH_D(nn.Module):
 
         # gan_init_with_norms(self.back_bone)
 
-        self.att_block_ = ContextGate_1d(in_c1=64, in_c2=15, out_c=1,
-                                       relu_negative_slope=0.2, activation=nn.Mish(),normalize=True).to('cuda')
+        self.att_block_ = ContextGate_1d(in_c1=64, in_c2=9, out_c=1,
+                                       relu_negative_slope=0.1, activation=None,normalize=False).to('cuda')
         # gan_init_with_norms(self.att_block_)
 
         self.att_block_.apply(init_weights_he_normal)
@@ -382,9 +385,9 @@ class CH_D(nn.Module):
         #     nn.SiLU()
         # ).to('cuda')
         # self.att_block = film_fusion_1d(in_c1=64, in_c2=51, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False).to('cuda')
         # self.att_block_ = film_fusion_1d(in_c1=64, in_c2=15, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,use_sin=False,bias=False).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,use_sin=False,bias=False).to('cuda')
         # gan_init_with_norms(self.att_block_)
 
         # self.depth_encoding_ =ScalerEncoding_1d(in_c=1)
@@ -393,11 +396,11 @@ class CH_D(nn.Module):
         # self.quat_encoding_ =ScalerEncoding_1d(in_c=10,shared=False,out=40)
 
         # self.f1 = film_fusion_1d(in_c1=64, in_c2=10, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
         # self.f2 = film_fusion_1d(in_c1=64, in_c2=10+1, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
         # self.f3 = film_fusion_1d(in_c1=64, in_c2=30, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=True).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=True).to('cuda')
 
         # self.att_block = nn.Sequential(
         #     nn.Linear(64+10+40+1+8, 128),
@@ -408,7 +411,7 @@ class CH_D(nn.Module):
         # ).to('cuda')
 
         # self.att_block2 = film_fusion_1d(in_c1=64, in_c2=40+1, out_c=1,
-        #                                relu_negative_slope=0.2, activation=nn.SiLU()).to('cuda')
+        #                                relu_negative_slope=0.1, activation=nn.SiLU()).to('cuda')
         # add_spectral_norm_selective(self.att_block)
         # add_spectral_norm_selective(self.f1)
         # add_spectral_norm_selective(self.f2)
@@ -498,7 +501,7 @@ class CH_D(nn.Module):
         transition = pose[:,:, 4+3:4+3+1]
 
 
-        encoded_quat = sign_invariant_quat_encoding_1d(quat)  # 10
+        # encoded_quat = sign_invariant_quat_encoding_1d(quat)  # 10
 
         # encoded_transition = self.pos_encoder((transition+1)/2)  # 10
         # encoded_depth=self.pos_encoder(depth_data_list) # 10
@@ -510,7 +513,7 @@ class CH_D(nn.Module):
         # encoded_quat2=self.quat_encoding_(encoded_quat)
 
 
-        condition=(torch.cat([encoded_quat,fingers,transition,depth_data_list], dim=-1))
+        condition=(torch.cat([quat,fingers,transition,depth_data_list], dim=-1))
 
 
         # output = self.att_block(feature_list, torch.cat([encoded_quat,fingers,transition,depth_data_list], dim=-1))

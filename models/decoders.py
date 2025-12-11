@@ -835,17 +835,15 @@ class att_conv_normalized_free2(nn.Module):
         else:
             activation_function = activation
 
-        self.key = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
-            activation_function,
-            nn.Conv2d(64, 64, kernel_size=1),
-            # nn.Sigmoid()
-        ).to('cuda')
+
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
 
         self.gamma = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
+            nn.Mish(),
+            nn.Conv2d(64, 64, kernel_size=1),
+
         ).to('cuda')
 
         self.beta = nn.Sequential(
@@ -854,7 +852,14 @@ class att_conv_normalized_free2(nn.Module):
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, 64, kernel_size=1),
-            activation_function,
+            nn.Mish(),
+            # nn.Conv2d(64, 64, kernel_size=1),
+            # activation_function,
+        ).to('cuda')
+
+        self.mid = nn.Sequential(
+            nn.Mish(),
+            nn.Conv2d(64, 64, kernel_size=1),
             # nn.Conv2d(64, 64, kernel_size=1),
             # activation_function,
         ).to('cuda')
@@ -862,10 +867,10 @@ class att_conv_normalized_free2(nn.Module):
         self.d = nn.Sequential(
             activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
-            LayerNorm2D(64),
+            # LayerNorm2D(64),
             activation_function,
             nn.Conv2d(64, 48, kernel_size=1),
-            LayerNorm2D(48),
+            # LayerNorm2D(48),
             activation_function,
             nn.Conv2d(48, out_c, kernel_size=1),
         ).to('cuda')
@@ -877,22 +882,27 @@ class att_conv_normalized_free2(nn.Module):
 
         '''key value from input1'''
         query = self.query(query_input)
-        key = self.key(key_value_input)
 
         # query=query-query.mean(dim=1,keepdim=True)
 
         # bias=self.bias(key_value_input)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
-        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
-        query = F.softmax(query.unflatten(1,(2,-1)) * self.scale, dim=1).flatten(1,2)
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        query=self.mid(query)
+        # query = F.softmax(query, dim=1)
 
-        gamma = self.gamma(query)
-        beta = self.beta(query)
+        # query = F.softmax(query.unflatten(1,(2,-1)) * self.scale, dim=1).flatten(1,2)
+
+        gamma = self.gamma(key_value_input)
+        beta = self.beta(key_value_input)
 
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
 
-        x = (gamma * key)+beta
+        x = (gamma * query)
+
+        x = F.softmax(x*self.scale, dim=1)
+        x=x*beta
 
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 

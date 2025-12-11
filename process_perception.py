@@ -4,6 +4,7 @@ import subprocess
 import cv2
 import cv2 as cv
 import numpy as np
+from PIL import ImageEnhance, Image
 from colorama import Fore
 
 from Configurations import config
@@ -102,7 +103,13 @@ def get_scene_point_clouds():
 def get_scene_RGB():
     '''load and crop'''
     full_RGB=cv2.imread(rgb_path)
-    full_RGB=cv2.cvtColor(full_RGB, cv2.COLOR_BGR2RGB)/255
+    full_RGB=cv2.cvtColor(full_RGB, cv2.COLOR_BGR2RGB)#/255
+
+    pil_img=Image.fromarray(full_RGB)
+    pil_img=ImageEnhance.Color(pil_img).enhance(1.5)
+    pil_img=ImageEnhance.Contrast(pil_img).enhance(1.3)
+    # pil_img=ImageEnhance.Brightness(pil_img).enhance(1.1)
+    full_RGB=np.array(pil_img)/255
     assert full_RGB.shape == (1200, 1920, 3), f'{full_RGB.shape}'
     scene_RGB = crop_scene_image(full_RGB)
     # view_image(scene_RGB)

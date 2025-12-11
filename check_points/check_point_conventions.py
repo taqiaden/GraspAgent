@@ -4,7 +4,7 @@ from lib.models_utils import initialize_model, export_model_state, get_model_tim
 from lib.optimizer import export_optm, load_opt
 import torch.nn.init as init
 
-weight_decay = 1e-5
+weight_decay = 1e-4
 # model_cache_folder='check_points'
 
 class ModelWrapper():
@@ -94,12 +94,12 @@ class GANWrapper():
                                      weight_decay=weight_decay_)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
 
-    def critic_adamW_optimizer(self,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,eps=1e-8):
+    def critic_adamW_optimizer(self,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,eps=1e-8,load_check_point=True):
         if learning_rate is not None: self.learning_rate=learning_rate
 
         self.critic_optimizer = torch.optim.AdamW(self.critic.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=eps,
                                      weight_decay=weight_decay_)
-        self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
+        if load_check_point: self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key+'_critic_optimizer')
 
     def generator_adam_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
         if learning_rate is not None: self.learning_rate=learning_rate
@@ -112,7 +112,7 @@ class GANWrapper():
                                                         weight_decay=weight_decay_)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
 
-    def generator_adamW_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
+    def generator_adamW_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,load_check_point=True):
         if learning_rate is not None: self.learning_rate=learning_rate
         if param_group is None:
             self.generator_optimizer = torch.optim.AdamW(self.generator.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
@@ -121,7 +121,7 @@ class GANWrapper():
             self.generator_optimizer = torch.optim.AdamW(param_group,
                                                         betas=(beta1, beta2), eps=1e-8,
                                                         weight_decay=weight_decay_)
-        self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
+        if load_check_point: self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
 
     def load_G_optimizer(self):
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key + '_generator_optimizer')

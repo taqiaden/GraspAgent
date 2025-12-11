@@ -1,3 +1,5 @@
+import argparse
+import configparser
 import os
 import numpy as np
 from colorama import Fore
@@ -13,7 +15,6 @@ from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
 from GraspAgent_2.utils.Online_clustering import OnlingClustering
 from GraspAgent_2.utils.focal_loss import FocalLoss
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector
-from GraspAgent_2.utils.weigts_normalization import scale_all_weights, fix_weight_scales
 
 from Online_data_audit.data_tracker import gripper_grasp_tracker, DataTracker
 from check_points.check_point_conventions import GANWrapper
@@ -58,7 +59,7 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0,eps
         min_ = values.min().item()
         range_ = max_ - min_
 
-        if (not range_>0.) :
+        if not range_ > 0.:
             selection_probability=torch.rand_like(values)
         else:
             pivot_point = np.sqrt(np.abs(balance_indicator)) * np.sign(balance_indicator)
@@ -73,16 +74,7 @@ def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0,eps
             dist = MaskedCategorical(probs=selection_probability, mask=mask)
 
         target_index = dist.sample()
-        # except Exception as e:
-        #     print(str(e))
-        #     print(selection_probability)
-        #     print(mask)
-        #     print(mask.sum())
-        #     print(values.mean())
-        #     print(values.max())
-        #     print(values.min())
-        #     print(values.std())
-        #     exit()
+
 
         return target_index
 
@@ -96,7 +88,7 @@ def process_pose(target_point, target_pose, view=False):
     fingers = torch.clip(target_pose_[4:4+3],0,1).cpu().tolist()
 
     transition = target_pose_[4+3:4+3+1].cpu().numpy() / 100
-    projected_transition = quat_rotate_vector(quat, [1, 0, 0])*transition[0]
+    projected_transition = quat_rotate_vector(quat, [0.866, -0.5, 0])*transition[0]
 
     # approach = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
     # projected_transition = approach * transition
@@ -115,12 +107,14 @@ def process_pose(target_point, target_pose, view=False):
 
 
 class TrainGraspGAN:
-    def __init__(self, n_samples=None, epochs=1, learning_rate=5e-5):
+    def __init__(self, args,n_samples=None, epochs=1, learning_rate=5e-5):
 
-        self.batch_size=2
+        self.args=args
+
+        self.batch_size=1
         self.max_G_norm = 500
         self.max_D_norm = 100
-        self.iter_per_scene = 5
+        self.iter_per_scene = 1
 
         self.n_samples = n_samples
         self.size = n_samples
@@ -170,7 +164,7 @@ class TrainGraspGAN:
 
         self.quat_centers=OnlingClustering(key_name=CH_model_key+'_quat',number_of_centers=20,vector_size=4,decay_rate=0.01,is_quat=True,dist_threshold=0.77)
         self.fingers_centers=OnlingClustering(key_name=CH_model_key+'_fingers',number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
-        self.transition_centers=OnlingClustering(key_name=CH_model_key+'_transitions',number_of_centers=3,vector_size=1,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
+        self.transition_centers=OnlingClustering(key_name=CH_model_key+'_transitions',number_of_centers=5,vector_size=1,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
 
 
     def initialize(self, n_samples=None):
@@ -222,11 +216,10 @@ class TrainGraspGAN:
         gan = GANWrapper(CH_model_key, CH_G, CH_D)
         gan.ini_models(train=True)
 
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0.)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0.,load_check_point=self.args.load_last_optimizer)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.,weight_decay_=0.)
-        gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
+        gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,load_check_point=self.args.load_last_optimizer)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.)
-
         return gan
 
     def step_discriminator(self,depth,   gripper_pose, gripper_pose_ref ,pairs,floor_mask ):
@@ -507,8 +500,8 @@ class TrainGraspGAN:
         loss.backward()
 
         '''GRADIENT CLIPPING'''
-        params=list(self.gan.generator.back_bone_.parameters()) + \
-         list(self.gan.generator.CH_PoseSampler_.parameters())
+        params=list(self.gan.generator.back_bone.parameters()) + \
+         list(self.gan.generator.CH_PoseSampler.parameters())
         norm=torch.nn.utils.clip_grad_norm_(params, max_norm=self.max_G_norm)
         self.G_grad_norm_MR.update(norm.item())
         print(Fore.LIGHTGREEN_EX,f' G norm : {norm}',Fore.RESET)
@@ -655,12 +648,11 @@ class TrainGraspGAN:
               f'g_loss without sampler={loss.item()}',
               Fore.RESET)
 
-
         loss.backward()
 
         '''GRADIENT CLIPPING'''
-        params=list(self.gan.generator.back_bone_.parameters()) + \
-         list(self.gan.generator.CH_PoseSampler_.parameters())
+        params=list(self.gan.generator.back_bone.parameters()) + \
+         list(self.gan.generator.CH_PoseSampler.parameters())
         norm=torch.nn.utils.clip_grad_norm_(params, max_norm=self.max_G_norm)
         self.G_grad_norm_MR.update(norm.item())
         print(Fore.LIGHTGREEN_EX,f' G norm : {norm}',Fore.RESET)
@@ -726,13 +718,18 @@ class TrainGraspGAN:
         # min_ = grasp_quality.min()
         # grasp_quality = (grasp_quality - min_) / (max_ - min_)
         def norm_(gamma ,expo_=1.0,min=0.01):
+
             gamma = (gamma - gamma.min()) / (
-                    gamma.max() - gamma.min())
+                    gamma.max() - gamma.min()+1e-6)
+
             gamma = gamma ** expo_
+
             gamma=torch.clamp(gamma,min)
+
             return gamma
         gamma_dive = norm_((1.001 - F.cosine_similarity(clipped_gripper_pose_PW,
                                                         sampling_centroid[None, :], dim=-1) ) /2 ,1)
+
         gamma_dive *= norm_((1.001 - F.cosine_similarity(gripper_pose_ref_PW,
                                                         sampling_centroid[None, :], dim=-1) ) /2 ,1)
 
@@ -745,6 +742,9 @@ class TrainGraspGAN:
         if avaliable_iterations<3: return False, None,None,None
 
         n = int(min(max_n, avaliable_iterations))
+
+
+        print(Fore.LIGHTBLACK_EX,'         # Available candidates =',avaliable_iterations.item(),Fore.RESET)
 
         counter = 0
         counter2=0
@@ -768,19 +768,31 @@ class TrainGraspGAN:
 
             margin=1.
 
+            assert target_ref_pose[0]>0,f'{target_ref_pose}'
+
             ref_success ,ref_initial_collision,ref_n_grasp_contact,ref_self_collide = self.evaluate_grasp(target_point,target_ref_pose,view=False,hard_level=(1-self.tou)*hard_level_factor)
             gen_success,gen_initial_collision,gen_n_grasp_contact,gen_self_collide  = self.evaluate_grasp(target_point, target_generated_pose,view=False,hard_level=(1-self.tou)*hard_level_factor)
+            gen_success=gen_success and target_generated_pose[0].item()>0
+            if t==1 and self.skip_rate()>0.9:
+                print(f' ref ---- {target_ref_pose}')
+                print(f' gen ---- {target_generated_pose}')
 
             if not ref_success and not gen_success:
                     continue
             print(f'ref_success={ref_success}, gen_success={gen_success}')
 
-            if ref_success and gen_success and ref_n_grasp_contact!= gen_n_grasp_contact:
-                ref_success=ref_success and ref_n_grasp_contact>gen_n_grasp_contact
-                gen_success=gen_success and gen_n_grasp_contact>ref_n_grasp_contact
-                if ref_n_grasp_contact>2 or gen_n_grasp_contact>2:
-                    margin=0
-
+            if self.skip_rate.val > 0.7:
+                if ref_success and gen_success and ref_n_grasp_contact!= gen_n_grasp_contact:
+                    ref_success=ref_success and ref_n_grasp_contact>gen_n_grasp_contact
+                    gen_success=gen_success and gen_n_grasp_contact>ref_n_grasp_contact
+                    margin=abs(ref_n_grasp_contact-gen_n_grasp_contact)/max(ref_n_grasp_contact,gen_n_grasp_contact)
+                else:
+                    max_ref_fingers=target_ref_pose[4:4+3].max().item()
+                    max_gen_fingers=target_generated_pose[4:4+3].max().item()
+                    if abs(max_ref_fingers-max_gen_fingers)>0.2 and max(max_ref_fingers,max_gen_fingers)>0.7:
+                        ref_success = ref_success and max_ref_fingers <max_gen_fingers
+                        gen_success = gen_success and max_gen_fingers < max_ref_fingers
+                        margin=abs(max_ref_fingers-max_gen_fingers)/max(max_ref_fingers,max_gen_fingers)
 
             if ref_success and not gen_success and counter2<self.batch_size:
                 superior_A_model_moving_rate.update(0.)
@@ -857,7 +869,7 @@ class TrainGraspGAN:
             return False, pairs, sampling_centroid,sampler_samples
 
     def step(self,i):
-        self.ch_env.drop_new_obj(stablize=np.random.random()>0.5)
+        self.ch_env.drop_new_obj(stablize=np.random.random()>0.)
 
         '''get scene perception'''
         depth, pc, floor_mask = self.ch_env.get_scene_preception(view=False)
@@ -873,6 +885,16 @@ class TrainGraspGAN:
 
 
         for k in range(self.iter_per_scene):
+
+            if self.skip_rate.val>0.7:
+                self.batch_size = 1
+                self.iter_per_scene=5
+                self.ch_env.max_obj_per_scene=1
+            elif self.skip_rate.val<0.2:
+                self.batch_size = 2
+                self.iter_per_scene=1
+                self.ch_env.max_obj_per_scene=10
+
 
             with torch.no_grad():
 
@@ -892,7 +914,6 @@ class TrainGraspGAN:
                 f =(1 - grasp_quality.detach())
                 n=max(self.tou,self.skip_rate.val)**2
                 annealing_factor = n+(1-n)*f
-                annealing_factor=annealing_factor
                 print(Fore.LIGHTYELLOW_EX,f'mean_annealing_factor= {annealing_factor.mean()}, tou={self.tou}',Fore.RESET)
 
                 self.max_G_norm=self.G_grad_norm_MR.val* self.tou**2 + (1 - self.tou**2)*5
@@ -908,6 +929,10 @@ class TrainGraspGAN:
 
                 gripper_pose_ref = ch_pose_interpolation(gripper_pose, self.sampling_centroid,
                                                          annealing_factor=annealing_factor,quat_centers=self.quat_centers.centers,finger_centers=self.fingers_centers.centers,transition_centers=self.transition_centers.centers)  # [b,self.n_param,600,600]
+
+                if self.skip_rate()>0.9:
+                    gripper_pose_ref[:,4:5]=torch.clip(gripper_pose_ref[:,4:5],0.5,1.0)
+                    gripper_pose_ref[:,-1]=torch.clip(gripper_pose_ref[:,-1],-0.5,.5)
 
                 if i % int(50) == 0 and i != 0 and k == 0:
                     try:
@@ -925,23 +950,21 @@ class TrainGraspGAN:
                                                                                   self.tou, grasp_quality.detach(),grasp_collision.detach(),
                                                                                   self.superior_A_model_moving_rate,latent_mask)
             if not counted:
-                self.ch_env.update_obj_info(0.1)
+
                 # self.superior_A_model_moving_rate.update(0)
                 self.tou = 1 - self.superior_A_model_moving_rate.val
                 # self.step_generator_without_sampler(depth,floor_mask,pc,latent_mask)
-                self.ch_env.remove_obj()
-                self.skip_rate.update(1.)
+                if k==0:
+                    self.ch_env.update_obj_info(0.1)
+                    self.skip_rate.update(1.)
+                    self.ch_env.remove_obj()
+
                 break
             else:
                 self.skip_rate.update(0.)
                 self.ch_env.update_obj_info(0.9)
 
-            if self.skip_rate.val>0.7:
-                self.batch_size = 1
-                self.iter_per_scene=5
-            elif self.skip_rate.val<0.3:
-                self.batch_size = 2
-                self.iter_per_scene=1
+
 
             self.tou = 1 - self.superior_A_model_moving_rate.val
 
@@ -1046,14 +1069,18 @@ class TrainGraspGAN:
 
         for i in range(iterations):
             # cuda_memory_report()
-            try:
+            if args.catch_exceptions:
+                try:
+                    self.step(i)
+                    pi.step(i)
+                except Exception as e:
+                    print(Fore.RED, str(e), Fore.RESET)
+                    torch.cuda.empty_cache()
+                    self.ch_env.update_obj_info(0.1)
+                    self.ch_env.remove_all_objects()
+            else:
                 self.step(i)
                 pi.step(i)
-            except Exception as e:
-                print(Fore.RED, str(e), Fore.RESET)
-                torch.cuda.empty_cache()
-                self.ch_env.update_obj_info(0.1)
-                self.ch_env.remove_all_objects()
 
         pi.end()
 
@@ -1061,10 +1088,10 @@ class TrainGraspGAN:
         self.save_statistics()
         self.clear()
 
-def train_N_grasp_GAN(n=1):
+def train_N_grasp_GAN(args,n=1):
     lr = 1e-5
 
-    Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
+    Train_grasp_GAN = TrainGraspGAN(args,n_samples=None, learning_rate=lr)
     torch.cuda.empty_cache()
 
     for i in range(n):
@@ -1077,7 +1104,63 @@ def train_N_grasp_GAN(n=1):
         # exit()
         Train_grasp_GAN.begin(iterations=100)
 
+def read_config(path):
+    config = configparser.ConfigParser()
+    config.read(path)
+    return config
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "1"):
+        return True
+    if v.lower() in ("no", "false", "f", "0"):
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected.")
+
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.ini",
+        help="Path to the config file"
+    )
+
+    parser.add_argument(
+        "--load_last_optimizer",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=True,
+        help="Load last optimizer state (default: True). Use true/false."
+    )
+
+
+    parser.add_argument(
+        "--catch_exceptions",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=True,
+        help="Wrap the execution with try and except (default: True). Use true/false."
+    )
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
+    args = get_args()
 
-    train_N_grasp_GAN(n=10000)
+    # Normalize filename (avoid config.ini.ini)
+    config_path = args.config
+    if not config_path.lower().endswith(".ini"):
+        config_path += ".ini"
+
+    # Read config
+    config = read_config(config_path)
+
+    print("Config path:", os.path.abspath(config_path))
+    print("load_last_optimizer:", args.load_last_optimizer)
+
+    train_N_grasp_GAN(args,n=10000)
