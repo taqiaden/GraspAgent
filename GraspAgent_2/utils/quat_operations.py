@@ -87,6 +87,35 @@ def transform_frame(v, u, q):
     u_new = rotate_vec(q, u)
     return v_new, u_new
 
+
+def xy_to_quat_torch(v):
+    """
+    v: (..., 2) normalized XY vectors
+    returns (..., 4) quaternion [w, x, y, z]
+    """
+    theta = torch.atan2(v[..., 1], v[..., 0])
+    half = 0.5 * theta
+    qw = torch.cos(half)
+    qz = torch.sin(half)
+
+    return torch.stack([
+        qw,
+        torch.zeros_like(qw),
+        torch.zeros_like(qw),
+        qz
+    ], dim=-1)
+
+
+def grasp_frame_to_quat(alpha, beta, default_quat):
+    beta = F.normalize(beta, p=2, dim=0, eps=1e-8)
+    beta_quat = xy_to_quat_torch(beta)
+    quat = quat_mul(beta_quat, default_quat)
+    alpha = F.normalize(alpha, p=2, dim=0, eps=1e-8)
+    alpha_quat = quat_between(torch.tensor([0., 0., -1.0],device=alpha.device), alpha)
+    quat = quat_mul(alpha_quat, quat)
+    quat = F.normalize(quat, p=2, dim=0, eps=1e-8)
+    return quat
+
 def quat_from_two_frames(v1, u1, v2, u2):
     def nrm(x):
         return x / np.linalg.norm(x)
@@ -143,7 +172,7 @@ def quat_between(v_from, v_to):
     cross = torch.cross(v_from, v_to)
     dot = torch.dot(v_from, v_to)
     w = torch.sqrt((torch.norm(v_from)**2) * (torch.norm(v_to)**2)) + dot
-    quat = torch.cat([torch.tensor([w]), cross])
+    quat = torch.cat([torch.tensor([w],device=v_from.device), cross])
     return quat / torch.norm(quat)
 
 def quat_mul(q1, q2):

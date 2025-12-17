@@ -7,6 +7,7 @@ from lib.cuda_utils import cuda_memory_report
 from lib.dataset_utils import online_data2
 import numpy as np
 import torch
+import torch.nn.functional as F
 import trimesh
 from colorama import Fore
 import open3d as o3d
@@ -105,7 +106,8 @@ def get_shift_end_points(start_points):
     targets[:,2] += start_points[:,2]
     directions = targets - start_points
     end_points = start_points + ((directions * shift_execution_length) / torch.linalg.norm(directions,axis=-1,keepdims=True))
-    return end_points
+    directions=F.normalize(directions,p=2,dim=-1,eps=1e-8)
+    return end_points,directions
 
 def masked_color(voxel_pc, score, pivot=0.5):
     mask_=score.cpu().numpy()>pivot if torch.is_tensor(score) else score>pivot
@@ -173,13 +175,13 @@ class GraspAgent():
         # print(self.buffer.advantages)
         # exit()
 
-        self.gripper_usage_rate=MovingRate('gripper_usage',min_decay=0.01)
-        self.suction_usage_rate=MovingRate('suction_usage',min_decay=0.01)
-        self.double_grasp_rate=MovingRate('double_grasp',min_decay=0.01)
-        self.gripper_grasp_success_rate=MovingRate('gripper_grasp_success',min_decay=0.01)
-        self.suction_grasp_success_rate=MovingRate('suction_grasp_success',min_decay=0.01)
-        self.shift_rate=MovingRate('shift',min_decay=0.01)
-        self.planning_success_rate=MovingRate('planning_success',min_decay=0.01)
+        self.gripper_usage_rate=MovingRate('gripper_usage',decay_rate=0.01)
+        self.suction_usage_rate=MovingRate('suction_usage',decay_rate=0.01)
+        self.double_grasp_rate=MovingRate('double_grasp',decay_rate=0.01)
+        self.gripper_grasp_success_rate=MovingRate('gripper_grasp_success',decay_rate=0.01)
+        self.suction_grasp_success_rate=MovingRate('suction_grasp_success',decay_rate=0.01)
+        self.shift_rate=MovingRate('shift',decay_rate=0.01)
+        self.planning_success_rate=MovingRate('planning_success',decay_rate=0.01)
 
         self.segmentation_result_time_stamp=None
         self.buffer_modify_alert=False
@@ -224,6 +226,8 @@ class GraspAgent():
         self.preferred_placement_side=False
         self.handover_mask=None
         self.objects_mask=None
+
+        self.shift_directions=None
 
     def print_report(self):
         print(Fore.BLUE)
@@ -363,7 +367,7 @@ class GraspAgent():
     def get_suction_shift_reachability(self,positions):
         suction_scope_a = self.suction_arm_reachability_net(torch.cat([positions, self.suction_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         if self.shift_end_points is None:
-            self.shift_end_points = get_shift_end_points(positions)
+            self.shift_end_points,self.shift_directions = get_shift_end_points(positions)
         suction_scope_b = self.suction_arm_reachability_net(torch.cat([self.shift_end_points, self.suction_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         result=torch.stack([suction_scope_a,suction_scope_b],dim=-1)
         result,_=torch.min(result,dim=-1)
@@ -377,7 +381,7 @@ class GraspAgent():
 
     def get_gripper_shift_reachability(self,positions):
         gripper_scope_a=self.gripper_arm_reachability_net(torch.cat([positions, self.gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
-        self.shift_end_points = get_shift_end_points(positions)
+        self.shift_end_points,self.shift_directions = get_shift_end_points(positions)
         gripper_scope_b=self.gripper_arm_reachability_net(torch.cat([self.shift_end_points, self.gripper_approach], dim=-1)).squeeze()#.squeeze().detach().cpu().numpy()
         result = torch.stack([gripper_scope_a, gripper_scope_b], dim=-1)
         result, _ = torch.min(result, dim=-1)
@@ -911,8 +915,6 @@ class GraspAgent():
 
         scene_list = []
 
-        # if first_action_obj.is_executable and second_action_obj.is_executable:
-        #     '''dual pose view'''
         first_pose_mesh=first_action_obj.pose_mesh2()
         if first_pose_mesh is not None:
             first_action_obj.print_()
@@ -922,15 +924,7 @@ class GraspAgent():
         if second_pose_mesh is not None:
             second_action_obj.print_()
             scene_list+=second_pose_mesh
-        # else:
-        #     '''single pose view'''
-        #
-        #
-        #     first_pose_mesh = first_action_obj.pose_mesh()
-        #     if first_pose_mesh is not None: scene_list += [first_pose_mesh]
-        #
-        #     second_pose_mesh = second_action_obj.pose_mesh()
-        #     if second_pose_mesh is not None: scene_list += [second_pose_mesh]
+
         voxel_pc_numpy=self.voxel_pc.cpu().numpy()
         masked_colors = np.ones_like(voxel_pc_numpy) * [0.52, 0.8, 0.92]
         if self.first_action_mask is not None:
@@ -953,7 +947,7 @@ class GraspAgent():
                 break
         return T_d
 
-    def gripper_grasp_processing(self,action_obj,  view=False):
+    def process_grasp_action(self,action_obj,  view=False):
         target_point = self.voxel_pc[action_obj.point_index]
         relative_pose_7 = self.gripper_poses_7[action_obj.point_index]
         action_obj.parrelel_gripper_pose=relative_pose_7.clone()
@@ -984,14 +978,17 @@ class GraspAgent():
 
         if view: vis_scene(T_d, width, npy=self.voxel_pc)
 
-    def gripper_shift_processing(self,action_obj):
-        normal = self.normals[action_obj.point_index]
+    def process_shift_action(self,action_obj):
+        # normal = self.normals[action_obj.point_index]
         target_point = self.voxel_pc[action_obj.point_index]
 
-        minus_normal = -normal
-        v0 = torch.tensor([1., 0., 0.],device=normal.device)
-        a = angle_between_vectors(v0, minus_normal)  # scalar
-        b = vector_product(v0, minus_normal)  # (3,)
+        shift_dir=self.shift_directions[action_obj.point_index]
+        shift_approach=torch.cat([-shift_dir,-0.707])
+
+        # minus_normal = -normal
+        v0 = torch.tensor([1., 0., 0.],device=shift_approach.device)
+        a = angle_between_vectors(v0, shift_approach)  # scalar
+        b = vector_product(v0, shift_approach)  # (3,)
 
         T_d = rotation_matrix(a, b)  # (4,4)
         T_d[:3, 3] = target_point
@@ -1005,7 +1002,7 @@ class GraspAgent():
 
         action_obj.is_executable=not has_collision
 
-    def suction_processing(self,action_obj):
+    def process_suction_action(self,action_obj):
         normal = self.normals[action_obj.point_index]
         target_point = self.voxel_pc[action_obj.point_index]
 
@@ -1020,16 +1017,16 @@ class GraspAgent():
     def process_action(self,action_obj):
         if action_obj.is_grasp:
             if action_obj.use_gripper_arm:
-                self.gripper_grasp_processing(action_obj )
+                self.process_grasp_action(action_obj )
             else:
-                self.suction_processing(action_obj)
+                self.process_suction_action(action_obj)
         else:
             '''shift action'''
             action_obj.shift_end_point=self.shift_end_points[action_obj.point_index]
             if action_obj.use_gripper_arm:
-                self.gripper_shift_processing(action_obj)
+                self.process_shift_action(action_obj)
             else:
-                self.suction_processing(action_obj)
+                self.process_suction_action(action_obj)
 
     def get_dense_knee_extremes(self,approach_vectors):
         res_elevation = knee_ref_elevation - self.voxel_pc[:,2]

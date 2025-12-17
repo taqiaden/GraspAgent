@@ -606,13 +606,11 @@ class att_res_conv_normalized(nn.Module):
         inputs = torch.cat([key_value_input, query_input], dim=1)
         res = self.res(inputs)
 
-
         '''key value from input1'''
         # key = self.key(normalized_key_value)
         value = self.value(key_value_input)
 
         query = self.query(query_input)
-
 
         key = self.key(key_value_input)
         # bias=self.bias(key_value_input)
@@ -841,8 +839,8 @@ class att_conv_normalized_free2(nn.Module):
 
         self.gamma = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
-            nn.Mish(),
-            nn.Conv2d(64, 64, kernel_size=1),
+            # nn.Mish(),
+            # nn.Conv2d(64, 64, kernel_size=1),
 
         ).to('cuda')
 
@@ -851,19 +849,25 @@ class att_conv_normalized_free2(nn.Module):
         ).to('cuda')
 
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, 64, kernel_size=1),
-            nn.Mish(),
-            # nn.Conv2d(64, 64, kernel_size=1),
-            # activation_function,
+            nn.Conv2d(in_c2, 128, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(128, 128, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(128, 64, kernel_size=1),
         ).to('cuda')
 
-        self.mid = nn.Sequential(
-            nn.Mish(),
+        self.contx_proj = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=1),
-            # nn.Conv2d(64, 64, kernel_size=1),
-            # activation_function,
+            nn.SiLU(),
+            nn.Conv2d(64, 64, kernel_size=1),
         ).to('cuda')
 
+        # self.mid2 = nn.Sequential(
+        #     nn.Mish(),
+        #     nn.Conv2d(64, 64, kernel_size=1),
+        #     # nn.Conv2d(64, 64, kernel_size=1),
+        #     # activation_function,
+        # ).to('cuda')
         self.d = nn.Sequential(
             activation_function,
             nn.Conv2d(64, 64, kernel_size=1),
@@ -878,31 +882,44 @@ class att_conv_normalized_free2(nn.Module):
         self.in_c1=in_c1
 
 
-    def forward(self, key_value_input, query_input):
-
+    def forward(self, context, query_input):
+        context=self.contx_proj(context)
+        context=F.normalize(context,p=2,dim=1,eps=1e-8)
         '''key value from input1'''
         query = self.query(query_input)
+        query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # query=self.mid2(query)
+
+
+        x=context*query
+        return x.sum(dim=1,keepdim=True)
+
+
+        query=torch.softmax(query,dim=1)
+        #
 
         # query=query-query.mean(dim=1,keepdim=True)
 
         # bias=self.bias(key_value_input)
         # key = F.normalize(key, p=2, dim=1, eps=1e-8)
-        query = F.normalize(query, p=2, dim=1, eps=1e-8)
-        query=self.mid(query)
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # query=self.mid(query)
         # query = F.softmax(query, dim=1)
 
         # query = F.softmax(query.unflatten(1,(2,-1)) * self.scale, dim=1).flatten(1,2)
 
-        gamma = self.gamma(key_value_input)
-        beta = self.beta(key_value_input)
+        gamma = self.gamma(context)
+        beta = self.beta(context)
 
         # key=key-key.mean(dim=1,keepdim=True)
         # query=query-query.mean(dim=1,keepdim=True)
 
-        x = (gamma * query)
-
-        x = F.softmax(x*self.scale, dim=1)
-        x=x*beta
+        x = (gamma * query)+beta
+        # x = self.mid(x)
+        # x = F.normalize(x, p=2, dim=1, eps=1e-8)
+        # x=torch.sigmoid(x)
+        # x = F.softmax(x*self.scale, dim=1)
+        # x=x*beta
 
         # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
 

@@ -15,8 +15,15 @@ from models.decoders import LayerNorm2D, att_conv_LN, att_conv_norm_free, att_re
 from models.point_net_grasp_gan import DepthPointNetAdapter
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
-from registration import camera, standardize_depth
 import torch.nn.functional as F
+
+
+def depth_standardization(depth,mask):
+    # mean_ = depth[mask].mean()
+    mean_=1265
+    depth_ = (depth.clone() - mean_) / 30
+    depth_[~mask] = 0.
+    return depth_
 
 from visualiztion import view_features
 
@@ -248,10 +255,10 @@ class GripperGraspSampler3(nn.Module):
 
         # beta=beta_dist_width[:,0:2]
         width=self.width(representation_2d,torch.cat([approach,beta,depth],dim=1))
-        width = F.normalize(width, p=2, dim=1).sum(dim=1, keepdim=True)
+        width = F.normalize(width, p=2, dim=1).sum(dim=1,keepdim=True)
 
         dist=self.dist(representation_2d,torch.cat([approach,beta,width,depth],dim=1))
-        dist = F.normalize(dist, p=2, dim=1).sum(dim=1, keepdim=True)
+        dist = F.normalize(dist, p=2, dim=1).sum(dim=1,keepdim=True)
 
         # dist=self.softplus(dist)
         # width=1-self.softplus(-width)
@@ -438,8 +445,11 @@ class D(nn.Module):
         # self.back_bone.GN_on_decoder()
 
         self.att_block_ = att_conv_normalized_free2(in_c1=64, in_c2=7+1 , out_c=1,
-                                           relu_negative_slope=0.1,activation=None,drop_out_ratio=0.).to(
+                                           relu_negative_slope=0.1,activation=silu,drop_out_ratio=0.).to(
             'cuda')
+
+        # add_spectral_norm_selective(self.back_bone)
+        # add_spectral_norm_selective(self.att_block_)
 
     def get_features(self,depth):
         depth = standardize_depth(depth)
@@ -464,7 +474,7 @@ class D(nn.Module):
 
 
 
-        print('D max_features_output=',features.max().item(), ', min=',features.min().item(),', abs mean=',features.abs().mean().item(),'mean=',features.mean().item())
+        print('D max_features_output=',features.max().item(), ', min=',features.min().item(),', std=',features.std().item(),', mean=',features.mean().item())
 
 
 

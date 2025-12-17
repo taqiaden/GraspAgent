@@ -90,7 +90,9 @@ class OnlingClustering():
     def load(self,inti_centers=None):
         if os.path.exists(self.save_path):
             try:
-                return torch.load(self.save_path).cuda()
+                clusters=torch.load(self.save_path).cuda()
+                if clusters.shape[1]==self.vector_size: return  clusters
+                else: return inti_centers
             except Exception as e:
                 print(Fore.RED,'failed to load clusters center , ',str(e),Fore.RESET)
                 return inti_centers

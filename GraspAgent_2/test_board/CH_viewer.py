@@ -195,7 +195,7 @@ class TrainGraspGAN:
         floor_collision=grasp_collision[0,1].reshape(-1)
         any_collision=grasp_collision[0,2].reshape(-1)
 
-        selection_mask = (~floor_mask) & (any_collision<0.5)
+        selection_mask = (~floor_mask) #& (any_collision<0.5)
 
         gripper_pose_PW = gripper_pose.permute(0, 2, 3, 1)[0, :, :, :].reshape(360000,self.n_param)
         clipped_gripper_pose_PW=gripper_pose_PW.clone()
@@ -252,12 +252,13 @@ class TrainGraspGAN:
             # print('ref')
             # ref_success ,ref_initial_collision= self.evaluate_grasp(target_point,target_ref_pose,view=True,shake_intensity=0.002)
             print('gen')
-            # gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=False)
-            # print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,n_contact,self_collide,Fore.RESET )
-            gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=True)
+            gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=False)
             print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,n_contact,self_collide,Fore.RESET )
+            if gen_success:
+                gen_success,gen_initial_collision,n_contact,self_collide = self.evaluate_grasp(target_point, target_generated_pose,view=True)
+                print(Fore.LIGHTCYAN_EX,gen_success,gen_initial_collision,n_contact,self_collide,Fore.RESET )
     def step(self,i):
-        self.ch_env.drop_new_obj(stablize=np.random.random()>0.5)
+        self.ch_env.drop_new_obj(stablize=np.random.random()>0.5,selected_index=None)
 
         '''get scene perception'''
         depth, pc, floor_mask = self.ch_env.get_scene_preception(view=False)
@@ -281,6 +282,7 @@ class TrainGraspGAN:
                             1 - self.grasp_quality_statistics.accuracy)
                 annealing_factor = self.tou * f
                 print(f'mean_annealing_factor= {annealing_factor.mean()}, tou={self.tou}')
+
 
                 gripper_pose_ref = ch_pose_interpolation(gripper_pose, self.sampling_centroid,
                                                          annealing_factor=annealing_factor,quat_centers=self.quat_centers.centers,finger_centers=self.fingers_centers.centers)  # [b,self.n_param,600,600]

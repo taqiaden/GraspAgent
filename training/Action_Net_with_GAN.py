@@ -73,8 +73,8 @@ def firmness_loss(c_, s_, f_, q_, prediction_, label_, prediction_uniqness, dist
     if sum(s_) == 0 and sum(c_) == 0:
         if (f_[1] - f_[0] > 0.) and q_[1] > 0.5:
             relative_firmness = (abs(f_[1] - f_[0]) / (f_[1] + f_[0]))
-            margin=(dist_factor ** (1 + m - (q_[1] ** m))) * (q_[1] ** m)*(1-dist_factor)**0.2
-            margin=margin**0.5
+            # margin=(dist_factor ** (1 + m - (q_[1] ** m))) * (q_[1] ** m)*(1-dist_factor)**0.2
+            # margin=margin**0.5
             # margin = (f_[1] ** m)
 
             # loss = torch.clamp(1 - prediction_, 0.) ** 2 + torch.clamp(1 - label_, 0.) ** 2 + torch.clamp(
@@ -84,8 +84,8 @@ def firmness_loss(c_, s_, f_, q_, prediction_, label_, prediction_uniqness, dist
             return True, label_, prediction_, relative_firmness, 0, loss
         elif (f_[0] - f_[1] > 0.) and q_[0] > 0.5:
             relative_firmness = (abs(f_[1] - f_[0]) / (f_[1] + f_[0]))
-            margin=(dist_factor ** (1 + m - (q_[0] ** m))) * (q_[0] ** m)
-            margin = (f_[0] ** m)
+            # margin=(dist_factor ** (1 + m - (q_[0] ** m))) * (q_[0] ** m)
+            # margin = (f_[0] ** m)
 
             # loss = torch.clamp(1 - prediction_, 0.) ** 2 + torch.clamp(1 - label_, 0.) ** 2 + torch.clamp(
             #     prediction_ - label_ + relative_firmness, 0.) ** 2
@@ -527,6 +527,7 @@ class TrainGraspGAN:
                     print(Fore.RESET)
 
             if not counted:
+                if target_generated_pose[-2]<0.1:f_[0]=0
                 '''firmness loss'''
                 counted, superior, inferior, margin, margin2, loss = firmness_loss(c_, s_, f_, q_, prediction_,
                                                                                    label_, prediction_uniqness,
@@ -603,7 +604,7 @@ class TrainGraspGAN:
 
             # if loss > -0.3:
             # cuda_memory_report()
-            print(Fore.LIGHTYELLOW_EX, f'c_loss={loss.item()}', '  scores mean =', inferiors.mean().item(), Fore.RESET)
+            print(Fore.LIGHTYELLOW_EX, f'c_loss={loss.item()}', '  scores mean =', inferiors.mean().item(),' margins= ',margin_lis, Fore.RESET)
 
             loss.backward()
 
@@ -1012,6 +1013,8 @@ class TrainGraspGAN:
 
             pc, mask = depth_to_point_clouds(depth[0, 0], camera)
             pc = transform_to_camera_frame_torch(pc, reverse=True)
+
+
 
             if valid_gripper_pose:
                 valid_pose_index = self.pixel_to_point_index(depth, mask, gripper_pixel_index)

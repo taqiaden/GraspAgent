@@ -64,6 +64,7 @@ class Action():
         self.transformation=torch.full((4,4), float('nan'), device='cuda')
         self.width=None
         self.shift_end_point=torch.full((3,), float('nan'), device='cuda')
+        self.parrelel_gripper_pose=None
 
         '''quality'''
         self.is_executable=None
@@ -127,7 +128,7 @@ class Action():
     @property
     def real_width(self):
         if self.width is not None:
-            real_width = self.width * config.width_scale
+            real_width = self.width.item() * config.width_scale
             if real_width > 25:
                 return 25
             elif real_width < 0:
@@ -272,6 +273,9 @@ class Action():
             pr.print_(f'{self.action_name} using {self.arm_name} arm')
             if self.target_point is not None:
                 pr.print_(f'target point {self.target_point}, props= {self.prob}')
+
+            if self.parrelel_gripper_pose is not None:
+                pr.print_(f'parrelel_gripper_pose {self.parrelel_gripper_pose}, props= {self.prob}')
 
             if self.robot_feedback is not None:
                 pr.print_(f'Robot feedback message : {self.robot_feedback}')

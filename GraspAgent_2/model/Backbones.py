@@ -112,7 +112,6 @@ class PointNetBackbone(nn.Module):
 class PointNetA(nn.Module):
     def __init__(self,use_instance_norm=True,use_bn=False):
         super().__init__()
-        self.pc_center_3 = torch.tensor([0.4364, -0.0091, 0.0767]).to('cuda')
         r = 1.
         radii_list_new = [[0.0025 * r, 0.004 * r, 0.008 * r],
                           [0.015 * r, 0.03 * r, 0.06 * r],
@@ -124,8 +123,7 @@ class PointNetA(nn.Module):
                                           use_instance_norm=use_instance_norm).to('cuda')
 
     def forward(self, pc_data_ ):
-        shifted_pc_data = pc_data_ - self.pc_center_3
-        representation = self.back_bone(shifted_pc_data)
+        representation = self.back_bone(pc_data_)
         return representation
 
 

@@ -289,6 +289,7 @@ class ActionNet(nn.Module):
             return gripper_pose,griper_collision_classifier,approach
 
     def forward(self, depth,mask, detach_backbone=False):
+
         '''input standardization'''
         depth = depth_standardization(depth,mask)
         batch_size=depth.shape[0]
@@ -299,9 +300,9 @@ class ActionNet(nn.Module):
                 features = self.back_bone(input).detach()
         else:
             features = self.back_bone(input)
+        print('Depth max=',depth.max().item(), ', min=',depth.min().item(),', std=',depth.std().item(),', mean=',depth.mean().item())
 
-        print('A max_features_output=',features.max().item(), ', min=',features.min().item(),', mean=',features.mean().item())
-
+        print('A max_features_output=',features.max().item(), ', min=',features.min().item(),', std=',features.std().item(),', mean=',features.mean().item())
 
         # features=self.LN(features)
         # print(features)
@@ -366,8 +367,9 @@ class ActionNet(nn.Module):
 
         return gripper_pose, predicted_normal, griper_collision_classifier, suction_quality_classifier, shift_affordance_classifier, background_class
 def depth_standardization(depth,mask):
-    mean_ = depth[mask].mean()
-
+    # mean_ = depth[mask].mean()
+    mean_=1265
+    # print(f'mean_: {mean_}')
     depth_ = (depth.clone() - mean_) / 30
     depth_[~mask] = 0.
 

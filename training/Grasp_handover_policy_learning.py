@@ -32,7 +32,8 @@ online_data = online_data()
 
 demonstrations_data = demonstrations_data()
 
-bce_loss= torch.nn.BCELoss()
+main_loss= torch.nn.BCELoss()
+# main_loss= binary_smooth_l1
 
 def policy_loss(new_policy_probs, old_policy_probs, advantages, epsilon=0.2):
     ratio = new_policy_probs / old_policy_probs
@@ -76,8 +77,8 @@ class TrainPolicyNet:
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
-        # self.model_wrapper.ini_adam_optimizer(learning_rate=self.learning_rate, beta1=0.9)
-        self.model_wrapper.ini_sgd_optimizer(learning_rate=self.learning_rate)
+        self.model_wrapper.ini_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9)
+        # self.model_wrapper.ini_sgd_optimizer(learning_rate=self.learning_rate)
 
 
     def synchronize_buffer(self):
@@ -198,7 +199,7 @@ class TrainPolicyNet:
                 g_pix_B = gripper_pixel_index[j, 1]
                 prediction = griper_grasp_quality_score[j, 0, g_pix_A, g_pix_B]
                 # l = binary_smooth_l1(prediction, label)
-                l=bce_loss(prediction, label)
+                l=main_loss(prediction, label)
 
                 self.gripper_sampling_rate.update(1)
 
@@ -214,7 +215,7 @@ class TrainPolicyNet:
                 s_pix_B = suction_pixel_index[j, 1]
                 prediction = suction_grasp_quality_score[j, 0, s_pix_A, s_pix_B]
                 # l = binary_smooth_l1(prediction, label)
-                l=bce_loss(prediction, label)
+                l=main_loss(prediction, label)
 
 
                 self.gripper_sampling_rate.update(0)
@@ -316,12 +317,12 @@ class TrainPolicyNet:
                 pass
             elif labels[j, 1] != -1:
                 '''No grasp points'''
-                demonstration_loss += (bce_loss(target_gripper_predictions[objects_mask],
+                demonstration_loss += (main_loss(target_gripper_predictions[objects_mask],
                                                  torch.zeros_like(target_gripper_predictions)[objects_mask])).mean()
                 # demonstration_loss += (binary_l1(target_suction_predictions[objects_mask], torch.ones_like(target_suction_predictions)[objects_mask])).mean()
             elif labels[j, 2] != -1:
                 '''No suction points'''
-                demonstration_loss += (bce_loss(target_suction_predictions[objects_mask],
+                demonstration_loss += (main_loss(target_suction_predictions[objects_mask],
                                                  torch.zeros_like(target_suction_predictions)[objects_mask])).mean()
                 # demonstration_loss += (binary_l1(target_gripper_predictions[objects_mask], torch.ones_like(target_gripper_predictions)[objects_mask])).mean()
             elif labels[j, 3] != -1:
@@ -341,10 +342,10 @@ class TrainPolicyNet:
             elif labels[j, 6] != -1:
                 '''No grasp nor suction'''
                 demonstration_loss += (
-                    bce_loss(target_gripper_predictions[objects_mask],
+                    main_loss(target_gripper_predictions[objects_mask],
                               torch.zeros_like(target_gripper_predictions)[objects_mask])).mean()
                 demonstration_loss += (
-                    bce_loss(target_suction_predictions[objects_mask],
+                    main_loss(target_suction_predictions[objects_mask],
                               torch.zeros_like(target_suction_predictions)[objects_mask])).mean()
             else:
                 assert False, f'{labels}'
@@ -414,8 +415,8 @@ class TrainPolicyNet:
 
     def train(self, max_size=100, batch_size=1):
         '''dataloaders'''
-        seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
-        # seize_policy_ids = self.experience_sampling(int(batch_size * max_size))
+        # seize_policy_ids = self.mixed_buffer_sampling(batch_size=batch_size, n_batches=max_size)
+        seize_policy_ids = self.experience_sampling(int(batch_size * max_size))
         seize_policy_data_loader = self.get_seize_policy_dataloader(seize_policy_ids, batch_size)
 
         pi = progress_indicator('Main training round: ', max_limit=len(seize_policy_data_loader))
@@ -476,7 +477,7 @@ class TrainPolicyNet:
                 if objects_masks[k] is not None:
                     bin_mask = ~objects_masks[k]
                     pred=griper_grasp_quality_score[k,0][masks[k]]
-                    bin_no_grasp_loss+=bce_loss(pred[bin_mask], torch.zeros_like(pred[bin_mask])).mean()
+                    bin_no_grasp_loss+=main_loss(pred[bin_mask], torch.zeros_like(pred[bin_mask])).mean()
                     counter+=1
 
             loss = quality_loss+bin_no_grasp_loss/max(1,counter)
@@ -542,7 +543,7 @@ class TrainPolicyNet:
         self.demonstrations_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-3
+    lr = 1e-4
     train_action_net = TrainPolicyNet(learning_rate=lr)
     train_action_net.initialize_model()
     wait = wi('Begin synchronized trianing')

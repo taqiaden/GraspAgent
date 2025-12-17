@@ -110,6 +110,7 @@ class MojocoMultiFingersEnv():
 
         self.last_hand_geom_id = self.m.ngeom - 1
 
+
         assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
     def update_obj_info(self,score):
@@ -146,7 +147,28 @@ class MojocoMultiFingersEnv():
     def obj_xy_positions(self):
         return [self.objects_poses [i:i+2] for i in range(0, len(self.objects_poses ), 7)]
 
-    def drop_new_obj(self,selected_index=None,obj_pose=None,stablize=True):
+    def view_hand(self):
+        from pyglet import gl
+
+        # Load your model
+        model = mujoco.MjModel.from_xml_path(self.root+self.hand_xml_file)
+        data = mujoco.MjData(model)
+
+        with mujoco.viewer.launch_passive(model, data) as viewer:
+            # ----- white background -----
+            # viewer._user_scn flags remove the skybox
+            viewer.user_scn.flags[mujoco.mjtRndFlag.mjRND_SKYBOX] = 0
+            viewer.user_scn.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0
+
+            # viewer.scn is not exposed, but we can reach the GLFW window
+            # and set the clear colour once:
+            gl.glClearColor(1.0, 1.0, 1.0, 1.0)  # white background
+
+            while viewer.is_running():
+                mujoco.mj_step(model, data)
+                viewer.sync()
+
+    def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True):
         while True:
             if selected_index is None:
                 for j in range(1000):
@@ -165,29 +187,30 @@ class MojocoMultiFingersEnv():
                 else:
                     obj_pose = [(np.random.rand() - 0.5)*0.4, (np.random.rand() - 0.5)*0.4, 0.2]
 
-            r=np.random.random()
-            if r<0.3:
-                obj_quat = torch.randn((4,))
-                obj_quat[[1, 2]] *= 0
-                obj_quat = obj_quat / torch.norm(obj_quat)
-                obj_quat = obj_quat.tolist()
-                # print(obj_quat)
-            elif r>0.7:
-                obj_quat = torch.randn((4,))
-                obj_quat = obj_quat / torch.norm(obj_quat)
-                obj_quat = obj_quat.tolist()
-            else:
-                basis_quats = torch.tensor([
-                    [1., 0., 0., 0.],
-                    [0., 1., 0., 0.],
-                    [0., 0., 1., 0.],
-                    [0., 0., 0., 1.]
-                ])  # shape [4,4]
+            if obj_quat is None:
+                r=np.random.random()
+                if r<0.3:
+                    obj_quat = torch.randn((4,))
+                    obj_quat[[1, 2]] *= 0
+                    obj_quat = obj_quat / torch.norm(obj_quat)
+                    obj_quat = obj_quat.tolist()
+                    # print(obj_quat)
+                elif r>0.7:
+                    obj_quat = torch.randn((4,))
+                    obj_quat = obj_quat / torch.norm(obj_quat)
+                    obj_quat = obj_quat.tolist()
+                else:
+                    basis_quats = torch.tensor([
+                        [1., 0., 0., 0.],
+                        [0., 1., 0., 0.],
+                        [0., 0., 1., 0.],
+                        [0., 0., 0., 1.]
+                    ])  # shape [4,4]
 
-                # Select one at random
-                idx = torch.randint(0, 4, (1,))
-                obj_quat = basis_quats[idx][0].tolist()
-                # print(obj_quat)
+                    # Select one at random
+                    idx = torch.randint(0, 4, (1,))
+                    obj_quat = basis_quats[idx][0].tolist()
+                    # print(obj_quat)
 
             self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
 
@@ -319,7 +342,7 @@ class MojocoMultiFingersEnv():
         return idxs,prob
 
     def prepare_obj_mesh(self,idxs=None):
-        tree = ET.parse(self.root+'/scene.xml')
+        tree = ET.parse(self.root+self.scene_xml_file)
         root = tree.getroot()
         if idxs is not None:
             for idx in idxs:
@@ -538,7 +561,9 @@ class MojocoMultiFingersEnv():
     def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=50,shake_intensity=0.05):
         pass
 
-
+    @abstractmethod
+    def  decode_finger_ctrl(self,fingers):
+        pass
 
     def visualize(self,obj_pos_quat,duration=300):
         self.d.mocap_pos[0] = self.far_hand_pos
@@ -673,7 +698,7 @@ class MojocoMultiFingersEnv():
 
         return  self.d.qpos[7 + len(self.default_finger_joints):]
 
-    def manual_view(self,pos=None,quat=None):
+    def manual_view(self,pos=None,quat=None,fingers=None):
         pos=[0., 0., .3] if pos is None else pos
         quat = [0., 1., 0., 0.] if quat is None else quat
 
@@ -687,6 +712,7 @@ class MojocoMultiFingersEnv():
         self.d.qpos[k:] = list(self.objects_poses)
         self.d.qpos[7:k] = self.default_finger_joints
 
+        if fingers is not None: self.d.ctrl=self.decode_finger_ctrl(fingers)
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
@@ -717,7 +743,7 @@ class MojocoMultiFingersEnv():
 
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
-            viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
+            # viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
             # Close the viewer automatically after 30 wall-seconds.
             start = time.time()
             while viewer.is_running() and time.time() - start < 30:
