@@ -77,8 +77,8 @@ class TrainPolicyNet:
 
     def initialize_model(self):
         self.model_wrapper.ini_model(train=True)
-        self.model_wrapper.ini_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9)
-        # self.model_wrapper.ini_sgd_optimizer(learning_rate=self.learning_rate)
+        # self.model_wrapper.ini_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9)
+        self.model_wrapper.ini_sgd_optimizer(learning_rate=self.learning_rate)
 
 
     def synchronize_buffer(self):
@@ -543,7 +543,7 @@ class TrainPolicyNet:
         self.demonstrations_statistics.clear()
 
 if __name__ == "__main__":
-    lr = 1e-4
+    lr = 1e-3
     train_action_net = TrainPolicyNet(learning_rate=lr)
     train_action_net.initialize_model()
     wait = wi('Begin synchronized trianing')

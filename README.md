@@ -20,7 +20,7 @@ This repository is under construction.
         - reset: path plan is found but execution terminated due to an error
 
 ## Acknowledgements
-The collision detection unit and the ROS communication module are mainly handled by by Li Daheng, a senior member at RLIS Lab, CAISA, Bejing, China.
+The collision detection unit, the ROS communication module,and simulation environment were implemented by by Li Daheng, a senior member at RLIS Lab, CAISA, Bejing, China.
 
 ## Citations
 If you find this project helpful for your research, please consider citing the following BibTeX entry.

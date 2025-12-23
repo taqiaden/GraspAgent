@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from abc import abstractmethod
 from collections import deque
@@ -13,6 +14,7 @@ import numpy as np
 import xml.etree.ElementTree as ET
 from random import sample
 import random
+from scipy.spatial.transform import Rotation as R
 
 import os
 
@@ -21,7 +23,17 @@ from scipy.spatial import ConvexHull
 
 from GraspAgent_2.hands_config.sh_config import fingers_max, fingers_min
 from GraspAgent_2.utils.quat_operations import random_quaternion, quat_mul, quat_rotate_vector
+from visualiztion import view_npy_open3d
 
+def pose_quat_to_matrix(position, quaternion):
+    """
+    position: (3,) [x, y, z]
+    quaternion: (4,) [x, y, z, w]  (IMPORTANT order)
+    """
+    T = np.eye(4)
+    T[:3, :3] = R.from_quat(quaternion).as_matrix()
+    T[:3, 3] = position
+    return T
 
 def find_group(num, groups):
     for i, group in enumerate(groups):
@@ -76,8 +88,7 @@ class MojocoMultiFingersEnv():
         self.m=None
         self.d=None
 
-        self.prepare_obj_mesh()
-        self.initiate_mojoco()
+
 
         '''camera info'''
         self.height = 600
@@ -100,6 +111,8 @@ class MojocoMultiFingersEnv():
 
         self.last_hand_geom_id=None
 
+        self.prepare_obj_mesh()
+        self.initiate_mojoco()
 
         self.dict_file_path=self.root+'/'+key+'_obj_data.json'
         self.obj_dict= self.load_obj_dict()
@@ -219,7 +232,7 @@ class MojocoMultiFingersEnv():
                 self.objects.popleft()
                 self.objects_poses=self.objects_poses[:-7]
 
-            self.prepare_obj_mesh(self.objects)
+            self.prepare_obj_mesh()
 
             self.initialize()
 
@@ -341,11 +354,62 @@ class MojocoMultiFingersEnv():
 
         return idxs,prob
 
-    def prepare_obj_mesh(self,idxs=None):
+    def find_obj_file(self, idx):
+        tree = ET.parse(self.root + '/mesh/mesh_'+str(idx)+'.xml')
+        root = tree.getroot()
+
+        for mesh in root.iter('mesh'):
+            name=mesh.get('name')
+            number=re.search(r'\d+', name).group()
+            if str(idx)==number :
+                return mesh.get('file')
+
+        return None
+
+    def get_obj_point_clouds(self,view=False):
+        if self.objects is not None:
+            all_points=[]
+            for i in range(len(self.objects)):
+                idx=self.objects[i]
+                path=self.find_obj_file(idx)
+                print(f'{idx},  {path}')
+                assert path is not None , f'{path}'
+                obj_file=self.root +'/assets/' + path
+                assert os.path.exists(obj_file),f'{obj_file}'
+
+                mesh = trimesh.load(
+                    obj_file,
+                    force='mesh'  # ensures a Trimesh, not a Scene
+                )
+                n=i*7
+                pose=self.objects_poses[n:n+3]
+                quat=self.objects_poses[n+3:n+7]
+                T = pose_quat_to_matrix(pose, quat)
+                mesh.apply_transform(T)
+
+                POINTS_PER_UNIT_AREA=1000000
+                surface_area = mesh.area
+                num_points = int(surface_area * POINTS_PER_UNIT_AREA)
+
+                points, face_ids = trimesh.sample.sample_surface(mesh, num_points)
+                num_points = int(surface_area * POINTS_PER_UNIT_AREA)
+
+                all_points.append(points)
+
+            if view:
+                print(f'N objs: {len(all_points)}')
+                pc=np.vstack(all_points)
+
+                scene = trimesh.Scene()
+                scene.add_geometry(mesh)
+                scene.add_geometry(trimesh.points.PointCloud(pc, colors=[255, 0, 0]))
+                scene.show()
+
+    def prepare_obj_mesh(self):
         tree = ET.parse(self.root+self.scene_xml_file)
         root = tree.getroot()
-        if idxs is not None:
-            for idx in idxs:
+        if self.objects is not None:
+            for idx in self.objects:
                 new_mesh = ET.Element('include')
                 new_mesh.set('file', 'mesh/mesh_' + str(idx) + '.xml')
                 root.insert(1, new_mesh)
@@ -507,8 +571,6 @@ class MojocoMultiFingersEnv():
         # if n_contact>0:
         #     print(Fore.LIGHTCYAN_EX,geom_groups,'--',contacted_groups,'---',n_contact,Fore.RESET)
         return contacted_groups>=minimum_contact_points and not contact_with_floor and not self_collide, contacted_groups,self_collide
-
-
 
     def static_view(self,period=5):
         # print('mocap_pos=', self.d.mocap_pos[0])

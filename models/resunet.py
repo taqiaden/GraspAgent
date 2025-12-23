@@ -28,7 +28,7 @@ class batch_norm_relu(nn.Module):
         return x
 
 class residual_block(nn.Module):
-    def __init__(self, in_c, out_c, stride=1,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.,activation=None,IN_affine=False,scale=1.0):
+    def __init__(self, in_c, out_c, stride=1,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.,activation=None,IN_affine=False,scale=1.0,skip=True):
         super().__init__()
         """ Convolutional layer """
         self.b1 = batch_norm_relu(in_c,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine)
@@ -37,7 +37,7 @@ class residual_block(nn.Module):
         self.c2 = nn.Conv2d(out_c, out_c, kernel_size=3, padding=1, stride=1)
 
         """ Shortcut Connection (Identity Mapping) """
-        self.s = nn.Conv2d(in_c, out_c, kernel_size=1, padding=0, stride=stride)
+        self.s = nn.Conv2d(in_c, out_c, kernel_size=1, padding=0, stride=stride) if skip else None
 
         self.scale=1. if scale is None else nn.Parameter(torch.tensor(scale, dtype=torch.float32, device='cuda'), requires_grad=True)
 
@@ -47,24 +47,25 @@ class residual_block(nn.Module):
         x = self.c1(x)
         x = self.b2(x)
         x = self.c2(x)
-        s = self.s(inputs)
+        s = self.s(inputs) if self.s is not None else 0.
 
         skip = x*self.scale + s
         return skip
 # wget https://repo.continuum.io/archive/Anaconda3-5.3.1-Linux-x86_64.sh
 # bash archive/Anaconda3-5.3.1-Linux-x86_64.sh -b -p ~/anaconda
 class decoder_block(nn.Module):
-    def __init__(self, in_c, out_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.,activation=None,IN_affine=False,scale=1.0):
+    def __init__(self, in_c, out_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.,activation=None,IN_affine=False,scale=1.0,skip=True):
         super().__init__()
 
         self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
-        self.r = residual_block(in_c+out_c, out_c,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
+        self.r = residual_block(in_c+out_c, out_c,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=skip)
 
     def forward(self, inputs, skip):
         x = self.upsample(inputs)
         x = torch.cat([x, skip], axis=1)
         x = self.r(x)
         return x
+
 def get_auto_groupnorm(num_channels, max_groups=8,affine=True):
     # Find the largest number of groups <= max_groups that divides num_channels
     for g in reversed(range(1, max_groups + 1)):
@@ -89,26 +90,28 @@ def replace_instance_with_groupnorm(module, max_groups=8,affine=True):
             replace_instance_with_groupnorm(child, max_groups=max_groups)
 
 class res_unet(nn.Module):
-    def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=None):
+    def __init__(self,in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.0,activation=None,IN_affine=False,scale=None,activate_skip=True):
         super().__init__()
 
         """ Encoder 1 """
         self.c11 = nn.Conv2d(in_c, 64, kernel_size=3, padding=1)
         self.br1 = batch_norm_relu(64,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine)
         self.c12 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
-        self.c13 = nn.Conv2d(in_c, 64, kernel_size=1, padding=0)
+        self.c13 = nn.Conv2d(in_c, 64, kernel_size=1, padding=0) if activate_skip else None
 
         """ Encoder 2 and 3 """
-        self.r2 = residual_block(64, 128, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
-        self.r3 = residual_block(128, 256, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
+        self.r2 = residual_block(64, 128, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
+        self.r3 = residual_block(128, 256, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
 
         """ Bridge """
-        self.r4 = residual_block(256, 512, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
+        self.r4 = residual_block(256, 512, stride=2,Batch_norm=Batch_norm,Instance_norm=Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
 
         """ Decoder """
-        self.d1 = decoder_block(512, 256,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
-        self.d2 = decoder_block(256, 128,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
-        self.d3 = decoder_block(128, 64,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale)
+        self.d1 = decoder_block(512, 256,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
+        self.d2 = decoder_block(256, 128,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
+        self.d3 = decoder_block(128, 64,Batch_norm,Instance_norm,relu_negative_slope=relu_negative_slope,activation=activation,IN_affine=IN_affine,scale=scale,skip=activate_skip)
+
+
 
         """ Output """
         # self.output = nn.Conv2d(64, 1, kernel_size=1, padding=0)
@@ -149,7 +152,7 @@ class res_unet(nn.Module):
 
         x = self.c12(x)
 
-        s = self.c13(inputs)
+        s = self.c13(inputs) if self.c13 is not None else 0.
         skip1 = x + s
 
         # print(x.shape)

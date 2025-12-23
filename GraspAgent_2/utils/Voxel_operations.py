@@ -1,6 +1,7 @@
 import torch
 
 
+
 def crop_cube(points, center, cube_size):
     half_size = cube_size / 2
     lower = center - half_size
@@ -9,6 +10,18 @@ def crop_cube(points, center, cube_size):
     mask = mask.all(dim=1)
     return points[mask]
 
+
+def crop_sphere_torch(points, center, radius):
+    """
+    points: [N, 3] or [B, N, 3]
+    center: [3] or [B, 1, 3]
+    radius: float
+    returns: cropped points
+    """
+    diff = points - center
+    dist2 = (diff * diff).sum(dim=-1)
+    mask = dist2 <= radius * radius
+    return points[mask]
 
 def voxelize_2d_avg_height(points,  cube_size, grid_size,center=None):
     """

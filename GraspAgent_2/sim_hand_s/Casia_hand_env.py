@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import mujoco
 import numpy as np
 import torch
-
 from GraspAgent_2.training.sample_random_grasp import quat_between_batch
 from GraspAgent_2.utils.Multi_finger_hand_env import MojocoMultiFingersEnv
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_mul, bulk_quat_mul, quat_between
@@ -90,19 +89,19 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None
         # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
 
-        delta=[0, 0, 0.01]
+        delta=[0, 0, 0.001]
         self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
-        shake_amp = .1
-        shake_f = 200  # Hz
+        shake_amp = .001
+        shake_f = 20  # Hz
 
-        for i in range(60):
+        for i in range(600):
             #Rise phase
-            if 7 < i < 30:
+            if 70 < i < 300:
                 self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
             # shake phase
-            if 50 > i > 30:
-                if i==31:
+            if 500 > i > 300:
+                if i==301:
                     grasp_success, n_grasp_contact1, self_collide1 = self.check_valid_grasp(minimum_contact_points=2)
                     if not grasp_success or not shake: break
                 t = i * self.m.opt.timestep
@@ -114,8 +113,6 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 self.d.mocap_pos[0] += shake  # vertical shake (z)
             mujoco.mj_step(self.m, self.d)
 
-        # After stepping
-        # grasp_success = self.check_grasped_obj()
         if grasp_success:
             stable_grasp,n_grasp_contact2,self_collide2 = self.check_valid_grasp(minimum_contact_points=2)
             return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp
@@ -151,21 +148,21 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         # print(Fore.CYAN,f'initial d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
         # print(Fore.CYAN,f'initial d.qpos[3:3+4] {self.d.qpos[3:3+4]}',Fore.RESET)
 
-        delta=[0, 0, 0.01]
+        delta=[0, 0, 0.001]
         self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
-        shake_amp = .1
-        shake_f = 200  # Hz
+        shake_amp = .001
+        shake_f = 20  # Hz
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
-            for i in range(60):
+            for i in range(600):
 
                 step_start = time.time()
 
-                if 7 < i < 30:
+                if 70 < i < 300:
                     self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
                 # shake phase
-                if 50>i > 30:
+                if 500>i > 300:
                     t = i * self.m.opt.timestep
                     phase = 2 * np.pi * shake_f * t
                     shake = shake_amp * np.array([np.sin(phase),
@@ -231,11 +228,12 @@ def sample_quat(size,f=0.5,ref_quat=None):
 if __name__ == "__main__":
     root_dir = os.getcwd()  # current working directory
 
-    env=CasiaHandEnv(root=root_dir + "/speed_hand/",max_obj_per_scene=1,is_tendon_control=False)
+    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=10,is_tendon_control=False)
 
     # env.view_geom_names_and_ids()
 
-    pose=torch.tensor([[0.0,  1.0, 0.0,  0.9955,  0.0,  1.0,  0.4976,  0.5088,
+
+    pose=torch.tensor([[-0.5,  -0.5, -0.5,  0.9955,  0.0,  1.0,  0.4976,  0.5088,
          -0.0086],
         [ 0.0412, -0.8468, -0.5293,  0.6404,  0.7680, -0.4819,  0.9882, -0.4003,
          -0.5279],
@@ -310,7 +308,10 @@ if __name__ == "__main__":
 
 
     for i in range(1000):
-        env.drop_new_obj(selected_index=1,obj_pose=[0, 0, -0.09],obj_quat=[1,0,0,0], stablize=True)
+        for i in range(5):
+            env.drop_new_obj(selected_index=None,obj_pose=[0, 0, -0.09],obj_quat=[1,0,0,0], stablize=False)
+
+        env.get_obj_point_clouds(view=True)
 
 
         # quat = sample_quat(1,f=1.,ref_quat = torch.tensor([[1., 1., 0., 0.]],device='cuda'))[0].cpu().tolist()
@@ -410,6 +411,12 @@ if __name__ == "__main__":
         # env.passive_viewer(pos=[0,0,0], quat=quat,ctrl=ctrl)
         # while True:
         env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+        shifted_point[-1]+=0.1
+        env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+        shifted_point[-1]+=0.1
+
+        env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+
             # for i in range(3):
             #     k=7+i
             #     print(f'----joint {i+1}')

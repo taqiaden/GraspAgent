@@ -3,27 +3,26 @@ import torch.nn.functional as F
 from GraspAgent_2.model.Backbones import PointNetA
 from GraspAgent_2.model.Decoders import  ContextGate_2d, ContextGate_1d, res_ContextGate_2d
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
-from GraspAgent_2.utils.model_init import orthogonal_init_all, init_weights_he_normal
+from GraspAgent_2.utils.model_init import  init_weights_he_normal
 from GraspAgent_2.utils.positional_encoding import PositionalEncoding_2d, LearnableRBFEncoding1d, PositionalEncoding_1d, \
     LearnableRBFEncoding2D
 
 from models.resunet import res_unet
 import torch
 import torch.nn as nn
-YPG_model_key = 'YPG_model'
-YPG_model_key2 = 'YPG_model2'
-YPG_model_key3 = 'YPG_model3'
+YPG_point_base_model_key = 'YPG_model'
+
 
 class ParallelGripperPoseSampler(nn.Module):
     def  __init__(self):
         super().__init__()
 
         self.approach = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=1),
+            nn.Linear(64, 32),
             nn.SiLU(),
-            nn.Conv2d(32, 16, kernel_size=1),
+            nn.Linear(32, 16),
             nn.SiLU(),
-            nn.Conv2d(16, 3, kernel_size=1)
+            nn.Linear(16, 3)
         ).to('cuda')
 
         self.scale = nn.Parameter(torch.tensor(0.1, dtype=torch.float32, device='cuda'), requires_grad=True)
@@ -68,10 +67,9 @@ class ParallelGripperPoseSampler(nn.Module):
 
         return pose
 
-class YPG_G(nn.Module):
+class YPG_G_point_base(nn.Module):
     def __init__(self):
         super().__init__()
-        gain = torch.nn.init.calculate_gain('leaky_relu', 0.2)
 
         self.back_bone_ = PointNetA(use_instance_norm=True).to('cuda')
         self.back_bone_.apply(init_weights_he_normal)
@@ -103,11 +101,14 @@ class YPG_G(nn.Module):
         self.pos_encoder = LearnableRBFEncoding2D( num_centers=10,init_sigma=0.1)  # for 3D position
         self.dir_encoder = PositionalEncoding_2d( num_freqs=4)  # for 2D/3D viewing direction
 
-    def forward(self, pc,mask,backbone=None,pairs=None, detach_backbone=False):
+        self.scale_gamma=nn.Sequential(nn.Linear(1,128)).to('cuda')
+        self.scale_beta=nn.Sequential(nn.Linear(1,128)).to('cuda')
 
-        # depth_ = depth_standardization(depth)
-
-        # input=torch.cat([depth_,mask],dim=1)
+    def forward(self, pc_,backbone=None,pairs=None, detach_backbone=False):
+        pc=pc_.clone()
+        pc-=pc.mean(dim=1,keepdim=True)
+        scale = torch.norm(pc, dim=-1).max(dim=1)[0][:,None]  # [B,1]
+        pc/=scale
 
         if detach_backbone:
             with torch.no_grad():
@@ -116,7 +117,13 @@ class YPG_G(nn.Module):
 
         else:
             features = self.back_bone_(pc)#if backbone is None else backbone(input)
-            features2 = self.back_bone2(pc)#*scale
+            features2 = self.back_bone2(pc)#*scale # b,128,N
+
+        gamma=self.scale_gamma(scale)[:,:,None]
+        beta=self.scale_beta(scale)[:,:,None]
+
+        features=features*gamma+beta
+        features2=features2*gamma+beta
 
         print('G max val= ',features.max().item(),' f2: ',features2.max().item())
 
@@ -149,7 +156,7 @@ def depth_standardization(depth):
     depth_[~mask] = 0.
 
     return depth_
-class YPG_D(nn.Module):
+class YPG_D_point_base(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=True,

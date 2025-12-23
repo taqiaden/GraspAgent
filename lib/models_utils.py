@@ -25,6 +25,16 @@ def reshape_for_layer_norm(tensor,camera=camera,reverse=False):
         tensor=tensor.reshape(batch_size,camera.height,camera.width,channels).permute(0,3,1,2)
         return tensor
 
+def print_layers(model):
+    total = 0
+    for name, module in model.named_modules():
+        if hasattr(module, 'weight') and module.weight is not None:
+            n_params = module.weight.numel() + (module.bias.numel() if module.bias is not None else 0)
+            total += n_params
+            print(f"{name:40s} | {str(module):30s} | params = {n_params:,}")
+    print("-" * 80)
+    print(f"Total trainable parameters: {total:,}")
+
 def view_parameters_value(model,iterations=None):
     print('Model parameters value:')
     i=0

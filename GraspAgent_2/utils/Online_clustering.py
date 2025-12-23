@@ -61,18 +61,19 @@ def pairwise_cosine_distance(X, eps=1e-8):
     return dist_matrix
 
 class OnlingClustering():
-    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,inti_centers=None,is_quat=None,dist_threshold=None):
+    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,inti_centers=None,is_quat=None):
         self.N=number_of_centers
         self.key_name=key_name
         self.vector_size=vector_size
         self.decay_rate=decay_rate
 
-        self.dist_threshold=dist_threshold
 
         self.save_path=self.key_name+'_online_centers'
         self.centers=self.load(inti_centers)
 
         self.update_rates=self.load_update_rates()
+
+        # assert self.update_rates.shape[0]==self.centers.shape[0], f'{self.update_rates.shape}, {self.centers.shape}'
         self.is_quat=is_quat if is_quat is not None else False
         self.use_euclidean_dist=use_euclidean_dist
 
@@ -143,29 +144,14 @@ class OnlingClustering():
 
         update_rate_percentage=((self.update_rates[:self.centers.shape[0]] / self.update_rates[:self.centers.shape[0]].sum()) * 100)
 
-        # mean_dist_z_score=z_score(mean_dist_per_center)
-        # min_dist_z_score=z_score(min_dist_per_center)
-        # update_rates_z_score=z_score(self.update_rates[:self.centers.shape[0]])
-
-        # print(f'update_rates_z_score={update_rates_z_score.cpu().numpy()}')
-        # print(f'min_dist_z_score={min_dist_z_score.cpu().numpy()}')
-        # print(f'mean_dist_z_score={mean_dist_z_score.cpu().numpy()}')
-
         if self.centers.shape[0]>self.N and min_dist_per_center.min()<self.metrics[0]:
             index = torch.argmin(min_dist_per_center)
         elif (update_rate_percentage<0.1).any() :
             index=torch.argmin(update_rate_percentage)
-            # print(f'relative_update_rate: ',update_rates_z_score)
-        # elif (min_dist_z_score<-1).any() :
-        #     index=torch.argmin(min_dist_z_score)
-        #     # print(f'relative_mean_dist: ',min_dist_z_score)
-        # elif (mean_dist_z_score<-1).any() :
-        #     index=torch.argmin(mean_dist_z_score)
-        #     # print(f'relative_min_dist: ',mean_dist_z_score)
+
         else:
             self.metrics[3]=min_dist_per_center.min()
             self.metrics[4]=min_dist_per_center.mean()
-
             return
 
 
@@ -173,16 +159,81 @@ class OnlingClustering():
         self.update_rates=torch.cat([self.update_rates[:index], self.update_rates[index+1:]], dim=0)
 
 
-        print(Fore.RED,f'Drop a center for {self.key_name} at index {index}',Fore.RESET)
+        print(Fore.RED,f'Remove redundant taxonomy for {self.key_name} at index {index}',Fore.RESET)
 
         self.save()
+
     def step_decay_rate(self,index):
         step=torch.zeros_like(self.update_rates)
         step[index]=1
 
         self.update_rates = (1 - self.decay_rate) * self.update_rates + self.decay_rate*step
 
+    def repulse_center(
+            self,
+            idx: int,
+            beta: float = 0.02,
+            eps: float = 1e-8,
+            max_norm: float = 0.05,
+            topk: int | None = None,
+    ):
+        """
+        Push centers[idx] away from its neighbours.
+        In-place update.
+        """
+
+        c = self.centers[idx]
+
+        if self.use_euclidean_dist:
+            diff = c - self.centers  # (K, D)
+            dist2 = (diff ** 2).sum(dim=1) + eps
+
+            w = beta / dist2
+            w[idx] = 0.0
+
+            if topk is not None:
+                _, nn = torch.topk(-dist2, k=topk)
+                mask = torch.zeros_like(w)
+                mask[nn] = 1.0
+                w *= mask
+
+            repulse = (w.unsqueeze(1) * diff).sum(dim=0)
+
+            # clip update
+            repulse = repulse * min(1.0, max_norm / (repulse.norm() + eps))
+            self.centers[idx] += repulse
+
+        else:
+            c_norm = F.normalize(c, dim=0)
+            ctr_norm = F.normalize(self.centers, dim=1)
+
+            cos_sim = ctr_norm @ c_norm
+            dist = (1 - cos_sim).clamp_min(eps)
+
+            w = beta / (dist ** 2 + eps)
+            w[idx] = 0.0
+
+            if topk is not None:
+                _, nn = torch.topk(-dist, k=topk)
+                mask = torch.zeros_like(w)
+                mask[nn] = 1.0
+                w *= mask
+
+            repulse_vec = c_norm - ctr_norm
+            repulse = (w.unsqueeze(1) * repulse_vec).sum(dim=0)
+
+            # tangent projection
+            repulse = repulse - torch.dot(repulse, c_norm) * c_norm
+
+            # clip update
+            repulse = repulse * min(1.0, max_norm / (repulse.norm() + eps))
+
+            self.centers[idx] = F.normalize(c_norm + repulse, dim=0)
+
+
     def update(self,new_vector):
+        if not self.use_euclidean_dist:
+            new_vector=F.normalize(new_vector,p=2,dim=0,eps=1e-8)
         if self.centers is None:
             self.centers=new_vector.clone()[None,:]
             self.update_rates=torch.ones_like(self.centers[:,0:1])
@@ -195,15 +246,17 @@ class OnlingClustering():
             index,min_dist=self.get_closest_center(new_vector)
 
             if self.centers.shape[0]<self.N*1.5 and min_dist>min(self.metrics[0].item(),self.metrics[4].item()):
+            # if self.centers.shape[0]<self.N*1.5 and min_dist>self.metrics[3].item():
                 self.centers = torch.cat([self.centers, new_vector[None, :]], dim=0)
                 self.update_rates=torch.cat([self.update_rates,self.update_rates.mean(dim=0,keepdim=True)],dim=0)
-                print(Fore.GREEN,f'add new center, found min dist {min_dist}', Fore.RESET)
+                print(Fore.GREEN,f'Append new taxonomy, min dist {min_dist}', Fore.RESET)
             else:
                 '''update'''
                 old_center = self.centers[index]
                 new_center = self.interpolate( old_center, new_vector)
                 self.centers[index] = new_center
                 self.step_decay_rate(index)
+                self.repulse_center(idx=index,beta=self.decay_rate/5)
 
         self.save()
 
@@ -244,7 +297,7 @@ class OnlingClustering():
 
     def view(self):
         if self.centers is not None:
-            print(f'new_centers of {self.key_name}')
+            print(Fore.LIGHTCYAN_EX,f'new_centers of {self.key_name}',Fore.RESET)
             print(self.centers)
             print('Update_rates %:')
             print(((self.update_rates/self.update_rates.sum())*100).tolist())

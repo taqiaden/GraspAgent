@@ -26,6 +26,9 @@ def pose_7_to_transformation(pose_7,target_point,clip=True):
     # relative_pose_5 = pose_7_to_pose_5(pose_7)
     # T_d, width, distance = convert_angles_to_transformation_form(pose_7, target_point,approach=pose_7[0:3])
     pose_7=pose_7.squeeze()
+    pose_7[0:3]=F.normalize(pose_7[0:3],p=2,dim=0,eps=1e-8)
+    pose_7[3:5]=F.normalize(pose_7[3:5],p=2,dim=0,eps=1e-8)
+
     beta= angle_ratio_from_sin_cos(pose_7[ 3:4], pose_7[ 4:5])*config.beta_scope
 
     if clip:

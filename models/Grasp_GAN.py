@@ -1,18 +1,11 @@
 import torch
-from colorama import Fore
 from torch import nn
 from torch.nn.utils import spectral_norm
 
-# from torch.nn.utils.parametrizations import spectral_norm
-
-from lib.cuda_utils import cuda_memory_report
-from lib.custom_activations import LGRelu
-from lib.models_utils import reshape_for_layer_norm
 from models.decoders import LayerNorm2D, att_conv_LN, att_conv_norm_free, att_res_conv_normalized, \
     att_res_conv_normalized_free, att_conv_normalized_free, att_conv_LN_normalize, att_conv_normalized, att_conv_LN2, \
     film_conv_normalized, att_conv_LN3, att_conv_normalized128, film_conv_normalized_128, att_res_conv_normalized2, \
     att_conv_normalized2, att_conv_normalized_free2, sine, ParameterizedSine
-from models.point_net_grasp_gan import DepthPointNetAdapter
 from models.resunet import res_unet
 from models.spatial_encoder import depth_xy_spatial_data
 import torch.nn.functional as F
@@ -230,9 +223,7 @@ class GripperGraspSampler3(nn.Module):
         #     nn.Conv2d(32, 4, kernel_size=1),
         #     tanh
         # ).to('cuda')
-        self.tanh=nn.Tanh()
-        self.sp=nn.Softplus()
-        self.softplus=nn.Softplus()
+
 
     def forward(self, representation_2d,  depth ):
 

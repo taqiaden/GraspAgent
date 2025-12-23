@@ -850,7 +850,7 @@ class att_conv_normalized_free2(nn.Module):
 
         self.query = nn.Sequential(
             nn.Conv2d(in_c2, 128, kernel_size=1),
-            nn.SiLU(),
+            nn.Softmax(dim=1),
             nn.Conv2d(128, 128, kernel_size=1),
             nn.SiLU(),
             nn.Conv2d(128, 64, kernel_size=1),

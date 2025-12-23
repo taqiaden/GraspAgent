@@ -124,7 +124,10 @@ def init_orthogonal(m,scale=None,gain=1.0):
         if scale is not None:m.weight.data*=scale
         if m.bias is not None:
             nn.init.zeros_(m.bias)
-
+def init_simplex_diversity(m):
+    if isinstance(m, nn.Linear) and m.out_features == 128:   # the layer *before* Softmax
+        nn.init.normal_(m.weight, mean=0.0, std=0.01)      # small variance
+        nn.init.zeros_(m.bias)
 def scaled_init(m):
     if isinstance(m, (nn.Linear, nn.Conv2d)):
         fan_in = m.weight.data.size(1)
@@ -171,6 +174,14 @@ def init_weights_he_normal(m,scale=None):
         if scale is not None: m.weight.data *= scale
         if m.bias is not None:
             nn.init.zeros_(m.bias)
+
+def scaled_he_init_all(module, scale=0.1):
+    for m in module.modules():
+        if isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.Linear)):
+            nn.init.kaiming_normal_(m.weight, nonlinearity="linear")
+            m.weight.data.mul_(scale)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
 
 def init_weights_normal(m):
     """
