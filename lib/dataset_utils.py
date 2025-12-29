@@ -26,6 +26,7 @@ training_data_dir='dataset/training_data/'
 local_online_pools=True
 local_online_pools2=False
 
+
 if where_am_i=='chaoyun-server': # server
     online_data_dir = r'/home/taqiaden/online_data/'
     online_data_dir2 = r'/home/taqiaden/online_data2/'
@@ -40,7 +41,9 @@ elif where_am_i=='yumi': #edge unit
     local_online_pools=False
     local_demonstrations=False
 
-
+elif where_am_i=='yons-MS-7D99':
+    online_data_dir=r'/home/yons/code/GraspAgent/online_data/'
+    online_data_dir2=r'/home/yons/code/GraspAgent/online_data2/'
 else:
     # online_data_dir=ip_address+r'\taqiaden_hub\online_data//'
     # online_data_dir=r'/home/taqiaden/online_data/'

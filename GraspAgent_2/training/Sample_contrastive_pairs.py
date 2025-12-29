@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -137,7 +139,7 @@ def diversity_promotion_probability(sampling_centroid,gripper_pose_ref_PW,grippe
     return selection_p
 
 def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_ref,
-                             sampling_centroid,batch_size,annealing_factor,grasp_quality,superior_A_model_moving_rate):
+                             sampling_centroid,batch_size,annealing_factor,grasp_quality,superior_A_model_moving_rate,Critic_model):
 
     pairs = []
 
@@ -184,11 +186,37 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
 
         prediction_uniqeness= (1- torch.clamp( grasp_quality[target_index],0,1).item())
         # print(f'prediction_uniqeness {prediction_uniqeness}')
+        # alpha_cos_dist = (1 - F.cosine_similarity(target_generated_pose[0:3], target_ref_pose[0:3], dim=-1))/2
+        # beta_cos_dist = (1 - F.cosine_similarity(target_generated_pose[3:5], target_ref_pose[3:5], dim=-1))/2
+        cos_dist = (1 - F.cosine_similarity(target_generated_pose[0:5], target_ref_pose[0:5], dim=-1))/2
+
+        ecl_dist=torch.linalg.norm(torch.clip(target_generated_pose[5:6],0,1)-torch.clip(target_ref_pose[5:6],0,1))#/math.sqrt(2)
+        # width_ecl_dist=torch.norm(torch.clip(target_generated_pose[6],0,1)-torch.clip(target_ref_pose[6],0,1))
+        # print((1-cos_dist.item()),'-----',(1-ecl_dist.item()))
+        sim2=(1-cos_dist.item())*(1-ecl_dist.item())
+        sim2=sim2**2
+        # sim2=2*sim2*((1-sim2)**0.3)
+        # a=target_generated_pose.clone()
+        # b=target_ref_pose.clone()
+        # a[5:]=torch.clip(a[5:],0,1)*2
+        # b[5:]=torch.clip(b[5:],0,1)*2
+        # scale_diff=torch.norm(a-b)/math.sqrt(7*2*2)
+        # sim2=(1-scale_diff)
+
+        # dist = (1 - F.cosine_similarity(a, b, dim=-1))/2
+
+        # dist2=Critic_model.dist(a[None,None,:],b[None,None,:])
+        # sim2=1/(1+dist2.item()*10)
+        # sim2=sim2**2
+
+
+
         c_, s_, f_, q_ = evaluate_grasps3(target_point, target_generated_pose, target_ref_pose, pc, bin_mask,
                                           visualize=False)
 
         counted ,margin,k =check_valid_pair(c_, s_, f_, q_,annealing_factor,prediction_uniqeness)
-
+        # margin=margin*sim2#(1-alpha_cos_dist)*(1-beta_cos_dist)*(1-dist_ecl_dist)*(1-width_ecl_dist)
+        assert margin>=0, f'margin: {margin}'
         if k==1:
             superior_A_model_moving_rate.update(0.)
             sampler_samples+=1
@@ -197,6 +225,8 @@ def sample_contrastive_pairs(  pc, mask, bin_mask, gripper_pose, gripper_pose_re
 
 
         if counted:
+            print(f'-------------------sim2={sim2}')
+
             '''improve firmness'''
             # if k>0:
             #     last_valid_pose=target_ref_pose.clone()

@@ -4,7 +4,7 @@ from torch.nn.utils import spectral_norm
 
 from lib.image_utils import view_image
 from lib.models_utils import number_of_parameters
-
+import spconv.pytorch as spconv
 
 class batch_norm_relu(nn.Module):
     def __init__(self, in_c,Batch_norm=True,Instance_norm=False,relu_negative_slope=0.,activation=None,IN_affine=False):
@@ -73,7 +73,7 @@ def get_auto_groupnorm(num_channels, max_groups=8,affine=True):
             return nn.GroupNorm(num_groups=g, num_channels=num_channels, affine=affine).to('cuda')
     # fallback to LayerNorm behavior
     return nn.GroupNorm(num_groups=1, num_channels=num_channels, affine=affine).to('cuda')
-def add_spectral_norm_selective(model, layer_types=(nn.Conv2d, nn.Linear)):
+def add_spectral_norm_selective(model, layer_types=(nn.Conv3d,nn.Conv2d,nn.Conv1d, nn.Linear,spconv.SparseConv3d)):
     for name, layer in model.named_children():
         if isinstance(layer, layer_types):
             setattr(model, name, spectral_norm(layer, name='weight'))

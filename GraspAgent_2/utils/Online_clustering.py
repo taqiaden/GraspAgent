@@ -146,7 +146,7 @@ class OnlingClustering():
 
         if self.centers.shape[0]>self.N and min_dist_per_center.min()<self.metrics[0]:
             index = torch.argmin(min_dist_per_center)
-        elif (update_rate_percentage<0.1).any() :
+        elif (update_rate_percentage<1).any() :
             index=torch.argmin(update_rate_percentage)
 
         else:

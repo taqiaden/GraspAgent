@@ -30,6 +30,9 @@ def pose_quat_to_matrix(position, quaternion):
     position: (3,) [x, y, z]
     quaternion: (4,) [x, y, z, w]  (IMPORTANT order)
     """
+    quaternion = np.array(quaternion, dtype=np.float64)
+    # Normalize quaternion to unit length
+    quaternion /= np.linalg.norm(quaternion)
     T = np.eye(4)
     T[:3, :3] = R.from_quat(quaternion).as_matrix()
     T[:3, 3] = position
@@ -228,7 +231,7 @@ class MojocoMultiFingersEnv():
             self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
 
             while len(self.objects)>self.max_obj_per_scene:
-                print('Remove object ID: ',self.objects[0])
+                print('Remove object ID: ', self.objects[0])
                 self.objects.popleft()
                 self.objects_poses=self.objects_poses[:-7]
 
@@ -242,6 +245,7 @@ class MojocoMultiFingersEnv():
                 break
             else:
                 self.remove_all_objects()
+            # break
 
         self.save_simulation_state()
 
@@ -359,11 +363,13 @@ class MojocoMultiFingersEnv():
         root = tree.getroot()
 
         for mesh in root.iter('mesh'):
-            name=mesh.get('name')
-            number=re.search(r'\d+', name).group()
-            if str(idx)==number :
-                return mesh.get('file')
+            # name=mesh.get('name')
+            # number=re.search(r'\d+', name).group()
+            # if str(idx)==number :
+            return mesh.get('file') # Assume the obj file name is mentioned at the first mesh
 
+
+        assert False
         return None
 
     def get_obj_point_clouds(self,view=False):
@@ -372,8 +378,7 @@ class MojocoMultiFingersEnv():
             for i in range(len(self.objects)):
                 idx=self.objects[i]
                 path=self.find_obj_file(idx)
-                print(f'{idx},  {path}')
-                assert path is not None , f'{path}'
+                assert path is not None , f'{path,idx}'
                 obj_file=self.root +'/assets/' + path
                 assert os.path.exists(obj_file),f'{obj_file}'
 
@@ -381,13 +386,16 @@ class MojocoMultiFingersEnv():
                     obj_file,
                     force='mesh'  # ensures a Trimesh, not a Scene
                 )
-                n=i*7
+
+
+                n=((len(self.objects)-i-1)*7)
                 pose=self.objects_poses[n:n+3]
                 quat=self.objects_poses[n+3:n+7]
-                T = pose_quat_to_matrix(pose, quat)
+                T=trimesh.transformations.quaternion_matrix(quat)
+                T[:3,3]=pose
                 mesh.apply_transform(T)
 
-                POINTS_PER_UNIT_AREA=1000000
+                POINTS_PER_UNIT_AREA=500000
                 surface_area = mesh.area
                 num_points = int(surface_area * POINTS_PER_UNIT_AREA)
 
@@ -395,15 +403,19 @@ class MojocoMultiFingersEnv():
                 num_points = int(surface_area * POINTS_PER_UNIT_AREA)
 
                 all_points.append(points)
+            pc = np.vstack(all_points)
+            # pc[:, 0:2] *= -1
 
             if view:
                 print(f'N objs: {len(all_points)}')
-                pc=np.vstack(all_points)
+
 
                 scene = trimesh.Scene()
                 scene.add_geometry(mesh)
                 scene.add_geometry(trimesh.points.PointCloud(pc, colors=[255, 0, 0]))
                 scene.show()
+
+            return pc
 
     def prepare_obj_mesh(self):
         tree = ET.parse(self.root+self.scene_xml_file)
@@ -444,7 +456,8 @@ class MojocoMultiFingersEnv():
         cam_pos = self.d.cam_xpos[self.camera_id]
         cam_rot = self.d.cam_xmat[self.camera_id].reshape(3, 3)
         extr = np.eye(4)
-        extr[:3, :3] = -cam_rot
+        # extr[:3, :3] = -cam_rot
+        extr[:3, 1:3] = -cam_rot[:,1:3]
         extr[:3, 3] = cam_pos
         return extr
 
@@ -686,18 +699,20 @@ class MojocoMultiFingersEnv():
                 steps_counter += 1
 
     def get_scene_preception(self,obj_pos_quat=None,view=False):
+        self.restore_simulation_state()
+
         if obj_pos_quat is None: obj_pos_quat=self.objects_poses
 
         self.d.mocap_pos[0] = self.far_hand_pos
         self.d.mocap_quat[0] = self.far_hand_quat
 
-        self.d.qpos = self.far_hand_pos + self.far_hand_quat + self.default_finger_joints + obj_pos_quat#.tolist()
+        self.d.qpos[0:7] = self.far_hand_pos + self.far_hand_quat #+ self.default_finger_joints + obj_pos_quat#.tolist()
         # mujoco.mj_step(self.m, self.d)
 
         depth = self.render_depth(self.renderer, self.camera_id)
 
         pointcloud ,floor_mask= self.depth_to_pointcloud(depth, self.intr, self.extr)
-        pointcloud[:, 0] *= -1
+        # pointcloud[:, 0] *= -1
         # if pointcloud.shape[0]!=600*600:
         #     from lib.image_utils import view_image
         #     view_image(depth)
@@ -707,8 +722,8 @@ class MojocoMultiFingersEnv():
         if view:
             from lib.image_utils import view_image
             view_image(depth)
-            # pc = trimesh.PointCloud(pointcloud)
-            # pc.show()
+            pc = trimesh.PointCloud(pointcloud)
+            pc.show()
 
         return depth,pointcloud,floor_mask
 
@@ -741,11 +756,11 @@ class MojocoMultiFingersEnv():
                     counter+=1
                     self.d.qvel[:] = 0
                     if not stablize:self.d.cvel[:] = 0
-                    self.d.qacc[:] = 0.0
-                    self.d.qfrc_applied[:] = 0.0
-                    self.d.qfrc_actuator[:] = 0.0
-                    self.d.qfrc_constraint[:] = 0.0
-                    self.d.ctrl[:] = 0.0
+                    # self.d.qacc[:] = 0.0
+                    # self.d.qfrc_applied[:] = 0.0
+                    # self.d.qfrc_actuator[:] = 0.0
+                    # self.d.qfrc_constraint[:] = 0.0
+                    # self.d.ctrl[:] = 0.0
                     if counter>window_size:
                         break
                 else:

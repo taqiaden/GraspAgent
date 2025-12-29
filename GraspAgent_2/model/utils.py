@@ -1,9 +1,10 @@
+import spconv.pytorch as spconv
 import torch
 from torch import nn
 from torch.nn.utils import spectral_norm
 
 
-def add_spectral_norm_selective(model, layer_types=(nn.Conv3d,nn.Conv2d,nn.Conv1d, nn.Linear)):
+def add_spectral_norm_selective(model, layer_types=(nn.Conv3d,nn.Conv2d,nn.Conv1d, nn.Linear,spconv.SparseConv3d,spconv.SubMConv3d)):
     for name, layer in model.named_children():
         if isinstance(layer, layer_types):
             setattr(model, name, spectral_norm(layer, name='weight'))

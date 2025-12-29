@@ -2,8 +2,11 @@ import math
 
 from torch import nn
 import torch.nn.functional as F
+
+from GraspAgent_2.model.Backbones import PointNetEncoder, PointNetA
 from GraspAgent_2.model.Decoders import ParameterizedSine, \
-    film_fusion_2d, film_fusion_1d, ContextGate_2d, ContextGate_1d, res_ContextGate_2d, siren
+    film_fusion_2d, film_fusion_1d, ContextGate_2d, ContextGate_1d, res_ContextGate_2d, siren, ContextGate_2d_2, \
+    ContextGate_1d_2
 from GraspAgent_2.model.sparse_encoder import SparseEncoderIN
 from GraspAgent_2.model.utils import replace_activations, add_spectral_norm_selective
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
@@ -30,7 +33,7 @@ class ParallelGripperPoseSampler(nn.Module):
 
         self.approach = nn.Sequential(
             nn.Conv2d(64, 32, kernel_size=1),
-            LayerNorm2D(32),
+            # LayerNorm2D(32),
             nn.SiLU(),
             nn.Conv2d(32, 16, kernel_size=1),
             nn.SiLU(),
@@ -46,14 +49,14 @@ class ParallelGripperPoseSampler(nn.Module):
         # self.beta_decoder = normalize_free_ContextGate_2d(in_c1=64, in_c2=3+1, out_c=2,
         #                                   relu_negative_slope=0., activation=nn.SiLU(),softmax_att=False,use_sin=True).to(
         #     'cuda')
-        self.beta_decoder = ContextGate_2d(in_c1=64, in_c2=1 + 3, out_c=2,
+        self.beta_decoder = ContextGate_2d_2(in_c1=64, in_c2=1 + 3, out_c=2,
                                            relu_negative_slope=0.1, activation=None, use_sin=False, bias=False,cyclic=False).to(
             'cuda')
-        self.width_ = ContextGate_2d(in_c1=64, in_c2=1 + 3 + 2, out_c=1*3,
+        self.width_ = ContextGate_2d_2(in_c1=64, in_c2=1 + 3 + 2, out_c=1,
                                      relu_negative_slope=0.1, activation=None, use_sin=False).to(
             'cuda')
 
-        self.dist_ = ContextGate_2d(in_c1=64, in_c2=1 + 3 + 2 + 1, out_c=1*3,
+        self.dist_ = ContextGate_2d_2(in_c1=64, in_c2=1 + 3 + 2 + 1, out_c=1,
                                     relu_negative_slope=0.1, activation=None, use_sin=False).to(
             'cuda')
 
@@ -82,13 +85,13 @@ class ParallelGripperPoseSampler(nn.Module):
         # encoded_beta=self.dir_encoder(beta)#.detach()
 
         width = self.width_(features, torch.cat([approach, beta, depth_], dim=1))
-        width = F.normalize(width, p=2,dim=1,eps=1e-8)[:,0:1]#.sum(dim=1,keepdim=True)
+        # width = F.normalize(width, p=2,dim=1,eps=1e-8).sum(dim=1,keepdim=True)
         # width += math.sqrt(3)
         # width /= 2 * math.sqrt(3)
         # encoded_width=self.pos_encoder(width)#.detach()
 
         dist = self.dist_(features, torch.cat([approach, beta, width, depth_], dim=1))
-        dist = F.normalize(dist, p=2,dim=1,eps=1e-8)[:,0:1]#.sum(dim=1,keepdim=True)
+        # dist = F.normalize(dist, p=2,dim=1,eps=1e-8).sum(dim=1,keepdim=True)
         # dist += math.sqrt(3)
         # dist /= 2 * math.sqrt(3)
 
@@ -112,7 +115,7 @@ class YPG_G(nn.Module):
 
         self.back_bone_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
                                    relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=True,activate_skip=False).to('cuda')
-
+        # self.point_net_backbone = PointNetA(use_instance_norm=True).to('cuda')
         self.back_bone_.apply(init_weights_he_normal)
         # orthogonal_init_all(self.back_bone, gain=gain)
 
@@ -121,9 +124,9 @@ class YPG_G(nn.Module):
         # replace_instance_with_groupnorm(self.back_bone_, max_groups=16)
 
         self.back_bone2 = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                   relu_negative_slope=0.2, activation=None, IN_affine=False,activate_skip =False).to('cuda')
-        replace_instance_with_groupnorm(self.back_bone2, max_groups=16)
-        # add_spectral_norm_selective(self.back_bone2)
+                                   relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=False,activate_skip =True).to('cuda')
+        # replace_instance_with_groupnorm(self.back_bone2, max_groups=16)
+        add_spectral_norm_selective(self.back_bone2)
         # orthogonal_init_all(self.back_bone2, gain=gain)
         self.back_bone2.apply(init_weights_he_normal)
 
@@ -136,10 +139,12 @@ class YPG_G(nn.Module):
         self.grasp_quality = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=1,
                                                 relu_negative_slope=0.1, activation=None).to(
             'cuda')
-        self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=2,
+        self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=1,
                                                   relu_negative_slope=0.1, activation=None).to(
             'cuda')
-
+        self.grasp_collision2 = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=1,
+                                                  relu_negative_slope=0.1, activation=None).to(
+            'cuda')
         # self.grasp_quality = nn.Sequential(
         #     nn.Conv2d(64+65+1, 64, kernel_size=1),
         #     nn.LeakyReLU(0.2),
@@ -172,9 +177,15 @@ class YPG_G(nn.Module):
 
         # self.D=YPG_D_Decoder()
 
-    def forward(self, depth, mask, backbone=None, pairs=None, detach_backbone=False):
+    def forward(self, depth, mask,pc, detach_backbone=False):
 
         depth_ = depth_standardization(depth)
+
+        # pc_=pc.clone()
+        # pc_=pc_-pc_.mean(dim=0,keepdim=True)
+        # pc_[:,0]/=0.4
+        # pc_[:,1]/=0.6
+        # pc_[:,2]/=0.34
 
         # local_diff3 = depth_ - F.avg_pool2d(depth_, kernel_size=3, stride=1, padding=1)
         # local_diff5 = depth_ - F.avg_pool2d(depth_, kernel_size=5, stride=1, padding=2)
@@ -188,10 +199,13 @@ class YPG_G(nn.Module):
         if detach_backbone:
             with torch.no_grad():
                 features = self.back_bone_(input)  #if backbone is None else backbone(input)
+                # pc_features=self.point_net_backbone(pc_[None,...])
                 features2 = self.back_bone2(input)#*scale
 
         else:
             features = self.back_bone_(input)  #if backbone is None else backbone(input)
+            # pc_features = self.point_net_backbone(pc_[None,...])
+
             features2 = self.back_bone2(input)#*scale
 
         print('G max val= ', features.max().item(), 'mean:', features.mean().item(), ' std:',
@@ -232,6 +246,9 @@ class YPG_G(nn.Module):
         # cuda_memory_report()
 
         grasp_collision = self.grasp_collision(features2, detached_gripper_pose)
+        grasp_collision2 = self.grasp_collision2(features2, detached_gripper_pose)
+        grasp_collision=torch.cat([grasp_collision,grasp_collision2],dim=1)
+
         grasp_collision = self.sig(grasp_collision)
 
         background_detection = self.background_detector(features2)
@@ -256,46 +273,6 @@ def depth_standardization(depth):
 
     return depth_
 
-class MahalanobisDistance(nn.Module):
-    def __init__(self, dim=64, out_dim=None, normalize=True):
-        """
-        dim: input feature dimension (64)
-        out_dim: projected dimension (default = dim)
-        normalize: whether to L2-normalize inputs before distance
-        """
-        super().__init__()
-        out_dim =  dim if out_dim is None else out_dim
-        self.normalize = normalize
-
-        # W defines M = W^T W
-        self.W = nn.Linear(dim, out_dim, bias=False)
-
-        # Small-gain initialization for stability
-        nn.init.kaiming_normal_(self.W.weight, nonlinearity="linear")
-        self.W.weight.data *= 0.5
-
-    def forward(self, main, others):
-        """
-        main:   [B, 1, 64]
-        others: [B, N, 64]
-
-        returns:
-            dist: [B, N]
-        """
-        if self.normalize:
-            main = F.normalize(main, dim=-1)
-            others = F.normalize(others, dim=-1)
-
-        # Broadcast main to [B, N, 64]
-        diff = main - others          # [B, N, 64]
-
-        # Apply learned transform
-        z = self.W(diff)              # [B, N, out_dim]
-
-        # Squared Mahalanobis distance
-        dist = (z * z).sum(dim=-1)    # [B, N]
-
-        return dist
 
 class NaivePointBackbone(nn.Module):
     def __init__(self):
@@ -351,6 +328,9 @@ class YPG_D(nn.Module):
 
         self.sparse_encoder=SparseEncoderIN().to('cuda')
         self.sparse_encoder.apply(init_weights_he_normal)
+
+        # add_spectral_norm_selective(self.sparse_encoder)
+
         # add_spectral_norm_selective(self.point_net_backbone)
 
         # self.dist=MahalanobisDistance(dim=64,normalize=True).to('cuda')
@@ -359,8 +339,9 @@ class YPG_D(nn.Module):
 
         # self.att_block = film_fusion_1d(in_c1=64, in_c2=45+20+1, out_c=1,
         #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=False,bias=False).to('cuda')
-        self.att_block_ = ContextGate_1d(in_c1=512, in_c2=7, out_c=1).to('cuda')
+        self.att_block_ = ContextGate_1d_2(in_c1=512, in_c2=7, out_c=1).to('cuda')
         # self.att_block_.apply(init_weights_he_normal)
+        # add_spectral_norm_selective(self.att_block_)
 
         # self.condition_projection= nn.Sequential(
         #     nn.Linear(45+20, 256),
@@ -509,3 +490,12 @@ class YPG_D(nn.Module):
         # anchor = F.normalize(anchor, p=2, dim=-1, eps=1e-8)
 
         return None, None,output
+
+    def dist(self,pose1,pose2):
+        with torch.no_grad():
+            embedding1=self.att_block_.cond_proj(pose1)
+            embedding2=self.att_block_.cond_proj(pose2)
+            dist=self.att_block_.dist(embedding1,embedding2)
+            return dist
+
+

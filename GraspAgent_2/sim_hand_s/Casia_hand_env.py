@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import mujoco
 import numpy as np
 import torch
+import trimesh
+
 from GraspAgent_2.training.sample_random_grasp import quat_between_batch
 from GraspAgent_2.utils.Multi_finger_hand_env import MojocoMultiFingersEnv
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_mul, bulk_quat_mul, quat_between
@@ -91,7 +93,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         delta=[0, 0, 0.001]
         self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
-        shake_amp = .001
+        shake_amp = .003
         shake_f = 20  # Hz
 
         for i in range(600):
@@ -142,6 +144,8 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         # self.static_view(1000)
 
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
+        self.static_view(1000)
+
         # if ini_contact_with_obj or ini_contact_with_floor:
         #     return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
 
@@ -150,7 +154,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         delta=[0, 0, 0.001]
         self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
-        shake_amp = .001
+        shake_amp = .003
         shake_f = 20  # Hz
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
@@ -188,7 +192,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
         self.static_view(1000)
 
-        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact,self_collide
+        return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact,self_collide,None
 
 def sample_quat(size,f=0.5,ref_quat=None):
     ref_quat = torch.tensor([[0., 1., 0., 0.]],device='cuda') if ref_quat is None else ref_quat
@@ -228,7 +232,7 @@ def sample_quat(size,f=0.5,ref_quat=None):
 if __name__ == "__main__":
     root_dir = os.getcwd()  # current working directory
 
-    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=10,is_tendon_control=False)
+    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=2,is_tendon_control=False)
 
     # env.view_geom_names_and_ids()
 
@@ -308,11 +312,30 @@ if __name__ == "__main__":
 
 
     for i in range(1000):
-        for i in range(5):
-            env.drop_new_obj(selected_index=None,obj_pose=[0, 0, -0.09],obj_quat=[1,0,0,0], stablize=False)
+        # env.prepare_obj_mesh()
+        # env.initialize()
+        env.drop_new_obj(selected_index=None,obj_pose=[0, 0.3, 0.],obj_quat=[1,0,0,0], stablize=False)
 
-        env.get_obj_point_clouds(view=True)
+        full_objects_pc=env.get_obj_point_clouds(view=False)
+        depth,pointcloud,floor_mask=env.get_scene_preception()
 
+        colors1=np.zeros_like(full_objects_pc)
+        colors1[:,0]=255
+        colors2=np.zeros_like(pointcloud)
+        colors1[:,1]=255
+
+        color=np.vstack([colors1,colors2])
+
+        pc=np.vstack([full_objects_pc,pointcloud])
+        from visualiztion import view_npy_open3d
+        #
+        view_npy_open3d(pc,view_coordinate=True)
+
+        # scene = trimesh.Scene()
+        # scene.add_geometry(trimesh.points.PointCloud(pc, colors=color))
+        # scene.show()
+
+        # continue
 
         # quat = sample_quat(1,f=1.,ref_quat = torch.tensor([[1., 1., 0., 0.]],device='cuda'))[0].cpu().tolist()
         # delta = quat_rotate_vector(np.array(quat), np.array([0, 0, 1]))
@@ -320,12 +343,11 @@ if __name__ == "__main__":
         # quat=pose[i,0:4].cpu().tolist()
         # fingers=pose[i,4:4+3].cpu().tolist()
         # transition=pose[i,4+3:].cpu().tolist()
-        from GraspAgent_2.training.CH_training import process_pose
-        quat, fingers, shifted_point = process_pose(np.array([0,0,0.5]), psoe2, view=True)
-        psoe2[4]+=0.1
-        psoe2[5]-=0.1
 
-        print(psoe2)
+        # psoe2[4]+=0.1
+        # psoe2[5]-=0.1
+        #
+        # print(psoe2)
         # print(f'combine {quats[i]}, {quats[i+1]}')
         # z = quaternion_angular_distance(quats[i], quats[i+1])
         # print(z)
@@ -337,59 +359,59 @@ if __name__ == "__main__":
         # quat=combine_quaternions(quats[i], quats[i+1], 0.5, 0.5, eps=1e-8).cpu().tolist()
         # print(f'get {quat}')
         # quat = [1.0, 0., 0., 0.]
-        angle_rad = math.radians(30)  # convert degrees → radians
-        cos_30 = math.cos(angle_rad)
-        sin_30 = math.sin(angle_rad)
+        # angle_rad = math.radians(30)  # convert degrees → radians
+        # cos_30 = math.cos(angle_rad)
+        # sin_30 = math.sin(angle_rad)
 
         # quat=quat_from_two_frames(v1=np.array([1.,0.,0.]),u1=np.array([0.,1.,0.]),v2=np.array([0.,sin_30,-cos_30]),u2=np.array([0.,cos_30,sin_30])).tolist()
         # print(quat)
 
         # transform_frame()
-        def xy_to_quat_torch(v):
-            """
-            v: (..., 2) normalized XY vectors
-            returns (..., 4) quaternion [w, x, y, z]
-            """
-            theta = torch.atan2(v[..., 1], v[..., 0])
-            half = 0.5 * theta
-            qw = torch.cos(half)
-            qz = torch.sin(half)
-
-            return torch.stack([
-                qw,
-                torch.zeros_like(qw),
-                torch.zeros_like(qw),
-                qz
-            ], dim=-1)
-
-        beta=torch.randn((2,))
-        beta=F.normalize(beta,p=2,dim=0,eps=1e-8)
-        beta_quat=xy_to_quat_torch(beta)
+        # def xy_to_quat_torch(v):
+        #     """
+        #     v: (..., 2) normalized XY vectors
+        #     returns (..., 4) quaternion [w, x, y, z]
+        #     """
+        #     theta = torch.atan2(v[..., 1], v[..., 0])
+        #     half = 0.5 * theta
+        #     qw = torch.cos(half)
+        #     qz = torch.sin(half)
+        #
+        #     return torch.stack([
+        #         qw,
+        #         torch.zeros_like(qw),
+        #         torch.zeros_like(qw),
+        #         qz
+        #     ], dim=-1)
+        #
+        # beta=torch.randn((2,))
+        # beta=F.normalize(beta,p=2,dim=0,eps=1e-8)
+        # beta_quat=xy_to_quat_torch(beta)
 
         # v2=quat_rotate_vector(quat, [cos_30,-sin_30,0])
-        default_quat=quat_between(torch.tensor([cos_30,-sin_30,0]),torch.tensor([0.,0.,-1.]))
+        # default_quat=quat_between(torch.tensor([cos_30,-sin_30,0]),torch.tensor([0.,0.,-1.]))
+        #
+        # quat=quat_mul(beta_quat,default_quat)
 
-        quat=quat_mul(beta_quat,default_quat)
 
+        # alpha=torch.randn((3,))/5
+        # alpha[-1]=-1
+        # alpha=F.normalize(alpha,p=2,dim=0,eps=1e-8)
 
-        alpha=torch.randn((3,))/5
-        alpha[-1]=-1
-        alpha=F.normalize(alpha,p=2,dim=0,eps=1e-8)
+        # print(alpha,'------')
 
-        print(alpha,'------')
+        # alpha_quat=quat_between(torch.tensor([0.,0.,-1.0]),alpha)
+        # quat=quat_mul(alpha_quat,quat).tolist()
 
-        alpha_quat=quat_between(torch.tensor([0.,0.,-1.0]),alpha)
-        quat=quat_mul(alpha_quat,quat).tolist()
-
-        def grasp_frame_to_quat(alpha,beta,default_quat):
-            beta = F.normalize(beta, p=2, dim=0, eps=1e-8)
-            beta_quat = xy_to_quat_torch(beta)
-            quat = quat_mul(beta_quat, default_quat)
-            alpha = F.normalize(alpha, p=2, dim=0, eps=1e-8)
-            alpha_quat = quat_between(torch.tensor([0., 0., -1.0]), alpha)
-            quat = quat_mul(alpha_quat, quat).tolist()
-            quat = F.normalize(quat, p=2, dim=0, eps=1e-8)
-            return quat
+        # def grasp_frame_to_quat(alpha,beta,default_quat):
+        #     beta = F.normalize(beta, p=2, dim=0, eps=1e-8)
+        #     beta_quat = xy_to_quat_torch(beta)
+        #     quat = quat_mul(beta_quat, default_quat)
+        #     alpha = F.normalize(alpha, p=2, dim=0, eps=1e-8)
+        #     alpha_quat = quat_between(torch.tensor([0., 0., -1.0]), alpha)
+        #     quat = quat_mul(alpha_quat, quat).tolist()
+        #     quat = F.normalize(quat, p=2, dim=0, eps=1e-8)
+        #     return quat
 
         # print(v2)
         # v2*=0
@@ -410,12 +432,17 @@ if __name__ == "__main__":
         # print(env.obj_xy_positions)
         # env.passive_viewer(pos=[0,0,0], quat=quat,ctrl=ctrl)
         # while True:
-        env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
-        shifted_point[-1]+=0.1
-        env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
-        shifted_point[-1]+=0.1
+        # env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+        # shifted_point[-1]+=0.1
+        # env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+        # shifted_point[-1]+=0.1
 
-        env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+        from GraspAgent_2.training.CH_training import process_pose
+        while True:
+            psoe2[-1]=psoe2[-1]+0.5
+            quat, fingers, shifted_point = process_pose(torch.tensor([0,0,0.5]), psoe2, view=True)
+
+            env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
 
             # for i in range(3):
             #     k=7+i

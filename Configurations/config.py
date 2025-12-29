@@ -23,7 +23,8 @@ if where_am_i=='chaoyun-server': # server
 elif where_am_i=='yumi': #edge unit
     check_points_directory=ip_address+r'/taqiaden_hub/NSL_model_state/'
 
-
+elif where_am_i=='yons-MS-7D99':
+    check_points_directory=r'/home/yons/code/GraspAgent/check_points/'
 else:
     check_points_directory=r'/media/taqiaden/42c447a4-49c0-4d74-9b1f-4b4b5cbe7486/taqiaden_hub/NSL_model_state/'
 
