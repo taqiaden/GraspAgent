@@ -49,9 +49,9 @@ def pose_interpolation( gripper_pose, objects_mask,annealing_factor,tou=1.):
     # sampling_ratios2 = 1/(1+((1-p2)*torch.rand_like(ref_pose[:,5:])) /(p2*torch.rand_like(ref_pose[:,5:])))
     # sampling_ratios=torch.cat([sampling_ratios1,sampling_ratios2],dim=1)
 
-    sampled_pose[:, 0:3] =clip_vectors_angle_batch(sampled_pose[:, 0:3] ,ref_pose[:, 0:3] ,np.pi/2)
-    sampled_pose[:, 3:5] =clip_vectors_angle_batch_2d(sampled_pose[:, 3:5] ,ref_pose[:, 3:5] ,np.pi/2)
-    sampled_pose[:, 5:]=clip_scalars_batch(sampled_pose[:, 5:],ref_pose[:, 5:],max_dist=0.5)
+    # sampled_pose[:, 0:3] =clip_vectors_angle_batch(sampled_pose[:, 0:3] ,ref_pose[:, 0:3] ,np.pi/2)
+    # sampled_pose[:, 3:5] =clip_vectors_angle_batch_2d(sampled_pose[:, 3:5] ,ref_pose[:, 3:5] ,np.pi/2)
+    # sampled_pose[:, 5:]=clip_scalars_batch(sampled_pose[:, 5:],ref_pose[:, 5:],max_dist=0.5)
 
     sampled_pose = sampled_pose.detach().clone() * sampling_ratios + (1 - sampling_ratios) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampled_pose.min()}, {ref_pose.min()}, {sampled_pose.max()}, {ref_pose.max()}'
@@ -497,7 +497,7 @@ def generate_random_CH_poses(ref_pose,noise_ratios,alpha: OnlingClustering,beta:
     base_transition=ref_pose[:,5+3:]
 
     noise = torch.rand_like(base_alpha)-0.5
-    noise[:, -1] = -1*torch.abs(noise[:, -1])
+    # noise[:, -1] = -1*torch.abs(noise[:, -1])
     noise = F.normalize(noise, dim=-1)
     # if alpha.centers is not None:
     #     # indices = torch.randint(0, alpha.centers.shape[0], (size,))
@@ -525,7 +525,6 @@ def generate_random_CH_poses(ref_pose,noise_ratios,alpha: OnlingClustering,beta:
     #     fingers_=nearest_replace(base_fingers, fingers.centers, noise_rate = noise_ratios[:,5:5+3],noise=noise)
     # else:
     fingers_ = noise
-    fingers_=torch.clip(fingers_,max=1.0)
 
     noise = torch.rand((size, 1), device='cuda')
     # if transition.centers is not None:
@@ -619,7 +618,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
 
     ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
-    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3]+0.5,0,1)
+    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
 
     sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
     sampling_ratios[sampling_ratios>0.95]=1.
@@ -627,6 +626,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     # sampling_ratios2 = 1/(1+((1-sampling_ratios)*torch.rand_like(sampling_ratios)) /(sampling_ratios*torch.rand_like(sampling_ratios)+1e-5))
     '''clip minimum update'''
     sampling_ratios1=torch.clip(sampling_ratios1,min=0.1)
+
     # sampling_ratios2=torch.clip(sampling_ratios2,min=0.1)
 
     sampled_pose=generate_random_CH_poses(ref_pose[0,:].reshape(9,-1).T, sampling_ratios1, alpha=alpha,beta=beta,fingers=fingers,transition=transition).reshape(600,600,9).permute(2,0,1)[None,...]
@@ -638,11 +638,13 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     # f[dist2<dist1]*=-1
     # sampled_pose[:,0:4]*=f
 
-    sampled_pose[:, 0:3] =clip_vectors_angle_batch(sampled_pose[:, 0:3] ,ref_pose[:, 0:3] ,np.pi/2)
-    sampled_pose[:, 3:5] =clip_vectors_angle_batch_2d(sampled_pose[:, 3:5] ,ref_pose[:, 3:5] ,np.pi/2)
-    sampled_pose[:, :3] = F.normalize(sampled_pose[:, :3], dim=1)
-    sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
-    sampled_pose[:, 5:]=clip_scalars_batch(sampled_pose[:, 5:],ref_pose[:, 5:],max_dist=0.3)
+    # sampled_pose[:, 0:3] =clip_vectors_angle_batch(sampled_pose[:, 0:3] ,ref_pose[:, 0:3] ,np.pi/2)
+    # sampled_pose[:, 3:5] =clip_vectors_angle_batch_2d(sampled_pose[:, 3:5] ,ref_pose[:, 3:5] ,np.pi/2)
+    # sampled_pose[:, :3] = F.normalize(sampled_pose[:, :3], dim=1)
+    # sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
+    # sampled_pose[:, 5:]=clip_scalars_batch(sampled_pose[:, 5:],ref_pose[:, 5:],max_dist=0.5)
+
+
 
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
@@ -654,10 +656,8 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
 
     # '''clip fingers to scope'''
-    # sampled_pose[:,5:5+3]=torch.clamp(sampled_pose[:,5:5+3],max=0.99)
-    sampled_pose[:,5+3:]=torch.clamp(sampled_pose[:,5+3:],min=0.0,max=0.99)
-
-    # sampled_pose[:,0:4] = torch.where(sampled_pose[:, 0:1] >= 0, sampled_pose[:,0:4], -sampled_pose[:,0:4])
+    sampled_pose[:,5:5+3]=torch.clamp(sampled_pose[:,5:5+3],max=0.5)
+    sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
 
     return sampled_pose

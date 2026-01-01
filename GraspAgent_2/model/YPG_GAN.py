@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from GraspAgent_2.model.Backbones import PointNetEncoder, PointNetA
 from GraspAgent_2.model.Decoders import ParameterizedSine, \
     film_fusion_2d, film_fusion_1d, ContextGate_2d, ContextGate_1d, res_ContextGate_2d, siren, ContextGate_2d_2, \
-    ContextGate_1d_2
+    ContextGate_1d_2, Quality_Net_2d
 from GraspAgent_2.model.sparse_encoder import SparseEncoderIN
 from GraspAgent_2.model.utils import replace_activations, add_spectral_norm_selective
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
@@ -125,8 +125,8 @@ class YPG_G(nn.Module):
 
         self.back_bone2 = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
                                    relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=False,activate_skip =True).to('cuda')
-        # replace_instance_with_groupnorm(self.back_bone2, max_groups=16)
-        add_spectral_norm_selective(self.back_bone2)
+        replace_instance_with_groupnorm(self.back_bone2, max_groups=16)
+        # add_spectral_norm_selective(self.back_bone2)
         # orthogonal_init_all(self.back_bone2, gain=gain)
         self.back_bone2.apply(init_weights_he_normal)
 
@@ -136,7 +136,7 @@ class YPG_G(nn.Module):
         # scaled_he_init_all( self.PoseSampler_2 )
 
 
-        self.grasp_quality = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=1,
+        self.grasp_quality = Quality_Net_2d(in_c1=64, in_c2=8, out_c=1,
                                                 relu_negative_slope=0.1, activation=None).to(
             'cuda')
         self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=8, out_c=1,
@@ -339,7 +339,7 @@ class YPG_D(nn.Module):
 
         # self.att_block = film_fusion_1d(in_c1=64, in_c2=45+20+1, out_c=1,
         #                                relu_negative_slope=0.2, activation=nn.SiLU(),normalize=False,with_gate=False,bias=False).to('cuda')
-        self.att_block_ = ContextGate_1d_2(in_c1=512, in_c2=7, out_c=1).to('cuda')
+        self.att_block_ = ContextGate_1d(in_c1=512, in_c2=7, out_c=1).to('cuda')
         # self.att_block_.apply(init_weights_he_normal)
         # add_spectral_norm_selective(self.att_block_)
 

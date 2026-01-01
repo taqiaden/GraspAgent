@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from GraspAgent_2.model.Backbones import PointNetEncoder
 from GraspAgent_2.model.Decoders import ContextGate_1d, ContextGate_2d, res_ContextGate_2d, CSDecoder_2d, \
-    ContextGate_2d_2, ContextGate_1d_2
+    ContextGate_2d_2, ContextGate_1d_2, Quality_Net_2d
 from GraspAgent_2.model.YPG_GAN import replace_activations
 from GraspAgent_2.model.sparse_encoder import SparseEncoderIN
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
@@ -18,7 +18,7 @@ from GraspAgent_2.utils.positional_encoding import PositionalEncoding_2d, Positi
 from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d, sign_invariant_quat_encoding_2d, \
     expmap_to_quat_map_2d
 from models.Grasp_GAN import norm_free
-from models.decoders import att_conv_normalized2
+from models.decoders import att_conv_normalized2, att_res_conv_normalized
 from models.resunet import res_unet
 import torch
 import torch.nn as nn
@@ -149,13 +149,15 @@ class ParallelGripperPoseSampler(nn.Module):
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
         transition=self.transition_(features,torch.cat([alpha,beta,depth], dim=1))
-        # transition=F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)
+        # transition=F.sigmoid(transition)
+        # transition=(F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)+math.sqrt(3))/(2*math.sqrt(3))
         # transition=(transition-0.5)*3
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
         fingers= self.fingers(features, torch.cat([alpha,beta,transition,depth], dim=1))
-        # fingers=F.normalize(fingers.unflatten(1,(3,3)),p=2,dim=1).sum(dim=1)/math.sqrt(3)
+        # fingers=F.tanh(fingers)/2
+        # fingers=F.normalize(fingers.unflatten(1,(3,3)),p=2,dim=1).sum(dim=1)/(2*math.sqrt(3))
         # fingers = F.normalize(fingers, dim=1)
         # finger1=fingers[:,0:3]
         # finger2=fingers[:,2:5]
@@ -203,11 +205,14 @@ class CH_G(nn.Module):
 
         self.back_bone2_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=False,activate_skip =True).to('cuda')
-        # replace_instance_with_groupnorm(self.back_bone2_, max_groups=16)
+        self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+                                  relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=False,activate_skip =True).to('cuda')
         self.back_bone2_.apply(init_weights_he_normal)
-        add_spectral_norm_selective(self.back_bone2_)
+        self.back_bone3_.apply(init_weights_he_normal)
 
-        # replace_instance_with_groupnorm(self.back_bone2_, max_groups=32)
+        # add_spectral_norm_selective(self.back_bone2_)
+        replace_instance_with_groupnorm(self.back_bone2_, max_groups=16)
+        replace_instance_with_groupnorm(self.back_bone3_, max_groups=16)
         # orthogonal_init_all(self.back_bone_2,gain=gain)
 
         self.CH_PoseSampler = ParallelGripperPoseSampler()
@@ -228,9 +233,10 @@ class CH_G(nn.Module):
             nn.Conv2d(14, 5, kernel_size=1),
         ).to('cuda')
 
-        self.grasp_quality_=res_ContextGate_2d(in_c1=64, in_c2=10, out_c=1,
+        self.grasp_quality_=Quality_Net_2d(in_c1=64, in_c2=10, out_c=1,
                                               relu_negative_slope=0.1,activation=None).to(
             'cuda')
+
 
 
         self.grasp_collision = res_ContextGate_2d(in_c1=64, in_c2=7, out_c=1,
@@ -242,10 +248,10 @@ class CH_G(nn.Module):
         self.grasp_collision3_ = res_ContextGate_2d(in_c1=64, in_c2=7, out_c=1,
                                               relu_negative_slope=0.1,activation=None).to(
             'cuda')
-        add_spectral_norm_selective(self.grasp_quality_)
-        add_spectral_norm_selective(self.grasp_collision)
-        add_spectral_norm_selective(self.grasp_collision2_)
-        add_spectral_norm_selective(self.grasp_collision3_)
+        # add_spectral_norm_selective(self.grasp_quality_)
+        # add_spectral_norm_selective(self.grasp_collision)
+        # add_spectral_norm_selective(self.grasp_collision2_)
+        # add_spectral_norm_selective(self.grasp_collision3_)
 
         # self.grasp_quality.apply(init_weights_he_normal)
         # self.grasp_collision.apply(init_weights_he_normal)
@@ -316,14 +322,18 @@ class CH_G(nn.Module):
             with torch.no_grad():
                 features = self.back_bone(input) #if backbone is None else backbone(input)
                 features2 = self.back_bone2_(input)#*scale
+                features3 = self.back_bone3_(input)#*scale
+
         else:
             features = self.back_bone(input) #if backbone is None else backbone(input)
             features2 = self.back_bone2_(input)#*scale
+            features3 = self.back_bone3_(input)  # *scale
 
         # features2=torch.cat([features2,scaled_depth_,depth_],dim=1)
         # features=torch.cat([features,scaled_depth_,depth_],dim=1)
         print('G b1 max val= ',features.max().item(), 'mean:',features.mean().item(),' std:',features.std(dim=1).mean().item())
         print('G b2 max val= ',features2.max().item(), 'mean:',features2.mean().item(),' std:',features2.std(dim=1).mean().item())
+        print('G b3 max val= ',features3.max().item(), 'mean:',features3.mean().item(),' std:',features3.std(dim=1).mean().item())
 
 
         depth_data=standarized_depth_
@@ -331,9 +341,9 @@ class CH_G(nn.Module):
         gripper_pose=self.CH_PoseSampler(features,depth_data,latent_vector)
 
         detached_gripper_pose=gripper_pose.detach().clone()
-        detached_gripper_pose[:,2] = torch.clip(detached_gripper_pose[:,2], max=0.)
-        detached_gripper_pose[:,0:3] = F.normalize(detached_gripper_pose[:,0:3], p=2, dim=1, eps=1e-8)
-        detached_gripper_pose[:,5:5+3]=torch.clip(detached_gripper_pose[:,5:5+3]+ 0.5,0,1)
+        # detached_gripper_pose[:,2] = torch.clip(detached_gripper_pose[:,2], max=0.)
+        # detached_gripper_pose[:,0:3] = F.normalize(detached_gripper_pose[:,0:3], p=2, dim=1, eps=1e-8)
+        # detached_gripper_pose[:,5:5+3]=torch.clip(detached_gripper_pose[:,5:5+3]+ 0.5,0,1)
 
         # encoded_quat = sign_invariant_quat_encoding_2d(quat)  # 10
 
@@ -372,7 +382,7 @@ class CH_G(nn.Module):
 
 
 
-        grasp_quality=self.grasp_quality_(features2,detached_gripper_pose)
+        grasp_quality=self.grasp_quality_(features3,detached_gripper_pose)
         # grasp_quality=self.sig(grasp_quality)
 
         # grasp_quality=torch.rand_like(gripper_pose[:,0:1])
@@ -439,7 +449,7 @@ class CH_D(nn.Module):
         # gan_init_with_norms(self.att_block_)
 
         self.att_block = ContextGate_1d(in_c1=512, in_c2=9, out_c=1).to('cuda')
-        # add_spectral_norm_selective(self.att_block_)
+        # add_spectral_norm_selective(self.att_block)
 
 
         # self.att_block_.apply(init_weights_he_normal)

@@ -211,7 +211,7 @@ class TrainGraspGAN:
         gan.ini_models(train=True)
 
 
-        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999,weight_decay_=0)
+        gan.critic_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.5, beta2=0.999,weight_decay_=0)
         # gan.critic_sgd_optimizer(learning_rate=self.learning_rate*10,momentum=0.,weight_decay_=0)
         gan.generator_adamW_optimizer(learning_rate=self.learning_rate, beta1=0.9, beta2=0.999)
         # gan.generator_sgd_optimizer(learning_rate=self.learning_rate,momentum=0.9)
@@ -263,13 +263,13 @@ class TrainGraspGAN:
             margin = pairs[j][1]
             k = pairs[j][2]
             if k>0:
-                loss+=(hinge_loss(positive=ref_scores[j],negative=generated_scores[j],margin=margin,k=1+tou)**2)/self.batch_size
+                loss+=(hinge_loss(positive=ref_scores[j],negative=generated_scores[j],margin=margin,k=1+tou)**1)/self.batch_size
 
 
                 # positive=ref_embedding[j]
                 # negative=generated_embedding[j]
             else:
-                loss+=(hinge_loss(positive=generated_scores[j],negative=ref_scores[j],margin=margin,k=1+tou)**2)/self.batch_size
+                loss+=(hinge_loss(positive=generated_scores[j],negative=ref_scores[j],margin=margin,k=1+tou)**1)/self.batch_size
 
                 # positive = generated_embedding[j]
                 # negative = ref_embedding[j]
@@ -390,7 +390,7 @@ class TrainGraspGAN:
             k = pairs[j][2]
 
             # loss+=(cosine_triplet_loss(anchor, positive=gen_embedding[j], negative=ref_embedding[j], margin_signal=0.))/batch_size
-            loss += (hinge_loss(positive=gen_scores[j], negative=ref_scores[j], margin=0.,k=1+tou) ** 2) / self.batch_size
+            loss += (hinge_loss(positive=gen_scores[j], negative=ref_scores[j], margin=0.,k=1+tou) ** 1) / self.batch_size
 
             target_generated_pose = gripper_pose[target_index].detach()
             target_ref_pose = gripper_pose_ref[target_index].detach()
@@ -738,6 +738,7 @@ class TrainGraspGAN:
                     # f=self.skip_rate.val**2+(1-self.skip_rate.val**2)*f
 
                     annealing_factor=f
+                    if self.skip_rate.val>0.9: annealing_factor=annealing_factor*0+1
                     print(f'mean_annealing_factor= {annealing_factor.mean()}, tou={tou}')
 
                     gripper_pose_ref = pose_interpolation(gripper_pose, objects_mask,annealing_factor=annealing_factor,tou=tou)
@@ -955,17 +956,17 @@ def train_N_grasp_GAN(n=1):
     # torch.autograd.set_detect_anomaly(True)
 
     for i in range(n):
-        # try:
+        try:
             cuda_memory_report()
             Train_grasp_GAN.initialize(n_samples=None)
             # fix_weight_scales(Train_grasp_GAN.gan.generator.grasp_quality)
             # exit()
             Train_grasp_GAN.begin()
-        # except Exception as e:
-        #     print(Fore.RED, str(e), Fore.RESET)
-        #     del Train_grasp_GAN
-        #     torch.cuda.empty_cache()
-        #     Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
+        except Exception as e:
+            print(Fore.RED, str(e), Fore.RESET)
+            del Train_grasp_GAN
+            torch.cuda.empty_cache()
+            Train_grasp_GAN = TrainGraspGAN(n_samples=None, learning_rate=lr)
 
     # del Train_grasp_GAN
 

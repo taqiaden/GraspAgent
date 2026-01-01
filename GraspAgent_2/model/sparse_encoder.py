@@ -10,30 +10,36 @@ class SparseEncoderIN(nn.Module):
         self.net = spconv.SparseSequential(
             # 100³ → 100³
             spconv.SparseConv3d(in_ch, 64, kernel_size=3,stride=1, padding=1, bias=True),
-            # spconv.SparseBatchNorm(64),
             nn.LayerNorm(64),
-            nn.LeakyReLU(0.2),
+            # spconv.SparseBatchNorm(64),
+
+            # nn.LeakyReLU(0.2),
+            nn.SiLU(),
 
             # 100³ → 50³
             spconv.SparseConv3d(64, 128, kernel_size=3, stride=2, padding=1, bias=True),
             nn.LayerNorm(128),
             # spconv.SparseBatchNorm(128),
 
-            nn.LeakyReLU(0.2),
+            # nn.LeakyReLU(0.2),
+            nn.SiLU(),
 
             # 50³ → 25³
             spconv.SparseConv3d(128, 256, kernel_size=3, stride=2, padding=1, bias=True),
             nn.LayerNorm(256),
             # spconv.SparseBatchNorm(256),
 
-            nn.LeakyReLU(0.2),
+            # nn.LeakyReLU(0.2),
+            nn.SiLU(),
 
             # 25³ → 13³
             spconv.SparseConv3d(256, out_ch, kernel_size=3, stride=2, padding=1, bias=True),
             nn.LayerNorm(out_ch),
             # spconv.SparseBatchNorm(out_ch),
 
-            nn.LeakyReLU(0.2),
+            # nn.LeakyReLU(0.2),
+            nn.SiLU(),
+
         )
 
     def forward(self, x):
