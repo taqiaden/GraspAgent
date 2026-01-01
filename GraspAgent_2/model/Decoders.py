@@ -402,11 +402,11 @@ class res_ContextGate_2d(nn.Module):
         self.cond_proj = nn.Sequential(
             nn.Conv2d(in_c2, 128, kernel_size=1),
             # LayerNorm2D(128),
-            # nn.SiLU(),
-            # nn.Conv2d(128, 128, kernel_size=1),
-            # LayerNorm2D(128),
             nn.SiLU(),
             nn.Conv2d(128, mid_c, kernel_size=1),
+            # LayerNorm2D(128),
+            # nn.SiLU(),
+            # nn.Conv2d(128, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.d = nn.Sequential(
@@ -488,12 +488,12 @@ class Quality_Net_2d(nn.Module):
             # LayerNorm2D(128),
             nn.SiLU(),
 
-            # nn.Conv2d(128, 128, kernel_size=1),
+            nn.Conv2d(128, mid_c, kernel_size=1),
             # nn.SiLU(),
 
             # LayerNorm2D(128),
             # nn.LeakyReLU(0.2),
-            nn.Conv2d(128, mid_c, kernel_size=1),
+            # nn.Conv2d(128, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.d = nn.Sequential(

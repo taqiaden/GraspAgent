@@ -83,10 +83,12 @@ def c_loss(pred,label):
     #     # weights = torch.exp(-loss.detach())
     #     # loss = (weights * loss)
     #     return loss
-
 def logits_to_probs(logits):
     return torch.clamp(logits,0,1)
     # return F.sigmoid(logits)
+def logits_to_probs2(logits):
+    # return torch.clamp(logits,0,1)
+    return F.sigmoid(logits)
     # return torch.clamp(logits,0,1)
 
 
@@ -634,7 +636,7 @@ class TrainGraspGAN:
 
         for k in range(self.batch_size*4):
             '''gripper collision'''
-            gripper_target_index = balanced_sampling(logits_to_probs(collision_logits.detach()),
+            gripper_target_index = balanced_sampling(logits_to_probs2(collision_logits.detach()),
                                                      mask=~floor_mask.detach(),
                                                      exponent=30.0,
                                                      balance_indicator=self.collision_statistics.label_balance_indicator)
@@ -646,12 +648,12 @@ class TrainGraspGAN:
 
             label = torch.ones_like(gripper_prediction_) if contact_with_obj or contact_with_floor else torch.zeros_like(gripper_prediction_)
 
-            object_collision_loss = c_loss(gripper_prediction_, label)
+            object_collision_loss = bce_with_logits(gripper_prediction_, label)
 
             with torch.no_grad():
                 self.collision_statistics.loss = object_collision_loss.item()
                 self.collision_statistics.update_confession_matrix(label.detach(),
-                                                                      logits_to_probs(gripper_prediction_.detach()))
+                                                                      logits_to_probs2(gripper_prediction_.detach()))
 
             gripper_collision_loss+=object_collision_loss/self.batch_size
 
@@ -659,7 +661,7 @@ class TrainGraspGAN:
 
         for k in range(self.batch_size*4):
             '''gripper-object collision'''
-            gripper_target_index = balanced_sampling(logits_to_probs(object_collision_logits.detach()),
+            gripper_target_index = balanced_sampling(logits_to_probs2(object_collision_logits.detach()),
                                                      mask=~floor_mask.detach(),
                                                      exponent=30.0,
                                                      balance_indicator=self.objects_collision_statistics.label_balance_indicator)
@@ -671,19 +673,19 @@ class TrainGraspGAN:
 
             label = torch.ones_like(gripper_prediction_) if contact_with_obj else torch.zeros_like(gripper_prediction_)
 
-            object_collision_loss = c_loss(gripper_prediction_, label)
+            object_collision_loss = bce_with_logits(gripper_prediction_, label)
 
             with torch.no_grad():
                 self.objects_collision_statistics.loss = object_collision_loss.item()
                 self.objects_collision_statistics.update_confession_matrix(label.detach(),
-                                                                      logits_to_probs(gripper_prediction_.detach()))
+                                                                      logits_to_probs2(gripper_prediction_.detach()))
 
             gripper_collision_loss+=object_collision_loss/self.batch_size
 
 
         for k in range(self.batch_size*4):
             '''gripper-bin collision'''
-            gripper_target_index = balanced_sampling(logits_to_probs(floor_collision_logits.detach()),
+            gripper_target_index = balanced_sampling(logits_to_probs2(floor_collision_logits.detach()),
                                                      mask=~floor_mask.detach(),
                                                      exponent=30.0,
                                                      balance_indicator=self.bin_collision_statistics.label_balance_indicator)
@@ -695,12 +697,12 @@ class TrainGraspGAN:
 
             label = torch.ones_like(gripper_prediction_) if contact_with_floor else torch.zeros_like(gripper_prediction_)
 
-            floor_collision_loss = c_loss(gripper_prediction_, label)
+            floor_collision_loss = bce_with_logits(gripper_prediction_, label)
 
             with torch.no_grad():
                 self.bin_collision_statistics.loss = floor_collision_loss.item()
                 self.bin_collision_statistics.update_confession_matrix(label.detach(),
-                                                                           logits_to_probs(gripper_prediction_.detach()))
+                                                                           logits_to_probs2(gripper_prediction_.detach()))
 
             gripper_collision_loss += floor_collision_loss / self.batch_size
 
@@ -1137,7 +1139,7 @@ class TrainGraspGAN:
                     depth[None, None, ...],~floor_mask.view(1,1,600,600),latent_vector,detach_backbone=True)
 
                 grasp_quality=logits_to_probs(grasp_quality_logits)
-                grasp_collision=logits_to_probs(grasp_collision_logits)
+                grasp_collision=logits_to_probs2(grasp_collision_logits)
 
                 f =(1 - grasp_quality.detach())**2
                 n=max(self.tou,self.skip_rate.val)
