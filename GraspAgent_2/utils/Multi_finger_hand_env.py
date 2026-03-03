@@ -126,13 +126,25 @@ class MojocoMultiFingersEnv():
 
         self.last_hand_geom_id = self.m.ngeom - 1
 
-
         assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
-    def update_obj_info(self,score):
+    def step_obj_prop(self,obj):
+        # old_val=self.obj_dict[str(obj)]
+        # new_val=old_val+step_val
+        # new_val=max(min(new_val,1.0),0)
+        self.obj_dict[str(obj)]=self.obj_dict[str(obj)]*0.5+0.5
+        # '''confidence-aware'''
+        #Small values behave like low trust → slow learning
+        #Large values behave like high confidence → fast adaptation
+        # gamma = 2.0
+        # alpha = 0.1 * (self.obj_dict[str(obj)]  ** gamma)
+        # self.obj_dict[str(obj)]  = self.obj_dict[str(obj)]  + alpha * (update_val - self.obj_dict[str(obj)] )
+
+
+    def update_obj_info(self,score,decay=0.99):
         for obj in self.objects:
             if str(obj) in self.obj_dict:
-                self.obj_dict[str(obj)]=max(0.9*self.obj_dict[str(obj)]+.1*score,0.01)
+                self.obj_dict[str(obj)]=max(decay*self.obj_dict[str(obj)]+(1-decay)*score,0.001)
                 # print(f'test -----------------------------------{len(self.obj_dict)}---------------------,{obj}, {self.obj_dict[obj]}')
                 # if not len(self.obj_dict) <= self.object_nums_all:
                 #     for key, value in self.obj_dict.items():
@@ -140,7 +152,6 @@ class MojocoMultiFingersEnv():
                 assert len(self.obj_dict) <= self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}, {obj}'
             else:
                 self.obj_dict[str(obj)]=1
-
 
     def load_obj_dict(self):
         if os.path.exists(self.dict_file_path):
@@ -151,9 +162,22 @@ class MojocoMultiFingersEnv():
             return {}
 
     def save_obj_dict(self):
+        # vmin = min(self.obj_dict.values())
+        # vmax = max(self.obj_dict.values())
+        #
+        # self.obj_dict = {
+        #     k: (v - vmin) / (vmax - vmin)
+        #     for k, v in self.obj_dict.items()
+        # }
+
+        epsilon = 1e-2
+
+        for k in self.obj_dict:
+            if self.obj_dict[k] < epsilon:
+                self.obj_dict[k] = epsilon
+
         with open(self.dict_file_path, "w") as f:
             json.dump(self.obj_dict, f, indent=4)
-
 
     @property
     def obj_positions(self):
@@ -184,12 +208,18 @@ class MojocoMultiFingersEnv():
                 mujoco.mj_step(model, data)
                 viewer.sync()
 
-    def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True):
+    def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True,drop_far_from_others=False):
         while True:
             if selected_index is None:
                 for j in range(1000):
                     new_obj_id,prob=self.sample_random_obj()
-                    if new_obj_id not in self.objects: break
+                    if new_obj_id not in self.objects :
+                        file_exist = self.check_file_exist(new_obj_id)
+                        if  file_exist:
+                           break
+                        else:
+                            self.obj_dict.pop(new_obj_id)
+                            continue
                 else: assert False
                 print('Newly added object ID: ', new_obj_id, ' prob: ',prob)
             else: new_obj_id=selected_index
@@ -198,10 +228,13 @@ class MojocoMultiFingersEnv():
 
             if obj_pose is None:
                 if len(self.objects)>1:
-                    xy_farthest=farthest_point_from_points(self.obj_xy_positions, xmin=-.3, xmax=0.3, ymin=-0.3, ymax=0.3, resolution=200)
-                    obj_pose = [xy_farthest[0], xy_farthest[1], 0.2]
+                    if drop_far_from_others:
+                        xy_farthest=farthest_point_from_points(self.obj_xy_positions, xmin=-.3, xmax=0.3, ymin=-0.3, ymax=0.3, resolution=200)
+                        obj_pose = [xy_farthest[0], xy_farthest[1], 0.2]
+                    else:
+                        obj_pose=[(np.random.random()-0.5)*0.8,(np.random.random()-0.5)*0.8,0.2]
                 else:
-                    obj_pose = [(np.random.rand() - 0.5)*0.4, (np.random.rand() - 0.5)*0.4, 0.2]
+                    obj_pose = [(np.random.random() - 0.5)*0.8, (np.random.random() - 0.5)*0.8, 0.2]
 
             if obj_quat is None:
                 r=np.random.random()
@@ -239,7 +272,7 @@ class MojocoMultiFingersEnv():
 
             self.initialize()
 
-            new_poses=self.get_stable_object_pose(self.objects_poses,stablize=stablize)
+            new_poses=self.get_stable_object_pose(self.objects_poses,stablize=stablize) if stablize else self.d.qpos[7 + len(self.default_finger_joints):]
             if new_poses is not None:
                 self.objects_poses=new_poses.tolist()
                 break
@@ -254,6 +287,7 @@ class MojocoMultiFingersEnv():
             print('Remove object ID: ', self.objects[0])
             self.objects.popleft()
             self.objects_poses = self.objects_poses[:-7]
+
     def initialize(self):
         self.initiate_mojoco()
         self.camera_id = None
@@ -294,8 +328,8 @@ class MojocoMultiFingersEnv():
 
         mujoco.mj_step(self.m, self.d)
 
-    def remove_all_objects(self):
-        for i in range(len(self.objects)):
+    def remove_objects(self,n=1):
+        for i in range(min(n,len(self.objects))):
             print('Drop object ID: ', self.objects[0])
             self.objects.popleft()
             self.objects_poses = self.objects_poses[:-7]
@@ -345,10 +379,10 @@ class MojocoMultiFingersEnv():
 
         keys = list(self.obj_dict.keys())
         weights = list(self.obj_dict.values())
-        idxs = random.choices(keys, weights=weights, k=1)[0]
+        key = random.choices(keys, weights=weights, k=1)[0]
+        # print(f'list max {max(weights)} min {min(weights)} mean {sum(weights)/len(weights)} len {len(weights)}')
 
-        prob=self.obj_dict[idxs]
-
+        prob=self.obj_dict[key]
 
         # while True:
         #     if idxs not in self.obj_dict: break
@@ -368,7 +402,6 @@ class MojocoMultiFingersEnv():
             # if str(idx)==number :
             return mesh.get('file') # Assume the obj file name is mentioned at the first mesh
 
-
         assert False
         return None
 
@@ -386,7 +419,6 @@ class MojocoMultiFingersEnv():
                     obj_file,
                     force='mesh'  # ensures a Trimesh, not a Scene
                 )
-
 
                 n=((len(self.objects)-i-1)*7)
                 pose=self.objects_poses[n:n+3]
@@ -417,6 +449,11 @@ class MojocoMultiFingersEnv():
 
             return pc
 
+    def check_file_exist(self,idx):
+        path=self.root+'/mesh/mesh_' + str(idx) + '.xml'
+        return os.path.exists(path)
+
+
     def prepare_obj_mesh(self):
         tree = ET.parse(self.root+self.scene_xml_file)
         root = tree.getroot()
@@ -428,6 +465,7 @@ class MojocoMultiFingersEnv():
         tree.write(self.root+'/temp.xml')
 
     def initiate_mojoco(self):
+
         self.m = mujoco.MjModel.from_xml_path(self.root+'/temp.xml')
 
         self.d = mujoco.MjData(self.m)
@@ -541,24 +579,28 @@ class MojocoMultiFingersEnv():
 
         return contact_with_obj,contact_with_floor
 
-    def check_valid_grasp(self,margin=0,minimum_contact_points=2):
+    def check_valid_grasp(self,margin=0,minimum_contact_points=2,view=False):
         is_hand_geom= lambda x: x>=1 and x<=self.last_hand_geom_id
         contact_with_floor=False
         self_collide=False
         n_contact=0
+        max_force=0.
+        in_contact_with_hand=False
+        max_penetration=0.
         # contacts = [] # store (pos, force)
         geom_groups=[0]*len(self.contact_pads_geom_ids)
         is_contact_pad = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids)
         for i in range(self.d.ncon):
             c = self.d.contact[i]
+            max_penetration=max(max_penetration,abs(c.dist))
             first_is_hand_point=is_hand_geom(c.geom1)
             second_is_hand_point=is_hand_geom(c.geom2)
 
             if c.dist < margin and (first_is_hand_point + second_is_hand_point ==1) :
-
                 if c.geom1==0 or c.geom2==0:
                     contact_with_floor=True
                 else:
+                    in_contact_with_hand=True
                     pad_geom_id=None
                     if is_contact_pad(c.geom1):
                         pad_geom_id=c.geom1
@@ -566,8 +608,12 @@ class MojocoMultiFingersEnv():
                         pad_geom_id=c.geom2
 
                     if pad_geom_id is not None:
-                        # force = np.zeros(6)
-                        # mujoco.mj_contactForce(self.m, self.d, i, force)
+                        force = np.zeros(6)
+                        mujoco.mj_contactForce(self.m, self.d, i, force)
+                        max_force = max(max_force, np.abs(np.linalg.norm(force[0:3])))
+                        if view:
+
+                            print(f'Force : {force[0:3]}')
                         # f = np.array(force[:3])  # world-frame force
                         # p = np.array(c.pos)  # world-frame contact point
                         # contacts.append((p, f))
@@ -581,9 +627,11 @@ class MojocoMultiFingersEnv():
 
 
         contacted_groups = sum(x > 0 for x in geom_groups)
+        if 0>contacted_groups<minimum_contact_points: print(Fore.LIGHTYELLOW_EX,f'------------------contacted_groups={contacted_groups}',Fore.RESET)
         # if n_contact>0:
         #     print(Fore.LIGHTCYAN_EX,geom_groups,'--',contacted_groups,'---',n_contact,Fore.RESET)
-        return contacted_groups>=minimum_contact_points and not contact_with_floor and not self_collide, contacted_groups,self_collide
+        grasp_success=contacted_groups>=minimum_contact_points if minimum_contact_points>0 else in_contact_with_hand
+        return grasp_success , contacted_groups,self_collide,max_force,max_penetration
 
     def static_view(self,period=5):
         # print('mocap_pos=', self.d.mocap_pos[0])
@@ -618,6 +666,7 @@ class MojocoMultiFingersEnv():
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
 
+
         self.d.qpos =hand_pos + hand_quat + hand_fingers + self.objects_poses
 
         self.d.ctrl*=0
@@ -628,7 +677,7 @@ class MojocoMultiFingersEnv():
         contact_with_obj, contact_with_floor = self.check_hand_contact()
 
         if view:
-            self.static_view()
+            self.static_view(1000)
 
         return  contact_with_obj , contact_with_floor
 
@@ -711,6 +760,7 @@ class MojocoMultiFingersEnv():
 
         depth = self.render_depth(self.renderer, self.camera_id)
 
+
         pointcloud ,floor_mask= self.depth_to_pointcloud(depth, self.intr, self.extr)
         # pointcloud[:, 0] *= -1
         # if pointcloud.shape[0]!=600*600:
@@ -737,6 +787,7 @@ class MojocoMultiFingersEnv():
             else:
                 print(f"Body '{body_name}' is massless (mass=0)")
 
+
     def get_stable_object_pose(self,obj_pos_quat,threshold=1e-4,window_size=20,stablize=True):
         self.d.mocap_pos[0] = self.far_hand_pos
         self.d.mocap_quat[0] = self.far_hand_quat
@@ -751,11 +802,11 @@ class MojocoMultiFingersEnv():
                 mujoco.mj_step(self.m, self.d)
             new_obj_pos=np.copy(self.d.qpos[7 + len(self.default_finger_joints):])
             if last_obj_pos is not None:
-                diff=np.sum(last_obj_pos-new_obj_pos)
+                diff=np.mean(np.abs(last_obj_pos-new_obj_pos))
                 if diff<threshold:
                     counter+=1
-                    self.d.qvel[:] = 0
-                    if not stablize:self.d.cvel[:] = 0
+                    # self.d.qvel[:] = 0
+                    # if not stablize:self.d.cvel[:] = 0
                     # self.d.qacc[:] = 0.0
                     # self.d.qfrc_applied[:] = 0.0
                     # self.d.qfrc_actuator[:] = 0.0
@@ -768,10 +819,10 @@ class MojocoMultiFingersEnv():
 
             last_obj_pos=new_obj_pos
         else:
-            print('Cannot find a stable pose')
-            return None
+            print(Fore.RED,f'Cannot find a stable obj state, diff={diff}',Fore.RESET)
+            # return None
 
-        self.m.opt.timestep = 0.002
+        # self.m.opt.timestep = 0.002
 
         return  self.d.qpos[7 + len(self.default_finger_joints):]
 
@@ -798,16 +849,19 @@ class MojocoMultiFingersEnv():
 
             while viewer.is_running():
                 step_start = time.time()
-                self.d.qpos[k:]=list(self.objects_poses)
+                # self.d.qpos[k:]=list(self.objects_poses)
 
                 mujoco.mj_step(self.m, self.d)
+                # print(self.d.ctrl)
 
                 viewer.sync()
                 time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
 
-    def passive_viewer(self,pos=None,quat=None,delta_pos=None,ctrl=None):
+    def passive_viewer(self,pos=None,quat=None,delta_pos=None,ctrl=None,fingers=None):
+        self.restore_simulation_state()
+
         pos=[0., 0., .3] if pos is None else pos
         quat = [0., 1., 0., 0.] if quat is None else quat
 
@@ -816,8 +870,8 @@ class MojocoMultiFingersEnv():
 
         self.d.qpos = pos + quat + self.default_finger_joints +list(self.objects_poses)
 
-        self.d.ctrl *= 0
-
+        # self.d.ctrl *= 0
+        if fingers is not None: self.d.ctrl = self.decode_finger_ctrl(fingers)
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
             # viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame

@@ -487,55 +487,68 @@ def nearest_replace_cosine(x: torch.Tensor, y: torch.Tensor,
     r=torch.randn_like(result) if noise is None else noise
     result = result *(1-noise_rate) + noise_rate*(r)
     return result
-def generate_random_CH_poses(ref_pose,noise_ratios,alpha: OnlingClustering,beta: OnlingClustering,fingers: OnlingClustering,transition: OnlingClustering):
-    size=ref_pose[:,  0].numel()
 
-    base_alpha=ref_pose[:,0:3]
-    base_beta=ref_pose[:,3:5]
-    base_fingers=ref_pose[:,5:5+3]
-    base_fingers=torch.clip(base_fingers,0,1)
-    base_transition=ref_pose[:,5+3:]
+def random_unit_circle(n):
+    # sample angles uniformly in [0, 2π)
+    theta = 2 * torch.pi * torch.rand(n,device='cuda')
 
-    noise = torch.rand_like(base_alpha)-0.5
-    # noise[:, -1] = -1*torch.abs(noise[:, -1])
-    noise = F.normalize(noise, dim=-1)
-    # if alpha.centers is not None:
-    #     # indices = torch.randint(0, alpha.centers.shape[0], (size,))
-    #     # alpha_=alpha.centers[indices]*0.9+noise*0.1
-    #     alpha_=nearest_replace_cosine(base_alpha,alpha.centers,noise_rate=noise_ratios[:,0:3],noise=noise)
-    # else:
-    alpha_ = noise
+    # convert to unit vectors
+    x = torch.cos(theta)
+    y = torch.sin(theta)
+
+    return torch.stack([x, y], dim=-1)
+def sample_vectors(n,dim_c,values):
+    r=values.shape[0]
+    idx = torch.randint(0, r, (n, dim_c))
+    return values[idx]
+
+def generate_random_CH_poses(size):
+
+    # values = torch.tensor([-1., 0., 1.])
+    # alpha_=sample_vectors(size,3,values).cuda()
+    alpha_ = (torch.rand((size,3),device='cuda')-0.5)*2
+    # alpha_ = torch.zeros((size,3),device='cuda')
+    # alpha_[:, -1] = -1
+    alpha_[:, -1] = -1#*(torch.abs(alpha_[:, -1])**0.5)
+    # alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
     alpha_ = F.normalize(alpha_, dim=-1)
 
-    noise = torch.rand_like(base_beta)-0.5
-    noise = F.normalize(noise, dim=-1)
-    # if beta.centers is not None:
-    #     # indices = torch.randint(0, beta.centers.shape[0], (size,))
-    #     # beta_=beta.centers[indices]*0.9+noise*0.1
-    #     beta_=nearest_replace_cosine(base_beta,beta.centers,noise_rate=noise_ratios[:,3:5],noise=noise)
-    # else:
-    beta_ =noise
+    beta_ = random_unit_circle(size)
+    # beta_[:,1]=beta_[:,1].abs()*-1
+
+    # values = torch.tensor([-1., 0., 1.])
+    # beta_=sample_vectors(size,2,values).cuda()
     beta_ = F.normalize(beta_, dim=-1)
 
-    noise = (torch.rand((size, 3), device='cuda')-0.5)*1.5
-    noise=torch.clip(noise,max=0.5)
-    # if fingers.centers is not None:
-    #     # indices = torch.randint(0, fingers.centers.shape[0], (size,))
-    #     # fingers_=fingers.centers[indices]*0.9+noise*0.1
-    #     fingers_=nearest_replace(base_fingers, fingers.centers, noise_rate = noise_ratios[:,5:5+3],noise=noise)
-    # else:
-    fingers_ = noise
+    # values = torch.tensor([-0.5, 0.,0.2, 0.5])
+    # fingers_=sample_vectors(size,3,values).cuda()
 
-    noise = torch.rand((size, 1), device='cuda')
-    # if transition.centers is not None:
-    #     # indices = torch.randint(0, transition.centers.shape[0], (size,))
-    #     # transition_=transition.centers[indices]*0.9+noise*0.1
-    #     transition_=nearest_replace(base_transition, transition.centers, noise_rate = noise_ratios[:,5+3:],noise=noise)
-    # else:
-    transition_=noise
+    fingers_ = (0.5-torch.rand((size, 3), device='cuda')**2)*1.5
+    fingers_=torch.clip(fingers_,max=0.5)
+
+    # values = torch.tensor([ 0.,0.3,0.5,0.7, 1.])
+    # transition_=sample_vectors(size, 1, values).cuda()
+    transition_ = torch.rand((size, 1), device='cuda')**2
 
     sampled_pose = torch.cat([alpha_,beta_, fingers_, transition_], dim=1)
     return sampled_pose
+
+def generate_random_SH_poses(size):
+
+    alpha_ = torch.randn((size,3),device='cuda')
+    alpha_[:, -1] = -1*torch.abs(alpha_[:, -1])
+    alpha_ = F.normalize(alpha_, dim=-1)
+
+    beta_ = random_unit_circle(size)
+    beta_ = F.normalize(beta_, dim=-1)
+
+    fingers_ = (torch.rand((size, 9), device='cuda')-0.5)*1.5
+
+    transition_ = torch.rand((size, 1), device='cuda')
+
+    sampled_pose = torch.cat([alpha_,beta_, fingers_, transition_], dim=1)
+    return sampled_pose
+
 
 def fill_tensor_by_rate(X, rates, m):
     """
@@ -595,7 +608,6 @@ def generate_random_CH_poses2(ref_pose,noise_ratios,taxonomies: OnlingClustering
         # pick based on rate
         noise=fill_tensor_by_rate(X=taxonomies_centers, rates=taxonomies_centers_rates, m=size)*0.9+random_noise*0.1
 
-
         '''closest taxonomy ids'''
         clipped_tax=taxonomies_centers.clone()
         clipped_tax[:,5:5+3]=torch.clip(clipped_tax[:,5:5+3],0,1)
@@ -604,8 +616,6 @@ def generate_random_CH_poses2(ref_pose,noise_ratios,taxonomies: OnlingClustering
         idx = dist.argmin(dim=1)  # [N]
         result = taxonomies_centers[idx]
         sampled_pose = result * (1 - noise_ratios) + noise_ratios * noise
-
-
 
     return sampled_pose
 
@@ -617,39 +627,27 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
 
     assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
 
+    ref_pose[:,2]=torch.clip(ref_pose[:,2],max=0.)
+
     ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
     ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
 
-    sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
-    sampling_ratios[sampling_ratios>0.95]=1.
-    sampling_ratios1 = 1/(1+((1-sampling_ratios)*torch.rand_like(ref_pose)) /(sampling_ratios*torch.rand_like(ref_pose)+1e-5))[0].permute(1,2,0).view(-1,9)
-    # sampling_ratios2 = 1/(1+((1-sampling_ratios)*torch.rand_like(sampling_ratios)) /(sampling_ratios*torch.rand_like(sampling_ratios)+1e-5))
-    '''clip minimum update'''
-    sampling_ratios1=torch.clip(sampling_ratios1,min=0.1)
+    # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
+    annealing_factor[annealing_factor>0.95]=1.0
 
-    # sampling_ratios2=torch.clip(sampling_ratios2,min=0.1)
+    sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
+    # r=torch.rand_like(ref_pose)
+    # r[:,0:5]/=2
+    # sampling_ratios=sampling_ratios*r
+    # sampling_ratios=sampling_ratios.repeat(1,9,1,1)
+    # sampling_ratios[:,-1]=1-sampling_ratios[:,-1]
+    # sampling_ratios[:,3:5]/=2
 
-    sampled_pose=generate_random_CH_poses(ref_pose[0,:].reshape(9,-1).T, sampling_ratios1, alpha=alpha,beta=beta,fingers=fingers,transition=transition).reshape(600,600,9).permute(2,0,1)[None,...]
-
-    # '''process quat sign'''
-    # dist1=signed_cosine_distance(sampled_pose[:,0:4],ref_pose[:,0:4])
-    # dist2=signed_cosine_distance(-sampled_pose[:,0:4],ref_pose[:,0:4])
-    # f=torch.ones_like(ref_pose[:,0:1])
-    # f[dist2<dist1]*=-1
-    # sampled_pose[:,0:4]*=f
-
-    # sampled_pose[:, 0:3] =clip_vectors_angle_batch(sampled_pose[:, 0:3] ,ref_pose[:, 0:3] ,np.pi/2)
-    # sampled_pose[:, 3:5] =clip_vectors_angle_batch_2d(sampled_pose[:, 3:5] ,ref_pose[:, 3:5] ,np.pi/2)
-    # sampled_pose[:, :3] = F.normalize(sampled_pose[:, :3], dim=1)
-    # sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
-    # sampled_pose[:, 5:]=clip_scalars_batch(sampled_pose[:, 5:],ref_pose[:, 5:],max_dist=0.5)
-
-
-
+    sampled_pose=generate_random_CH_poses(ref_pose[0,0].numel()).reshape(600,600,9).permute(2,0,1)[None,...]
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
-    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
 
+    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
 
     # max_angle_rad=2*np.pi*tou
     sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
@@ -659,50 +657,33 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     sampled_pose[:,5:5+3]=torch.clamp(sampled_pose[:,5:5+3],max=0.5)
     sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
-
     return sampled_pose
 
-def generate_random_SH_poses(size,sampling_centroid):
 
-    quat = sample_sh_quat(size)
-
-
-    fingers_beta=beta_peak_intensity_tensor(n=size,c=3,data_range=[-1,1],centers=torch.tensor([0,0,0],device='cuda'))
-
-    fingers_main_joints=beta_peak_intensity_tensor(n=size,c=3,data_range=[-1,1],centers=torch.tensor([-1,-1,-1],device='cuda'))
-    fingers_tip_joints=beta_peak_intensity_tensor(n=size,c=3,data_range=[-1,1],centers=torch.tensor([-1,-1,-1],device='cuda'))
-
-
-    transition=beta_peak_intensity_tensor(n=size,c=1,data_range=[sampling_centroid[-1].item()-1,sampling_centroid[-1].item()+1],centers=torch.tensor([0],device='cuda'))
-
-    sampled_pose = torch.cat([quat, fingers_beta,fingers_main_joints,fingers_tip_joints, transition], dim=1)
-
-
-
-    return sampled_pose
-
-def sh_pose_interpolation( gripper_pose,sampling_centroid, annealing_factor=0.99):
+def sh_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=None,beta=None,fingers=None,transition=None,tou=1.):
 
     ref_pose = gripper_pose.detach().clone()
 
-    p = max(min(annealing_factor,1.),0.0)
+    assert ref_pose.shape[0]==1
 
-    print(f'p= {p}')
+    assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
 
-    sampled_pose = generate_random_SH_poses(ref_pose[:,  0].numel(),sampling_centroid).reshape(600,600,14).permute(2,0,1)[None,...]
+    ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
+    ref_pose[:,5:5+9]=torch.clip(ref_pose[:,5:5+9],-.5,0.5)
 
-    sampling_ratios = 1/(1+((1-p)*torch.rand_like(ref_pose)) /(p*torch.rand_like(ref_pose)+1e-5))
+    sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
+    sampling_ratios[sampling_ratios>0.95]=1.
+
+    sampled_pose=generate_random_SH_poses(ref_pose[0,0].numel()).reshape(600,600,15).permute(2,0,1)[None,...]
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
 
-    sampled_pose[:, :4] = F.normalize(sampled_pose[:, :4], dim=1)
+    # max_angle_rad=2*np.pi*tou
+    sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
+    sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
 
-    '''clip fingers to scope'''
-    fingers_min_=torch.repeat_interleave(torch.from_numpy(fingers_min[0:3]), 3, dim=0).view(1, -1, 1, 1).cuda()
-    fingers_max_=torch.repeat_interleave(torch.from_numpy(fingers_max[0:3]), 3, dim=0).view(1, -1, 1, 1).cuda()
-
-    sampled_pose[:,4:4+9]=torch.clamp(sampled_pose[:,4:4+9],min=fingers_min_+0.01,max=fingers_max_-0.01)
+    sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
     return sampled_pose
 

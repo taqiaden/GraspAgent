@@ -6,7 +6,7 @@ from filelock import FileLock
 from torch import nn
 
 from GraspAgent_2.hands_config.sh_config import fingers_range, fingers_min
-from GraspAgent_2.model.SH_GAN import SH_G, SH_D, SH_model_key
+from GraspAgent_2.model.SH_model import SH_G, SH_D, SH_model_key
 from GraspAgent_2.sim_dexee.Shadow_hand_env import grasp_env, quat_rotate_vector
 import torch.nn.functional as F
 

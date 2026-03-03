@@ -114,7 +114,7 @@ class YPG_G(nn.Module):
         gain = torch.nn.init.calculate_gain('leaky_relu', 0.2)
 
         self.back_bone_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                   relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=True,activate_skip=False).to('cuda')
+                                   relu_negative_slope=0.2, activation=nn.SiLU(), IN_affine=True,activate_skip=True).to('cuda')
         # self.point_net_backbone = PointNetA(use_instance_norm=True).to('cuda')
         self.back_bone_.apply(init_weights_he_normal)
         # orthogonal_init_all(self.back_bone, gain=gain)

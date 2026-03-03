@@ -1,6 +1,21 @@
+import numpy as np
 import torch
 
+def view_3d_occupancy_grid(grid):
+    grid = grid > 0.95  # boolean occupancy
 
+    # Convert to voxel coordinates
+    coords = np.argwhere(grid)
+
+    import pyvista as pv
+
+    # Create point cloud
+    cloud = pv.PolyData(coords)
+
+    # Plot interactively
+    plotter = pv.Plotter()
+    plotter.add_points(cloud, color='red', point_size=5)
+    plotter.show()
 
 def crop_cube(points, center, cube_size):
     half_size = cube_size / 2

@@ -1,5 +1,5 @@
 import torch
-
+import torch.nn.functional as F
 
 def add_reflective_blob_noise(depth, n_blobs=3, blob_radius=6, outlier_scale=0.02):
     d = depth.clone()
@@ -21,6 +21,29 @@ def add_reflective_blob_noise(depth, n_blobs=3, blob_radius=6, outlier_scale=0.0
         d[mask] = d[mask] + noise - torch.abs(d[mask]) * torch.abs(torch.randn(1,device=depth.device)) * 0.2
 
     return d
+
+def add_depth_noise(z: torch.Tensor,
+                    keep_mask: torch.Tensor | None = None,
+                    sigma: float = 0.001,
+                    quant: float = 1e-3,
+                    max_depth: float = 5.0) -> torch.Tensor:
+    """
+    z         : float tensor [H, W] (metres)
+    keep_mask : optional bool tensor [H, W].  True → quantise + noise, False → untouched
+    returns noisy tensor same shape / device
+    """
+    if keep_mask is None:
+        keep_mask = torch.ones_like(z, dtype=torch.bool)
+
+    # quantise only masked pixels
+    z = torch.where(keep_mask,z,
+                    quant * torch.round(z / quant) )
+
+    # noise only masked pixels
+    noise = torch.normal(0., sigma, z.shape, device=z.device)
+    z = torch.where(keep_mask,z, z + noise)
+
+    return z.clamp(0., max_depth)
 
 def add_flying_pixels(depth, prob=0.002, magnitude=0.05):
     d = depth.clone()

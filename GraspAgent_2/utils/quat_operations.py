@@ -169,7 +169,7 @@ def quat_from_two_frames(v1, u1, v2, u2):
 def quat_between(v_from, v_to):
     v_from = v_from / torch.norm(v_from)
     v_to = v_to / torch.norm(v_to)
-    cross = torch.cross(v_from, v_to)
+    cross = torch.cross(v_from, v_to,dim=-1)
     dot = torch.dot(v_from, v_to)
     w = torch.sqrt((torch.norm(v_from)**2) * (torch.norm(v_to)**2)) + dot
     quat = torch.cat([torch.tensor([w],device=v_from.device), cross])

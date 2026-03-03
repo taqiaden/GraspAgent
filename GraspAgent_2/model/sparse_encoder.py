@@ -1,54 +1,103 @@
+import numpy as np
 import spconv.pytorch as spconv
 import torch
 from torch import nn
+class Encoder2D_IN(nn.Module):
+    def __init__(self, in_ch=3, out_ch=512):
+        super().__init__()
 
+        def block(cin, cout, stride):
+            return nn.Sequential(
+                nn.Conv2d(cin, cout, kernel_size=3, stride=stride, padding=1, bias=True),
+                # nn.InstanceNorm2d(cout),
+                nn.SiLU(),
+            )
+
+        self.net = nn.Sequential(
+            block(100, 128, 1),
+            block(128, 256, 2),
+            block(256, 512, 2),
+            block(512, out_ch, 2),
+        )
+
+        self.head = nn.Sequential(
+            # nn.LayerNorm(out_ch),
+            nn.SiLU(),
+        )
+
+    def forward(self, x):
+        x = x.dense()
+        x = (x != 0).any(dim=1, keepdim=True).float()
+        assert x.shape[1]==1, f'{x.shape[1]}'
+        x=x[:,0]
+        # x: [B, C, H, W]
+        x = self.net(x)                  # -> [B, C, H', W']
+        x = torch.amax(x, dim=[2, 3])    # global spatial pooling -> [B, C]
+        return self.head(x)
+
+
+class Encoder3D_IN(nn.Module):
+    def __init__(self, in_ch=1, out_ch=512):
+        super().__init__()
+
+        def block(cin, cout, stride):
+            return nn.Sequential(
+                nn.Conv3d(cin, cout, kernel_size=3, stride=stride, padding=1, bias=False),
+                nn.InstanceNorm3d(cout, affine=True),
+                nn.SiLU(inplace=True),
+            )
+
+        self.net = nn.Sequential(
+            block(in_ch, 64, 1),
+            block(64, 128, 2),
+            block(128, 256, 2),
+            block(256, out_ch, 2),
+        )
+
+        self.head = nn.Sequential(
+            # nn.LayerNorm(out_ch),
+            nn.SiLU(),
+        )
+
+    def forward(self, x):
+        x = x.dense()
+        x = (x != 0).any(dim=1, keepdim=True).float()
+
+        x = self.net(x)                      # [B, C, D, H, W]
+
+        x = torch.amax(x, dim=[2, 3, 4])     # global spatial pooling
+        return self.head(x)
 
 class SparseEncoderIN(nn.Module):
     def __init__(self, in_ch=3, out_ch=512):
         super().__init__()
 
+        def block(cin, cout, stride):
+            return spconv.SparseSequential(
+                spconv.SparseConv3d(cin, cout, 3, stride=stride, padding=1, bias=True),
+                # spconv.SparseBatchNorm(cout),
+                # nn.LayerNorm(cout),\
+                spconv.SparseReLU(),
+                # nn.SiLU()
+            )
+
         self.net = spconv.SparseSequential(
-            # 100³ → 100³
-            spconv.SparseConv3d(in_ch, 64, kernel_size=3,stride=1, padding=1, bias=True),
-            nn.LayerNorm(64),
-            # spconv.SparseBatchNorm(64),
+            block(in_ch, 64, 1),
+            block(64, 128, 2),
+            block(128, 256, 2),
+            block(256, out_ch, 2),
+        )
 
-            # nn.LeakyReLU(0.2),
+        self.head = nn.Sequential(
+            # nn.LayerNorm(out_ch),
             nn.SiLU(),
-
-            # 100³ → 50³
-            spconv.SparseConv3d(64, 128, kernel_size=3, stride=2, padding=1, bias=True),
-            nn.LayerNorm(128),
-            # spconv.SparseBatchNorm(128),
-
-            # nn.LeakyReLU(0.2),
-            nn.SiLU(),
-
-            # 50³ → 25³
-            spconv.SparseConv3d(128, 256, kernel_size=3, stride=2, padding=1, bias=True),
-            nn.LayerNorm(256),
-            # spconv.SparseBatchNorm(256),
-
-            # nn.LeakyReLU(0.2),
-            nn.SiLU(),
-
-            # 25³ → 13³
-            spconv.SparseConv3d(256, out_ch, kernel_size=3, stride=2, padding=1, bias=True),
-            nn.LayerNorm(out_ch),
-            # spconv.SparseBatchNorm(out_ch),
-
-            # nn.LeakyReLU(0.2),
-            nn.SiLU(),
-
         )
 
     def forward(self, x):
-        x=self.net(x)
-        x=x.dense()
-        x = x.amax(dim=[2, 3, 4])
-        # x = x.mean(dim=[2, 3, 4])
-
-        return x
+        x = self.net(x)
+        x = x.dense()
+        x = torch.amax(x, dim=[2, 3, 4])  # smoother than amax
+        return self.head(x)
 
 
 class SparseResidualBlock(nn.Module):

@@ -66,7 +66,7 @@ def suction_sampler_loss(pc, target_normal,objects_mask, file_index):
 
     labels = torch.from_numpy(labels).to('cuda')
 
-    return ((1 - cos(target_normal[objects_mask], labels.squeeze()[objects_mask])) ** 2).mean()
+    return (1 - cos(target_normal[objects_mask], labels.squeeze()[objects_mask])).mean()
 
 def balanced_sampling(values, mask=None, exponent=2.0, balance_indicator=1.0):
     with torch.no_grad():

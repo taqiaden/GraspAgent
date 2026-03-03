@@ -1,16 +1,35 @@
 import math
 import os
+import re
 import time
+
+import imageio
 import torch.nn.functional as F
 import mujoco
 import numpy as np
 import torch
 import trimesh
+from colorama import Fore
 
+from GraspAgent_2.kinematic_utils.path_check import  kinematic_checker
 from GraspAgent_2.training.sample_random_grasp import quat_between_batch
 from GraspAgent_2.utils.Multi_finger_hand_env import MojocoMultiFingersEnv
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_mul, bulk_quat_mul, quat_between
 
+def next_video_name(dir_path=".", prefix="simulation", ext=".mp4"):
+    os.makedirs(dir_path, exist_ok=True)
+
+    pattern = re.compile(rf"{re.escape(prefix)}_(\d+){re.escape(ext)}$")
+    max_idx = 0
+
+    for f in os.listdir(dir_path):
+        m = pattern.match(f)
+        if m:
+            idx = int(m.group(1))
+            max_idx = max(max_idx, idx)
+
+    next_idx = max_idx + 1
+    return os.path.join(dir_path, f"{prefix}_{next_idx:03d}{ext}")
 
 class CasiaHandEnv(MojocoMultiFingersEnv):
     def __init__(self,root,max_obj_per_scene=2,is_tendon_control=False):
@@ -21,16 +40,29 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         self.root=root
 
-        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        # self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0]
 
         self.default_ctrl=self.decode_finger_ctrl([0.,0.,0.])
 
         self.contact_pads_geom_ids=[[2,3,4],[12,17,22,23],[26,31,36,37,40,45,50,51,54,59,64,65,68,73,78,79]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
+        # self.contact_pads_geom_ids=[[12,17,22,23],[26,31,36,37,40,45,50,51,54,59,64,65,68,73,78,79]] # (pad1,pad2,pad3), ft1, (ft2,ft3,ft4,ft5)
 
         # self.intilize_finger_joints()
 
         # self.contact_pads_info()
-
+    def  max_finger_ctrl(self):
+        # print(args)
+        if self.is_tendon_control:
+            j_th = 0.091 - 0.027
+            j_fm = 0.091 -  0.037  # forefinger and midmiddle finger
+            j_rl = 0.091 -  0.037  # ring finger and little finger
+        else:
+            # j form 0 to 1 represent open to close
+            j_th =   1.
+            j_fm =   1.5
+            j_rl =   1.5
+        return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def  decode_finger_ctrl(self,fingers):
         # print(args)
@@ -40,9 +72,9 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 - fingers[2] * 0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th = fingers[0] *  7
-            j_fm = fingers[1] *  7.5
-            j_rl = fingers[2] *  7.5
+            j_th = fingers[0] *  1.
+            j_fm = fingers[1] *  1.5
+            j_rl = fingers[2] *  1.5
         return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def check_fingers_scope(self,fingers):
@@ -65,8 +97,9 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
 
 
-    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=True):
+    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=True,update_obj_prob=False):
         self.restore_simulation_state()
+
         if obj_pose is None: obj_pose=self.objects_poses
 
         in_scope = self.check_fingers_scope(hand_fingers)
@@ -79,6 +112,10 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         # if not in_scope: return False, None, None,None,None
 
+
+        warning_flag = False
+
+
         self.d.time = 0.0
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
@@ -88,24 +125,26 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         if ini_contact_with_obj or ini_contact_with_floor:
             # self.static_view(1000)
-            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None
+            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None,warning_flag
         # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
-
-        delta=[0, 0, 0.001]
-        self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
+        delta=[0, 0, 0.003]
+        decoded_fingers = self.decode_finger_ctrl(hand_fingers)
+        max_fingers = self.max_finger_ctrl()
+        self.d.ctrl = decoded_fingers
         shake_amp = .003
         shake_f = 20  # Hz
 
         for i in range(600):
             #Rise phase
-            if 70 < i < 300:
+            if 150 < i < 350:
                 self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
             # shake phase
-            if 500 > i > 300:
-                if i==301:
-                    grasp_success, n_grasp_contact1, self_collide1 = self.check_valid_grasp(minimum_contact_points=2)
+            if 500 > i > 350:
+                if i==351:
+                    grasp_success, n_grasp_contact1, self_collide1,max_force1,max_penetration1 = self.check_valid_grasp(minimum_contact_points=2)
                     if not grasp_success or not shake: break
+                # self.d.ctrl = max_fingers #if i < 400 else decoded_fingers
                 t = i * self.m.opt.timestep
                 phase = 2 * np.pi * shake_f * t
                 shake = shake_amp * np.array([np.sin(phase),
@@ -115,11 +154,35 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 self.d.mocap_pos[0] += shake  # vertical shake (z)
             mujoco.mj_step(self.m, self.d)
 
+
+            qpos = self.d.qpos
+            qvel = self.d.qvel
+            qacc=self.d.qacc
+            MAX_MAG = 1e6
+            bad = (
+                    (not np.all(np.isfinite(qpos))) or
+                    (not np.all(np.isfinite(qvel))) or
+                    (not np.all(np.isfinite(qacc))) or
+                    np.any(np.abs(qpos) > MAX_MAG) or
+                    np.any(np.abs(qvel) > MAX_MAG)
+            )
+            if bad:
+                warning_flag = True
+
         if grasp_success:
-            stable_grasp,n_grasp_contact2,self_collide2 = self.check_valid_grasp(minimum_contact_points=2)
-            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp
+            stable_grasp,n_grasp_contact2,self_collide2,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=2)
+            # print(f'---test------------------------------{max_force1,max_penetration1,max_force2,max_penetration2}')
+            if update_obj_prob and not warning_flag:
+                grasped_obj = self.get_grasped_obj()
+                # print(f'grasped_obj_: {grasped_obj}')
+
+                # s=1.0 if stable_grasp else 0.9
+                # if stable_grasp:print(Fore.GREEN,f"object {grasped_obj} grasped successfully",Fore.RESET)
+                self.step_obj_prop(grasped_obj)
+
+            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp,warning_flag
         else:
-            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact1,self_collide1,None
+            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact1,self_collide1,None,warning_flag
 
     def view_grasp(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=300,hard_level=0.   ):
         self.restore_simulation_state()
@@ -144,40 +207,64 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         # self.static_view(1000)
 
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
-        self.static_view(1000)
+        # self.static_view(1000)
 
-        # if ini_contact_with_obj or ini_contact_with_floor:
-        #     return in_scope, False, ini_contact_with_obj, ini_contact_with_floor
-
-        # print(Fore.CYAN,f'initial d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
-        # print(Fore.CYAN,f'initial d.qpos[3:3+4] {self.d.qpos[3:3+4]}',Fore.RESET)
-
-        delta=[0, 0, 0.001]
-        self.d.ctrl = self.decode_finger_ctrl(hand_fingers)
+        delta=[0, 0, 0.003]
+        decoded_fingers=self.decode_finger_ctrl(hand_fingers)
+        max_fingers=self.max_finger_ctrl()
+        self.d.ctrl = decoded_fingers
         shake_amp = .003
         shake_f = 20  # Hz
+
+        # video_path = next_video_name("CasiaHand_sim_clips", prefix="simulation")
+        # writer = imageio.get_writer(video_path, fps=30)
+
+        # Off-screen renderer for recording
+        # renderer = mujoco.Renderer(self.m, width=640, height=480)
+
+        # for i in range(70):
+        #     mujoco.mj_step(self.m, self.d)
+        #     if i==10:self.static_view(1000)
+
+
+
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
-            for i in range(600):
 
+            for i in range(70,600):
                 step_start = time.time()
 
-                if 70 < i < 300:
+
+                if 150 < i < 350:
                     self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
                 # shake phase
-                if 500>i > 300:
+                if 500 > i > 350:
+                    # self.d.ctrl = max_fingers #if i<400 else decoded_fingers
+
                     t = i * self.m.opt.timestep
                     phase = 2 * np.pi * shake_f * t
-                    shake = shake_amp * np.array([np.sin(phase),
-                                                  np.sin(phase + 2.1),
-                                                  np.sin(phase + 4.2)])
-                    # shake = shake_amp * np.sin(2 * np.pi * shake_f * t)
-                    self.d.mocap_pos[0] += shake  # vertical shake (z)
+                    shake = shake_amp * np.array([
+                        np.sin(phase),
+                        np.sin(phase + 2.1),
+                        np.sin(phase + 4.2)
+                    ])
+                    self.d.mocap_pos[0] += shake
 
                 mujoco.mj_step(self.m, self.d)
-
                 viewer.sync()
+
+                # -------- capture frame from renderer --------
+                # renderer.update_scene(self.d)
+                # frame = renderer.render()  # RGB uint8
+                # writer.append_data(frame)
+
+                # maintain real-time speed
+                dt = self.m.opt.timestep
+                time.sleep(max(0, dt - (time.time() - step_start)))
+
+        # writer.close()
+        # print("Saved video to simulation.mp4")
 
                 # Rudimentary time keeping, will drift relative to wall clock.
                 # time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
@@ -186,13 +273,36 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success,n_grasp_contact,self_collide = self.check_valid_grasp(minimum_contact_points=2)
+        grasp_success,n_grasp_contact,self_collide,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=2,view=False)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # print(Fore.CYAN,f'final d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
         # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
-        self.static_view(1000)
+
+        grasped_obj=self.get_grasped_obj()
+        print(f'grasped_obj: {grasped_obj}')
+
+        if grasp_success:self.static_view(1000)
 
         return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact,self_collide,None
+
+    def get_grasped_obj(self):
+        k = 3 + 4 + len(self.default_finger_joints)
+        objects_poses = self.d.qpos[k:]
+        max_elevation = None
+        grasped_obj = None
+        for i in range(len(self.objects)):
+            n = ((len(self.objects) - i - 1) * 7)
+            pose = objects_poses[n:n + 3]
+            # quat = objects_poses[n + 3:n + 7]
+            if max_elevation is None:
+                max_elevation = pose[-1]
+                grasped_obj = self.objects[i]
+            else:
+                if pose[-1] > max_elevation:
+                    max_elevation = pose[-1]
+                    grasped_obj = self.objects[i]
+
+        return grasped_obj
 
 def sample_quat(size,f=0.5,ref_quat=None):
     ref_quat = torch.tensor([[0., 1., 0., 0.]],device='cuda') if ref_quat is None else ref_quat
@@ -232,10 +342,9 @@ def sample_quat(size,f=0.5,ref_quat=None):
 if __name__ == "__main__":
     root_dir = os.getcwd()  # current working directory
 
-    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=2,is_tendon_control=False)
+    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=5,is_tendon_control=False)
 
-    # env.view_geom_names_and_ids()
-
+    env.view_geom_names_and_ids()
 
     pose=torch.tensor([[-0.5,  -0.5, -0.5,  0.9955,  0.0,  1.0,  0.4976,  0.5088,
          -0.0086],
@@ -299,10 +408,8 @@ if __name__ == "__main__":
          -0.5760]], device='cuda:0')
 
 
-
-
-
-
+    # p.connect(p.DIRECT)  # initialize this only once, not every time
+    # planner = RRTConnectPlanner()  # initialize this only once, not every time
 
 
     # z=quaternion_pairwise_angular_distance(quats, eps=1e-7, degrees=True)
@@ -310,26 +417,26 @@ if __name__ == "__main__":
 
     psoe2 = pose[0]
 
-
+    kinematics = kinematic_checker()
     for i in range(1000):
         # env.prepare_obj_mesh()
         # env.initialize()
-        env.drop_new_obj(selected_index=None,obj_pose=[0, 0.3, 0.],obj_quat=[1,0,0,0], stablize=False)
+        env.drop_new_obj(selected_index=258,obj_pose=[0, 0.3, 0.2],obj_quat=[1,0,0,0], stablize=True)
 
-        full_objects_pc=env.get_obj_point_clouds(view=False)
-        depth,pointcloud,floor_mask=env.get_scene_preception()
-
-        colors1=np.zeros_like(full_objects_pc)
-        colors1[:,0]=255
-        colors2=np.zeros_like(pointcloud)
-        colors1[:,1]=255
-
-        color=np.vstack([colors1,colors2])
-
-        pc=np.vstack([full_objects_pc,pointcloud])
-        from visualiztion import view_npy_open3d
+        # full_objects_pc=env.get_obj_point_clouds(view=False)
+        # depth,pointcloud,floor_mask=env.get_scene_preception()
         #
-        view_npy_open3d(pc,view_coordinate=True)
+        # colors1=np.zeros_like(full_objects_pc)
+        # colors1[:,0]=255
+        # colors2=np.zeros_like(pointcloud)
+        # colors1[:,1]=255
+        #
+        # color=np.vstack([colors1,colors2])
+        #
+        # pc=np.vstack([full_objects_pc,pointcloud])
+        # from visualiztion import view_npy_open3d
+        #
+        # view_npy_open3d(pc,view_coordinate=True)
 
         # scene = trimesh.Scene()
         # scene.add_geometry(trimesh.points.PointCloud(pc, colors=color))
@@ -442,7 +549,19 @@ if __name__ == "__main__":
             psoe2[-1]=psoe2[-1]+0.5
             quat, fingers, shifted_point = process_pose(torch.tensor([0,0,0.5]), psoe2, view=True)
 
-            env.manual_view(pos=shifted_point, quat=quat,fingers=fingers)
+            shifted_point = np.array([-268.7269, -616.4493, 400.9593]) / 1000
+            # shifted_point[0:2]*=0
+            rpy = np.deg2rad([100.7061, -74.7654, -101.8784])
+            # quat = trimesh.transformations.quaternion_from_euler(*rpy)
+            quat=np.array(quat)
+
+            k_r=kinematics.kinematic_plan_exist(quat,  shifted_point )
+            print(f'kinematic plan result: {k_r}')
+            fingers[0]=1.
+            fingers[1]=1.
+            fingers[2]=1.
+
+            env.passive_viewer(pos=shifted_point.tolist(), quat=quat.tolist(),fingers=fingers)
 
             # for i in range(3):
             #     k=7+i

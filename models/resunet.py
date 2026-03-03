@@ -41,7 +41,6 @@ class residual_block(nn.Module):
 
         self.scale=1. if scale is None else nn.Parameter(torch.tensor(scale, dtype=torch.float32, device='cuda'), requires_grad=True)
 
-
     def forward(self, inputs):
         x = self.b1(inputs)
         x = self.c1(x)
