@@ -238,22 +238,22 @@ class ContextGate_1d(nn.Module):
 
         self.context_proj = nn.Sequential(
             nn.Linear(in_c1, 128, bias=True),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             # nn.SiLU(),
             # nn.Linear(128, 128, bias=True),
             nn.SiLU(),
             nn.Linear(128, 64, bias=True),
-            # nn.LayerNorm(64),
+            nn.LayerNorm(64),
             nn.SiLU(),
 
         )
 
         self.cond_proj = nn.Sequential(
             nn.Linear(in_c2, 128, bias=True),
-            # nn.LayerNorm(128),
+            nn.LayerNorm(128),
             nn.SiLU(),
             nn.Linear(128, 64, bias=True),
-            # nn.LayerNorm(64),
+            nn.LayerNorm(64),
             nn.SiLU(),
             # nn.Linear(128, 64, bias=True),
 
@@ -504,11 +504,11 @@ class res_ContextGate_2d(nn.Module):
         self.cond_proj = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
-            # nn.Softmax(dim=1),
+            nn.Softmax(dim=1),
             # nn.SiLU(),
             #
-            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
-            # LayerNorm2D(mid_c),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            LayerNorm2D(mid_c),
             # activation,
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
@@ -522,11 +522,11 @@ class res_ContextGate_2d(nn.Module):
         self.d = nn.Sequential(
             activation,
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            # LayerNorm2D(48),
+            LayerNorm2D(48),
             # nn.InstanceNorm2d(48),
             activation,
             nn.Conv2d(48, 32, kernel_size=1),
-            # LayerNorm2D(32),
+            LayerNorm2D(32),
             # nn.ReLU(),
             # nn.InstanceNorm2d(32),
 
@@ -596,23 +596,23 @@ class Quality_Net_2d(nn.Module):
         self.gamma = nn.Sequential(
             # LayerNorm2D(in_c1),
 
-            nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.beta = nn.Sequential(
             # LayerNorm2D(in_c1),
 
-            nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.contx_proj = nn.Sequential(
             # LayerNorm2D(in_c1),
             # activation,
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
-            # LayerNorm2D(mid_c),
+            LayerNorm2D(mid_c),
             # InstanceNorm2d(mid_c),
             activation,
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
             # nn.ReLU(),
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
@@ -630,11 +630,11 @@ class Quality_Net_2d(nn.Module):
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.cond_proj = nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
-            # LayerNorm2D(mid_c),
+            LayerNorm2D(mid_c),
             # nn.Softmax(dim=1),
-            # nn.SiLU(),
+            nn.SiLU(),
 
-            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
             # activation,
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
@@ -649,11 +649,11 @@ class Quality_Net_2d(nn.Module):
         self.d = nn.Sequential(
             activation,
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            # LayerNorm2D(48),
+            LayerNorm2D(48),
             # nn.InstanceNorm2d(48),
             activation,
             nn.Conv2d(48, 32, kernel_size=1),
-            # LayerNorm2D(32),
+            LayerNorm2D(32),
             # nn.ReLU(),
             # nn.InstanceNorm2d(32),
 
@@ -680,14 +680,16 @@ class Quality_Net_2d(nn.Module):
         # res = self.res(torch.cat([context, condition], dim=1))
 
         context = self.contx_proj(context)
-        # condition = self.cond_proj(condition)
+        condition = self.cond_proj(condition)
 
         # condition = F.normalize(condition, p=2, dim=1, eps=1e-8)
 
-        gamma = self.gamma(condition)
-        beta = self.beta(condition)
+        gamma = self.gamma(context)
+        beta = self.beta(context)
 
-        x = gamma * context
+        # condition = torch.softmax(condition, dim=1)
+
+        x = gamma * condition
         # x = torch.sigmoid(x)
         # x = F.normalize(x, p=2, dim=1, eps=1e-8)
         # x = torch.softmax(x, dim=1)

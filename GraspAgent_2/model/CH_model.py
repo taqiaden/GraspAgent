@@ -206,9 +206,9 @@ class CH_G(nn.Module):
         # gan_init_with_norms(self.back_bone)
 
         self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
-        self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
+                                  relu_negative_slope=0.0, activation=nn.SiLU(), IN_affine=False,activate_skip =False).to('cuda')
+        # self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        #                           relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
         # self.back_bone2_.apply(init_weights_he_normal)
         # self.back_bone3_.apply(init_weights_he_normal)
 
@@ -221,11 +221,9 @@ class CH_G(nn.Module):
 
         self.CH_PoseSampler = ParallelGripperPoseSampler()
 
-
         # self.query = nn.Sequential(
         #     nn.Conv2d(14, 5, kernel_size=1),
         # ).to('cuda')
-
 
         self.grasp_quality_=Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
                                               relu_negative_slope=0.,activation=nn.SiLU()).to(
@@ -236,13 +234,13 @@ class CH_G(nn.Module):
         #                        drop_out_ratio=0., use_sigmoid=True).to(
         #     'cuda')
 
-        self.grasp_collision_ =         res_ContextGate_2d(in_c1=64, in_c2=7, out_c=1,
+        self.grasp_collision_ =         Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
                                               relu_negative_slope=0.,activation=nn.SiLU()).to(
             'cuda')
-        self.grasp_collision2 =        res_ContextGate_2d(in_c1=64, in_c2=7, out_c=1,
+        self.grasp_collision2 =        Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
                                               relu_negative_slope=0.,activation=nn.SiLU()).to(
             'cuda')
-        self.grasp_collision3=          res_ContextGate_2d(in_c1=64, in_c2=7, out_c=1,
+        self.grasp_collision3=          Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
                                               relu_negative_slope=0.,activation=nn.SiLU()).to(
             'cuda')
         # add_spectral_norm_selective(self.grasp_quality)

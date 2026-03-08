@@ -208,6 +208,22 @@ class MojocoMultiFingersEnv():
                 mujoco.mj_step(model, data)
                 viewer.sync()
 
+    def reload(self):
+        self.prepare_obj_mesh()
+        self.initialize()
+
+        self.d.mocap_pos[0] = self.far_hand_pos
+        self.d.mocap_quat[0] = self.far_hand_quat
+
+        self.d.qpos = self.far_hand_pos + self.far_hand_quat + self.default_finger_joints + self.objects_poses
+        # print('--------------------------------------------------------')
+        # print(self.d.qpos[3+7+len(self.default_finger_joints ):])
+        # for k in range(100):
+        #     mujoco.mj_step(self.m, self.d)
+        # print(self.d.qpos[3+7+len(self.default_finger_joints ):])
+
+        self.save_simulation_state()
+
     def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True,drop_far_from_others=False):
         while True:
             if selected_index is None:
@@ -269,7 +285,6 @@ class MojocoMultiFingersEnv():
                 self.objects_poses=self.objects_poses[:-7]
 
             self.prepare_obj_mesh()
-
             self.initialize()
 
             new_poses=self.get_stable_object_pose(self.objects_poses,stablize=stablize) if stablize else self.d.qpos[7 + len(self.default_finger_joints):]
@@ -309,6 +324,17 @@ class MojocoMultiFingersEnv():
             'sensordata': self.d.sensordata.copy(),
             'userdata': self.d.userdata.copy() if hasattr(self.d, 'userdata') else None
         }
+
+    def print_state(self):
+
+        import pprint
+
+        # Create pretty printer
+        pp = pprint.PrettyPrinter(indent=2, width=100)
+
+        # Print the saved state
+        print("=== Saved State ===")
+        pp.pprint(self.saved_state)
 
     def restore_simulation_state(self ):
         """Restore to saved state"""

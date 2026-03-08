@@ -1,6 +1,7 @@
 import argparse
 import configparser
 import os
+import random
 import time
 import traceback
 import numpy as np
@@ -16,6 +17,7 @@ from GraspAgent_2.model.CH_model import CH_model_key, CH_D, CH_G
 from GraspAgent_2.sim_hand_s.Casia_hand_env import CasiaHandEnv
 from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
 from GraspAgent_2.utils.Voxel_operations import crop_sphere_torch, crop_cube, view_3d_occupancy_grid
+from GraspAgent_2.utils.dynamic_dataset import DynamicDataManagement, SynthesisedData
 from GraspAgent_2.utils.focal_loss import FocalLoss
 from GraspAgent_2.utils.quat_operations import quat_rotate_vector, grasp_frame_to_quat, quat_between
 from Online_data_audit.data_tracker import gripper_grasp_tracker, DataTracker
@@ -29,12 +31,15 @@ from lib.rl.masked_categorical import MaskedCategorical
 from records.training_satatistics import TrainingTracker, MovingRate
 import torch
 from visualiztion import view_npy_open3d
+from collections import deque
 
 freeze_G_backbone = False
 freeze_D_backbone = False
 
 test_mode=False
 view=False
+synthesizie_only=False
+
 
 hard_level_factor=0
 
@@ -59,7 +64,6 @@ firmness_expo = 1.0
 generator_expo = 1.0
 
 m = 0.2
-
 
 def c_loss(pred,label):
     loss=binary_smooth_l1(pred+0.5,label)
@@ -354,7 +358,7 @@ class TrainGraspGAN:
 
         self.args=args
 
-        self.batch_size=1
+        self.batch_size=2
         self.max_G_norm = 500
         self.max_D_norm = 100
         self.iter_per_scene = 1
@@ -406,6 +410,9 @@ class TrainGraspGAN:
 
         self.kinematics = kinematic_checker()
 
+        self.DDM=DynamicDataManagement(key=CH_model_key+'_synthesized_dynamic_data')
+
+        self.loaded_synthesised_data=None
 
         # self.quat_centers=OnlingClustering(key_name=CH_model_key+'_quat',number_of_centers=20,vector_size=4,decay_rate=0.01,is_quat=True,dist_threshold=0.77)
         # self.fingers_centers=OnlingClustering(key_name=CH_model_key+'_fingers',number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=True,dist_threshold=0.2)
@@ -482,7 +489,7 @@ class TrainGraspGAN:
         policy_params += list(gan.generator.grasp_collision2.parameters())
         policy_params += list(gan.generator.grasp_collision3.parameters())
         policy_params += list(gan.generator.back_bone2_.parameters())
-        policy_params += list(gan.generator.back_bone3_.parameters())
+        # policy_params += list(gan.generator.back_bone3_.parameters())
 
         gan.critic_adam_optimizer(learning_rate=self.args.lr, beta1=0.9, beta2=0.999)
         # gan.critic_sgd_optimizer(learning_rate=self.args.lr*10,momentum=0.,weight_decay_=0.)
@@ -874,7 +881,7 @@ class TrainGraspGAN:
                 if  time.time()-start>5 or self.skip_rate.val>0.9:
                     print(Fore.RED,f'quality policy exploration timeout',Fore.RESET)
                     break
-                if initial_collision: continue
+                # if initial_collision: continue
 
                 label = torch.ones_like(gripper_prediction_) if grasp_success else torch.zeros_like(gripper_prediction_)
                 self.grasp_quality_statistics.update_confession_matrix(label.detach(),logits_to_probs(gripper_prediction_.detach()))
@@ -930,9 +937,9 @@ class TrainGraspGAN:
 
         norm1=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone.parameters(), max_norm=float('inf'))
         norm2=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone2_.parameters(), max_norm=float('inf'))
-        norm3=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone3_.parameters(), max_norm=float('inf'))
+        # norm3=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone3_.parameters(), max_norm=float('inf'))
 
-        print(Fore.LIGHTGREEN_EX,f' G norm : {norm}, backbone1:{norm1}, bacckbone2: {norm2}, bacckbone3: {norm3}, repulsive_loss: {repulsive_loss.item()}',Fore.RESET)
+        print(Fore.LIGHTGREEN_EX,f' G norm : {norm}, backbone1:{norm1}, bacckbone2: {norm2},  repulsive_loss: {repulsive_loss.item()}',Fore.RESET)
 
         # params2 = list(self.gan.generator.back_bone.parameters()) + \
         #          list(self.gan.generator.grasp_quality.parameters())+ \
@@ -997,6 +1004,8 @@ class TrainGraspGAN:
         d_pairs = []
         g_pairs = []
 
+        all_pairs=[]
+
         selection_mask = (~floor_mask) #& (latent_vector.reshape(-1)!=0)
         grasp_quality=grasp_quality[0,0].reshape(-1)
         model_b_quality=model_b_quality[0,0].reshape(-1)
@@ -1034,8 +1043,8 @@ class TrainGraspGAN:
         # gamma_transition=norm_(clipped_gripper_pose_PW[:,-1],expo_=2)
 
         # selection_p = norm_(1-grasp_quality,expo_=1)*norm_(model_b_quality,expo_=1)#*norm_(grasp_collision,expo_=1)#*gamma_transition
-        selection_p=(1-torch.abs(grasp_quality-0.5)*2).clamp(min=0.001)**2
-        # selection_p=torch.rand_like(grasp_quality)
+        # selection_p=(1-torch.abs(grasp_quality-0.5)*2).clamp(min=0.001)**2
+        selection_p=torch.rand_like(grasp_quality)
         if test_mode: selection_p=grasp_quality**2
         # gamma_col=norm_(1-grasp_collision)*self.skip_rate()+(1-self.skip_rate())
         # gamma_graspness=grasp_quality*self.skip_rate()+(1-self.skip_rate())
@@ -1064,13 +1073,21 @@ class TrainGraspGAN:
         while t < n:
             # print(t)
             time_out=time.time()-start
-            if time_out>5 and not  test_mode: return d_pairs, g_pairs,  sampler_samples
+            if time_out>5 and not  test_mode: break
             t += 1
             # if torch.any(initial_mask):
             #     dist = MaskedCategorical(probs=selection_p, mask=initial_mask)
             # else:
-            dist = MaskedCategorical(probs=selection_p, mask=selection_mask)
-            target_index = dist.sample().item()
+            # ideal_ref=False
+            importance=0.1
+            if self.loaded_synthesised_data is not None and len(self.loaded_synthesised_data)>0:
+                # target_index=preferred_indexes.pop()
+                target_index,_,_,importance=self.loaded_synthesised_data.sample_pop()
+                # print(f'test ----- target_index={target_index}, ideal pose = {gripper_pose_ref_PW[target_index]}')
+                # ideal_ref=True
+            else:
+                dist = MaskedCategorical(probs=selection_p, mask=selection_mask)
+                target_index = dist.sample().item()
 
             selection_mask[target_index] *= False
             initial_mask[target_index] *= False
@@ -1106,13 +1123,14 @@ class TrainGraspGAN:
             gen_quality = grasp_quality[target_index]
 
             ref_success ,ref_initial_collision,ref_n_grasp_contact,ref_self_collide,stable_ref_grasp,warning_flag,ref_plan_found = self.evaluate_grasp(target_point,target_ref_pose,view=False,shake=False,update_obj_prob=False)
+            # if ideal_ref : assert ref_success
             if ref_success and ( not ref_plan_found): continue
             # if ref_success and ( not stable_ref_grasp): continue
 
             # ref_success=ref_success   and ref_plan_found
 
             if warning_flag:
-                return d_pairs, g_pairs,  sampler_samples
+                break
                 # continue
             gen_success, gen_initial_collision, gen_n_grasp_contact, gen_self_collide, stable_gen_grasp,warning_flag,gen_plan_found = self.evaluate_grasp(
                 target_point, target_generated_pose, view=False, shake=False,check_kinematics=False,update_obj_prob=gen_quality>0.5)
@@ -1125,7 +1143,7 @@ class TrainGraspGAN:
             gen_transition = torch.clamp(target_generated_pose[-1], 0, 1)
 
             if warning_flag:
-                return d_pairs, g_pairs,  sampler_samples
+                break
                 # continue
 
             if t==1 and self.skip_rate()>0.9:
@@ -1162,8 +1180,16 @@ class TrainGraspGAN:
             #         ref_success=ref_success and max_gen_finger>max_ref_finger
             #         gen_success=gen_success and max_ref_finger>max_gen_finger
 
-
-
+            if gen_success and grasp_quality[target_index].item()>0.5:
+                if ((target_ref_pose[-1]>target_generated_pose[-1]) or(importance>grasp_quality[target_index].item())) and ref_success and importance>0.25:
+                    importance = importance * 0.95
+                    all_pairs.append((target_index, target_point, gripper_pose_ref_PW[target_index], importance))
+                else:
+                    importance = grasp_quality[target_index].item()
+                    all_pairs.append((target_index,target_point,gripper_pose_PW[target_index],importance))
+            elif ref_success and importance>0.25:
+                importance=importance*0.95
+                all_pairs.append((target_index, target_point, gripper_pose_ref_PW[target_index],importance))
 
             if ref_success == gen_success:
                 if not ref_success and not gen_success:
@@ -1184,7 +1210,6 @@ class TrainGraspGAN:
 
             # self.skip_rate.update(t)
 
-
             cos_dist = (1 - F.cosine_similarity(target_generated_pose[0:5], target_ref_pose[0:5], dim=-1)) / 2
             scaler_dist=torch.linalg.norm(torch.clip(target_generated_pose[-1],0,1) - torch.clip(target_ref_pose[-1],0,1))
             scaler_dist2=torch.linalg.norm(torch.clip(target_generated_pose[5:8]+0.5,0,1) - torch.clip(target_ref_pose[5:8]+0.5,0,1))/np.sqrt(3)
@@ -1194,7 +1219,7 @@ class TrainGraspGAN:
             # sim = 2 * sim * ((1 - sim) ** 0.3)
 
             if len(d_pairs)<self.batch_size and not (ref_success and gen_success):
-                if  gen_success and (grasp_quality[target_index]**2<max(superior_A_model_moving_rate.val,np.random.random()) ):#min(0.5,np.random.random()):#target_ref_pose[-1].item()>target_generated_pose[-1].item():
+                if  gen_success and (grasp_quality[target_index]<max(superior_A_model_moving_rate.val,np.random.random()) ):#min(0.5,np.random.random()):#target_ref_pose[-1].item()>target_generated_pose[-1].item():
                     pass
                 elif ref_success and (grasp_quality[target_index]**2>max(np.random.random(),superior_A_model_moving_rate.val )):
                     pass
@@ -1212,6 +1237,7 @@ class TrainGraspGAN:
                     elif gen_success and not ref_success:# and counter2 < self.batch_size:
                         superior_A_model_moving_rate.update(1.)
                         counter2 += 1
+
             if len(g_pairs)<self.batch_size and ref_success and not gen_success:
                 # if   grasp_quality[target_index]>0.5:#target_ref_pose[-1].item()>target_generated_pose[-1].item():
                 #     pass
@@ -1243,6 +1269,48 @@ class TrainGraspGAN:
         # if len(d_pairs) == self.batch_size and len(g_pairs) == self.batch_size:
         #     return  d_pairs, g_pairs,  sampler_samples
         # else:
+        if len(all_pairs)>0:
+            '''Update dynamic data'''
+            self.ch_env.restore_simulation_state()
+            synthesised_data_obj=SynthesisedData()
+            synthesised_data_obj.obj_ids=self.ch_env.objects
+            synthesised_data_obj.obj_poses=self.ch_env.objects_poses
+
+            assert 7*len(self.ch_env.objects)==len(self.ch_env.objects_poses)
+
+            for pair in all_pairs:
+                target_index, target_point,pose,importance=pair
+
+                target_point = pc[target_index]
+
+                synthesised_data_obj.target_indexes.append(target_index)
+                synthesised_data_obj.grasp_target_points.append(target_point.cpu().numpy())
+                synthesised_data_obj.grasp_parameters.append(pose.cpu().numpy())
+                synthesised_data_obj.importance.append(importance)
+
+            if self.loaded_synthesised_data is not None:
+                synthesised_data_obj.id=self.loaded_synthesised_data.id
+                for n in range(len(self.loaded_synthesised_data.target_indexes)):
+                    target_index=self.loaded_synthesised_data.target_indexes[n]
+                    if target_index in synthesised_data_obj.target_indexes: continue
+                    synthesised_data_obj.target_indexes.append(target_index)
+                    synthesised_data_obj.grasp_target_points.append(self.loaded_synthesised_data.grasp_target_points[n])
+                    synthesised_data_obj.grasp_parameters.append(self.loaded_synthesised_data.grasp_parameters[n])
+                    synthesised_data_obj.importance.append(self.loaded_synthesised_data.importance[n])
+
+            if self.loaded_synthesised_data is None:
+                if max(synthesised_data_obj.importance) >= 0.5:
+                    self.DDM.save_data_point(synthesised_data_obj)
+            else:
+                self.DDM.update_old_record(synthesised_data_obj)
+                if max(synthesised_data_obj.importance)<0.5:
+                    self.DDM.low_quality_samples_tracker.append(self.loaded_synthesised_data.id)
+
+        else:
+            if self.loaded_synthesised_data is not None:
+                self.DDM.low_quality_samples_tracker.append(self.loaded_synthesised_data.id)
+
+
         return d_pairs, g_pairs,  sampler_samples
 
     def prepare_voxels(self,pairs,depth,pc, full_pointcloud,view=False):
@@ -1330,15 +1398,35 @@ class TrainGraspGAN:
 
         self.ch_env.max_obj_per_scene=10
 
-        self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
-        # self.ch_env.drop_new_obj(selected_index=None,stablize=True)
+        if ((np.random.rand() < self.skip_rate.val) or len(self.DDM)>=10000) and len(self.DDM) > 100 and not test_mode:
+
+            self.loaded_synthesised_data = self.DDM.load_random_sample()
+            self.ch_env.objects=deque(self.loaded_synthesised_data.obj_ids)
+            self.ch_env.objects_poses=self.loaded_synthesised_data.obj_poses
+
+            # assert 7*len(self.ch_env.objects)==len(self.ch_env.objects_poses), f'{len(self.ch_env.objects)}, {len(self.ch_env.objects_poses)}'
+
+            # print(Fore.LIGHTMAGENTA_EX,'----------Load saved data point .....................................objects:',self.ch_env.objects,Fore.RESET)
+            self.ch_env.reload()
+            # print(self.ch_env.objects_poses)
+
+            assert len(self.ch_env.d.qpos) == 3 + 4 + 15 + len(self.ch_env.objects) * 7
+
+        else:
+            self.loaded_synthesised_data = None
+
+            self.ch_env.drop_new_obj(selected_index=None, stablize=True)
+
+            nn=random.randint(0, self.ch_env.max_obj_per_scene-len(self.ch_env.objects))
+
+            for k in range(nn):
+                self.ch_env.drop_new_obj(selected_index=None, stablize=True)
+
+            assert len(self.ch_env.d.qpos) == 3 + 4 + 15 + len(self.ch_env.objects) * 7
+
+
+        # self.ch_env.print_state()
+
 
         '''get scene perception'''
         depth, pc, floor_mask = self.ch_env.get_scene_preception(view=False)
@@ -1400,7 +1488,7 @@ class TrainGraspGAN:
                 grasp_collision=logits_to_probs2(grasp_collision_logits)
 
                 n=max(self.tou, self.skip_rate.val)# ** 2
-                f = (1 - grasp_quality.detach()).clamp(min=0.1)** 2
+                f = (1 - grasp_quality.detach()).clamp(min=self.skip_rate.val**2)
 
                 annealing_factor = f#torch.clamp(f,min=n) #if self.skip_rate.val < 0.7 else n + (1 - n) * f
                 print(Fore.LIGHTYELLOW_EX,f'mean_annealing_factor= {annealing_factor.mean()},max_annealing_factor= {annealing_factor.max()},min_annealing_factor= {annealing_factor.min()}, tou={self.tou}, skip rate={self.skip_rate.val}',Fore.RESET)
@@ -1417,6 +1505,27 @@ class TrainGraspGAN:
 
                 gripper_pose_ref = ch_pose_interpolation(gripper_pose,
                                                          annealing_factor=annealing_factor,tou=max(self.tou,self.skip_rate.val))  # [b,self.n_param,600,600]
+                if self.loaded_synthesised_data is not None:
+                    '''inject saved poses'''
+                    gripper_pose_ref = gripper_pose_ref.permute(0, 2, 3, 1)[0, :, :, :].reshape(360000, self.n_param)
+                    for t in range(len(self.loaded_synthesised_data.target_indexes)):
+                        index=self.loaded_synthesised_data.target_indexes[t]
+                        pose=self.loaded_synthesised_data.grasp_parameters[t]
+                        # saved_target_point=self.loaded_synthesised_data.grasp_target_points[t]
+                        # target_point = pc[index]
+
+                        # print(f'saved_target_point: {saved_target_point}, target_point: {target_point}')
+                        # print(f'saved pose: {pose}')
+
+                        pose=torch.tensor(pose).cuda()
+                        gripper_pose_ref[index]=pose
+
+                    # gripper_pose_ref=gripper_pose_ref.permute(1,2,0)
+                    # print(f'saved_pose : {gripper_pose_ref[0,:,t]} , pose : {pose}')
+
+                    gripper_pose_ref=gripper_pose_ref.reshape(600,600,self.n_param).permute(2, 0, 1).unsqueeze(0)
+
+
                 model_b_quality_logits=self.gan.generator.get_grasp_quality(
                     depth[None, None, ...], ~floor_mask.view(1, 1, 600, 600),gripper_pose_ref )
                 model_b_quality=logits_to_probs(model_b_quality_logits)
@@ -1438,7 +1547,7 @@ class TrainGraspGAN:
                                                                                   self.superior_A_model_moving_rate,latent_vector,model_b_quality)
                 # print(f'len d {len(d_pairs)}, len g {len(g_pairs)}')
 
-
+                if synthesizie_only: break
 
             if test_mode:
                 if len(d_pairs)>0 and view:
@@ -1473,7 +1582,7 @@ class TrainGraspGAN:
                 self.print_pairs_info( g_pairs, gripper_pose, gripper_pose_ref)
                 print()
             # elif self.skip_rate.val>0.9:
-            else:
+            elif self.skip_rate.val<0.5:
                 print()
                 print('------------------------------------------------step_Policy--------------------------------------------------------')
                 self.step_generator(None,depth,clean_depth, floor_mask, pc, gripper_pose_ref_pixel, g_pairs,latent_vector)
@@ -1594,10 +1703,10 @@ class TrainGraspGAN:
         for i in range(iterations):
             if self.skip_rate.val > 0.8:
                 self.batch_size = 1
-                self.iter_per_scene = 5
+                self.iter_per_scene = 1#5
                 self.ch_env.max_obj_per_scene = 1
             elif self.skip_rate.val < 0.4:
-                self.batch_size = 1
+                self.batch_size = 2
                 self.iter_per_scene = 1
                 self.ch_env.max_obj_per_scene = int(7*np.random.rand())
             # cuda_memory_report()

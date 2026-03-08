@@ -119,7 +119,11 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.d.time = 0.0
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
+        # try:
         self.d.qpos = hand_pos + hand_quat + self.default_finger_joints + obj_pose
+        # except:
+        #     print(len(self.default_finger_joints),' ',len(hand_pos),' ',len(hand_quat),' ',len(obj_pose),' ',len(self.objects))
+        #     assert False
         self.d.ctrl *= 0
         mujoco.mj_step(self.m, self.d)
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
