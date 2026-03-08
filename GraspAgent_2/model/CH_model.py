@@ -70,17 +70,17 @@ class ParallelGripperPoseSampler(nn.Module):
         #                               relu_negative_slope=0.1, activation=None, use_sin=False,normalize=False).to(
         #     'cuda')
         self.alpha = ContextGate_2d_2(in_c1=64, in_c2= 1, out_c=3,
-                                      relu_negative_slope=0., activation=None, use_sin=False,normalize=False,bias=True).to(
+                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
             'cuda')
         self.beta = ContextGate_2d_2(in_c1=64, in_c2= 1+3, out_c=2,
-                                      relu_negative_slope=0., activation=None, use_sin=False,normalize=False,bias=True).to(
+                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
             'cuda')
         self.transition_=ContextGate_2d_2(in_c1=64, in_c2=1+5, out_c=1,
-                                          relu_negative_slope=0., activation=None,use_sin=False,normalize=False).to(
+                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False).to(
             'cuda')
 
         self.fingers=ContextGate_2d_2(in_c1=64, in_c2=1+5+1, out_c=3,
-                                          relu_negative_slope=0., activation=None,use_sin=False,normalize=False).to(
+                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False).to(
             'cuda')
 
         # self.fingers_scale=ContextGate_2d(in_c1=64, in_c2=1+5+1+3, out_c=3,
@@ -196,7 +196,7 @@ class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.,activation=None,IN_affine=False,activate_skip=False).to('cuda')
+                                  relu_negative_slope=0.,activation=nn.SiLU(),IN_affine=False,activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
         self.back_bone.apply(init_weights_he_normal)
