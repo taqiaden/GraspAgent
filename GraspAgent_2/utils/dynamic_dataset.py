@@ -31,10 +31,27 @@ class SynthesisedData:
         self.grasp_target_points = []
         self.grasp_parameters = []
         self.target_indexes = []
-
         self.importance=[]
+        self.grasped_objects=[]
+
+    def filter_best_grasps(self):
+        best_indices = {}
+
+        for i, (obj, imp) in enumerate(zip(self.grasped_objects, self.importance)):
+            if obj not in best_indices or imp > self.importance[best_indices[obj]]:
+                best_indices[obj] = i
+
+        # Keep original order of first occurrences
+        indices_to_keep = sorted(best_indices.values())
+
+        self.grasp_target_points = [self.grasp_target_points[i] for i in indices_to_keep]
+        self.grasp_parameters = [self.grasp_parameters[i] for i in indices_to_keep]
+        self.target_indexes =  [self.target_indexes[i] for i in indices_to_keep]
+        self.importance=[self.importance[i] for i in indices_to_keep]
+        self.grasped_objects=[self.grasped_objects[i] for i in indices_to_keep]
 
     def save_npz(self, filename):
+        self.filter_best_grasps()
         """Save as compressed NumPy arrays"""
         # Convert lists to numpy arrays
         np.savez_compressed(
@@ -45,17 +62,20 @@ class SynthesisedData:
             grasp_parameters=np.array(self.grasp_parameters),
             target_indexes=np.array(self.target_indexes),
             importance=np.array(self.importance),
+            grasped_objects=np.array(self.grasped_objects),
         )
 
     def load_npz(self, filename):
+        self.filter_best_grasps()
         """Load from npz file"""
-        data = np.load(filename)
+        data = np.load(filename,allow_pickle=True)
         self.obj_ids = data['obj_ids'].tolist()
         self.obj_poses = data['obj_poses'].tolist()
         self.grasp_target_points = data['grasp_target_points'].tolist()
         self.grasp_parameters = data['grasp_parameters'].tolist()
         self.target_indexes = data['target_indexes'].tolist()
-        self.importance = data['importance'].tolist() if 'importance' in data else [0.5]*len(self.target_indexes)
+        self.importance = (data['importance']+0.00001).tolist() if 'importance' in data else [0.5]*len(self.target_indexes)
+        self.grasped_objects = data['grasped_objects'].tolist() if 'grasped_objects' in data else [None]*len(self.target_indexes)
 
     @classmethod
     def from_npz(cls, filename):
@@ -74,8 +94,9 @@ class SynthesisedData:
         target_point=self.grasp_target_points.pop(selected_idx)
         grasp_parameters=self.grasp_parameters.pop(selected_idx)
         importance=self.importance.pop(selected_idx)
+        grasped_objects=self.grasped_objects.pop(selected_idx)
 
-        return target_index,target_point,grasp_parameters,importance
+        return target_index,target_point,grasp_parameters,importance,grasped_objects
 
     def random_pop(self):
         if len(self.importance)!=len(self.target_indexes): self.importance=[0.5]*len(self.target_indexes)
@@ -85,8 +106,9 @@ class SynthesisedData:
         target_point=self.grasp_target_points.pop(selected_idx)
         grasp_parameters=self.grasp_parameters.pop(selected_idx)
         importance=self.importance.pop(selected_idx)
+        grasped_objects=self.grasped_objects.pop(selected_idx)
 
-        return target_index,target_point,grasp_parameters,importance
+        return target_index,target_point,grasp_parameters,importance,grasped_objects
 
     def __len__(self):
         return len(self.target_indexes)
@@ -106,9 +128,7 @@ class DynamicDataManagement:
         self.low_quality_samples_tracker=deque()
 
 
-
     def get_last_id(self):
-
         ids = [
             int(f[:-4])
             for f in os.listdir(self.folder_dir)

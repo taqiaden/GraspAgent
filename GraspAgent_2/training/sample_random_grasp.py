@@ -510,7 +510,7 @@ def generate_random_CH_poses(size):
     # alpha_ = torch.zeros((size,3),device='cuda')
     # alpha_[:, -1] = -1
     alpha_[:, -1] = -1#*(torch.abs(alpha_[:, -1])**0.5)
-    # alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
+    alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
     alpha_ = F.normalize(alpha_, dim=-1)
 
     beta_ = random_unit_circle(size)
@@ -536,13 +536,14 @@ def generate_random_CH_poses(size):
 def generate_random_SH_poses(size):
 
     alpha_ = torch.randn((size,3),device='cuda')
-    alpha_[:, -1] = -1*torch.abs(alpha_[:, -1])
+    alpha_[:, -1] = -1#*torch.abs(alpha_[:, -1])
+    alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
     alpha_ = F.normalize(alpha_, dim=-1)
 
     beta_ = random_unit_circle(size)
     beta_ = F.normalize(beta_, dim=-1)
 
-    fingers_ = (torch.rand((size, 9), device='cuda')-0.5)*1.5
+    fingers_ = (torch.rand((size, 3), device='cuda')-0.5)*1.5
 
     transition_ = torch.rand((size, 1), device='cuda')
 
@@ -660,7 +661,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     return sampled_pose
 
 
-def sh_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=None,beta=None,fingers=None,transition=None,tou=1.):
+def sh_pose_interpolation( gripper_pose, annealing_factor):
 
     ref_pose = gripper_pose.detach().clone()
 
@@ -669,12 +670,15 @@ def sh_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
 
     ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
-    ref_pose[:,5:5+9]=torch.clip(ref_pose[:,5:5+9],-.5,0.5)
+    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
 
-    sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
-    sampling_ratios[sampling_ratios>0.95]=1.
+    # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
+    annealing_factor[annealing_factor>0.95]=1.
 
-    sampled_pose=generate_random_SH_poses(ref_pose[0,0].numel()).reshape(600,600,15).permute(2,0,1)[None,...]
+    sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
+
+
+    sampled_pose=generate_random_SH_poses(ref_pose[0,0].numel()).reshape(600,600,9).permute(2,0,1)[None,...]
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
     assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'

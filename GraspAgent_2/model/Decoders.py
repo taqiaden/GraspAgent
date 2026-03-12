@@ -579,6 +579,117 @@ class res_ContextGate_2d(nn.Module):
 
         return output
 
+class att_res_conv_normalized(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sigmoid=False,bottle_neck_factor=2,normalization=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+        self.use_sigmoid=use_sigmoid
+
+        # self.activation=activation
+        self.key = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+
+
+
+        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
+        self.value = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+
+
+
+        # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
+        self.query = nn.Sequential(
+            nn.Conv2d(in_c2, in_c1 // (bottle_neck_factor*2), kernel_size=1),
+            nn.SiLU(),
+            nn.Conv2d(in_c1 // (bottle_neck_factor*2), in_c1 // bottle_neck_factor, kernel_size=1),
+        ).to('cuda')
+
+
+
+        self.att = nn.Sequential(
+            nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
+            # LayerNorm2D(in_c1 // bottle_neck_factor),
+            activation_function,
+        ).to('cuda')
+
+        self.res = nn.Sequential(
+            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
+            # LayerNorm2D(32),
+            activation_function,
+        ).to('cuda')
+
+
+        self.sig = nn.Sigmoid()
+
+
+        self.d = nn.Sequential(
+            nn.Conv2d(32+(in_c1 // bottle_neck_factor), 32, kernel_size=1,bias=False),
+            # LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            # LayerNorm2D(16),
+            nn.Dropout2d(drop_out_ratio),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, key_value_input, query_input):
+        # key_value_input = self.LN(key_value_input)
+        # normalized_key_value=self.activation(normalized_key_value)
+        # normalzied_query_input=self.Q_LN(query_input)
+        # query_input=self.Q_LN(query_input)
+
+        '''residual'''
+        inputs = torch.cat([key_value_input, query_input], dim=1)
+        res = self.res(inputs)
+
+        '''key value from input1'''
+        # key = self.key(normalized_key_value)
+        value = self.value(key_value_input)
+
+        query = self.query(query_input)
+
+        key = self.key(key_value_input)
+        # bias=self.bias(key_value_input)
+
+        # key=key-key.mean(dim=1,keepdim=True)
+        # query=query-query.mean(dim=1,keepdim=True)
+
+        # query = F.normalize(query, p=2, dim=1, eps=1e-8)
+        # key = F.normalize(key, p=2, dim=1, eps=1e-8)
+        att_map = query * key
+
+        # att_map=att_map.unflatten(1,(4,self.in_c1//8))
+        # att_map = F.sigmoid(att_map)
+        if self.use_sigmoid:
+            # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = torch.sigmoid(att_map)
+        else:
+            # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.softmax(att_map*self.scale,dim=1)
+        # att_map = F.sigmoid(att_map*self.scale)
+
+        # att_map=att_map.flatten(1,2)
+        # att_map = F.softmax(att_map*self.scale,dim=1)
+
+        # att_map = self.sig(att_map*self.scale)
+
+        x = (att_map * value)#+bias
+        x = self.att(x)
+
+        x = torch.cat([x, res], dim=1)
+
+        output = self.d(x)
+        return output
 
 class Quality_Net_2d(nn.Module):
     def __init__(self, in_c1, in_c2, out_c, in_c3=0, relu_negative_slope=0.,
@@ -596,23 +707,23 @@ class Quality_Net_2d(nn.Module):
         self.gamma = nn.Sequential(
             # LayerNorm2D(in_c1),
 
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.beta = nn.Sequential(
             # LayerNorm2D(in_c1),
 
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.contx_proj = nn.Sequential(
             # LayerNorm2D(in_c1),
             # activation,
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
-            LayerNorm2D(mid_c),
+            # LayerNorm2D(mid_c),
             # InstanceNorm2d(mid_c),
             activation,
-            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            nn.Conv2d(mid_c, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
             # nn.ReLU(),
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
@@ -634,7 +745,7 @@ class Quality_Net_2d(nn.Module):
             # nn.Softmax(dim=1),
             nn.SiLU(),
 
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
             # activation,
             # nn.Conv2d(mid_c, mid_c, kernel_size=1),
@@ -649,11 +760,11 @@ class Quality_Net_2d(nn.Module):
         self.d = nn.Sequential(
             activation,
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            LayerNorm2D(48),
+            # LayerNorm2D(48),
             # nn.InstanceNorm2d(48),
             activation,
             nn.Conv2d(48, 32, kernel_size=1),
-            LayerNorm2D(32),
+            # LayerNorm2D(32),
             # nn.ReLU(),
             # nn.InstanceNorm2d(32),
 
@@ -680,16 +791,16 @@ class Quality_Net_2d(nn.Module):
         # res = self.res(torch.cat([context, condition], dim=1))
 
         context = self.contx_proj(context)
-        condition = self.cond_proj(condition)
+        # condition = self.cond_proj(condition)
 
         # condition = F.normalize(condition, p=2, dim=1, eps=1e-8)
 
-        gamma = self.gamma(context)
-        beta = self.beta(context)
+        gamma = self.gamma(condition)
+        beta = self.beta(condition)
 
         # condition = torch.softmax(condition, dim=1)
 
-        x = gamma * condition
+        x = gamma * context
         # x = torch.sigmoid(x)
         # x = F.normalize(x, p=2, dim=1, eps=1e-8)
         # x = torch.softmax(x, dim=1)

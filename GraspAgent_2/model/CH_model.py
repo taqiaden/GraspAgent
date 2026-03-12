@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from GraspAgent_2.model.Backbones import PointNetEncoder
 from GraspAgent_2.model.Decoders import ContextGate_1d, ContextGate_2d, res_ContextGate_2d, CSDecoder_2d, \
-    ContextGate_2d_2, ContextGate_1d_2, Quality_Net_2d, ContextGate_1d_3
+    ContextGate_2d_2, ContextGate_1d_2, Quality_Net_2d, ContextGate_1d_3, att_res_conv_normalized
 from GraspAgent_2.model.YPG_GAN import replace_activations
 from GraspAgent_2.model.sparse_encoder import SparseEncoderIN, Encoder3D_IN, Encoder2D_IN
 from GraspAgent_2.utils.NN_tools import replace_instance_with_groupnorm
@@ -19,7 +19,6 @@ from GraspAgent_2.utils.quat_operations import sign_invariant_quat_encoding_1d, 
     expmap_to_quat_map_2d
 from lib.cuda_utils import cuda_memory_report
 from models.Grasp_GAN import norm_free
-from models.decoders import att_conv_normalized2, att_res_conv_normalized
 from models.resunet import res_unet
 import torch
 import torch.nn as nn
@@ -196,7 +195,7 @@ class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.,activation=nn.SiLU(),IN_affine=False,activate_skip=False).to('cuda')
+                                  relu_negative_slope=0.,activation=None,IN_affine=False,activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
         self.back_bone.apply(init_weights_he_normal)
@@ -206,7 +205,7 @@ class CH_G(nn.Module):
         # gan_init_with_norms(self.back_bone)
 
         self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.0, activation=nn.SiLU(), IN_affine=False,activate_skip =False).to('cuda')
+                                  relu_negative_slope=0.0, activation=None, IN_affine=False,activate_skip =True).to('cuda')
         # self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
         #                           relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
         # self.back_bone2_.apply(init_weights_he_normal)
@@ -219,30 +218,48 @@ class CH_G(nn.Module):
         # replace_instance_with_groupnorm(self.back_bone3_, max_groups=16)
         # orthogonal_init_all(self.back_bone_2,gain=gain)
 
+        self.IN=nn.InstanceNorm2d(1).to('cuda')
+
+
         self.CH_PoseSampler = ParallelGripperPoseSampler()
 
         # self.query = nn.Sequential(
         #     nn.Conv2d(14, 5, kernel_size=1),
         # ).to('cuda')
 
-        self.grasp_quality_=Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-                                              relu_negative_slope=0.,activation=nn.SiLU()).to(
-            'cuda')
-
-        # self.grasp_quality_=att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
-        #                        relu_negative_slope=0.1, activation=None,
-        #                        drop_out_ratio=0., use_sigmoid=True).to(
+        # self.grasp_quality_=Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
+        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
         #     'cuda')
 
-        self.grasp_collision_ =         Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-                                              relu_negative_slope=0.,activation=nn.SiLU()).to(
+        self.grasp_quality_=att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+                               relu_negative_slope=0.1, activation=None,
+                               drop_out_ratio=0., use_sigmoid=True).to(
             'cuda')
-        self.grasp_collision2 =        Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-                                              relu_negative_slope=0.,activation=nn.SiLU()).to(
+
+        self.grasp_collision_=att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+                               relu_negative_slope=0.1, activation=None,
+                               drop_out_ratio=0., use_sigmoid=True).to(
             'cuda')
-        self.grasp_collision3=          Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-                                              relu_negative_slope=0.,activation=nn.SiLU()).to(
+
+        self.grasp_collision2=att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+                               relu_negative_slope=0.1, activation=None,
+                               drop_out_ratio=0., use_sigmoid=True).to(
             'cuda')
+
+        self.grasp_collision3=att_res_conv_normalized(in_c1=64, in_c2=7, out_c=1,
+                               relu_negative_slope=0.1, activation=None,
+                               drop_out_ratio=0., use_sigmoid=True).to(
+            'cuda')
+
+        # self.grasp_collision_ =         Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
+        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
+        #     'cuda')
+        # self.grasp_collision2 =        Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
+        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
+        #     'cuda')
+        # self.grasp_collision3=          Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
+        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
+        #     'cuda')
         # add_spectral_norm_selective(self.grasp_quality)
         # add_spectral_norm_selective(self.grasp_collision)
         # add_spectral_norm_selective(self.grasp_collision2_)
@@ -339,9 +356,10 @@ class CH_G(nn.Module):
 
         else:
             features = self.back_bone(input) #if backbone is None else backbone(input)
+
+
             features2 = self.back_bone2_(standarized_depth_)#*scale
             # features3 = self.back_bone3_(input)  # *scale
-
         # features2=torch.cat([features2,scaled_depth_,depth_],dim=1)
         # features=torch.cat([features,scaled_depth_,depth_],dim=1)
         print('G b1 max val= ',features.max().item(), 'mean:',features.mean().item(),' std:',features.std(dim=1).mean().item())
@@ -382,9 +400,9 @@ class CH_G(nn.Module):
         # input2=torch.cat([input,s],dim=1)
 
 
-        grasp_collision=self.grasp_collision_(features2,detached_gripper_pose_without_fingers)
-        grasp_collision=torch.cat([grasp_collision,self.grasp_collision3(features2,detached_gripper_pose_without_fingers)],dim=1)
-        grasp_collision=torch.cat([grasp_collision,self.grasp_collision2(features2,detached_gripper_pose_without_fingers)],dim=1)
+        grasp_collision=self.grasp_collision_(features2.detach(),detached_gripper_pose_without_fingers)
+        grasp_collision=torch.cat([grasp_collision,self.grasp_collision3(features2.detach(),detached_gripper_pose_without_fingers)],dim=1)
+        grasp_collision=torch.cat([grasp_collision,self.grasp_collision2(features2.detach(),detached_gripper_pose_without_fingers)],dim=1)
 
         # grasp_collision=self.grasp_collision_(features2,rotation=encoded_quat,transition=torch.cat([transition,depth_data],dim=1),fingers=None)
 

@@ -59,7 +59,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 -  0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th =   1.
+            j_th =   1.5
             j_fm =   1.5
             j_rl =   1.5
         return [j_th, j_fm, j_fm, j_rl, j_rl]
@@ -72,7 +72,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 - fingers[2] * 0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th = fingers[0] *  1.
+            j_th = fingers[0] *  1.5
             j_fm = fingers[1] *  1.5
             j_rl = fingers[2] *  1.5
         return [j_th, j_fm, j_fm, j_rl, j_rl]
@@ -104,6 +104,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         in_scope = self.check_fingers_scope(hand_fingers)
         if not in_scope: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+        grasped_obj=None
         # v2 = quat_rotate_vector(hand_quat, [0, 1, 0])
         # if v2[-1]<0:in_scope=False
 
@@ -129,11 +130,11 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         if ini_contact_with_obj or ini_contact_with_floor:
             # self.static_view(1000)
-            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None,warning_flag
+            return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None,warning_flag,grasped_obj
         # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
         delta=[0, 0, 0.003]
         decoded_fingers = self.decode_finger_ctrl(hand_fingers)
-        max_fingers = self.max_finger_ctrl()
+        # max_fingers = self.max_finger_ctrl()
         self.d.ctrl = decoded_fingers
         shake_amp = .003
         shake_f = 20  # Hz
@@ -176,17 +177,18 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         if grasp_success:
             stable_grasp,n_grasp_contact2,self_collide2,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=2)
             # print(f'---test------------------------------{max_force1,max_penetration1,max_force2,max_penetration2}')
+            grasped_obj = self.get_grasped_obj()
             if update_obj_prob and not warning_flag:
-                grasped_obj = self.get_grasped_obj()
+
                 # print(f'grasped_obj_: {grasped_obj}')
 
                 # s=1.0 if stable_grasp else 0.9
                 # if stable_grasp:print(Fore.GREEN,f"object {grasped_obj} grasped successfully",Fore.RESET)
                 self.step_obj_prop(grasped_obj)
 
-            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp,warning_flag
+            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp,warning_flag,grasped_obj
         else:
-            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact1,self_collide1,None,warning_flag
+            return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,n_grasp_contact1,self_collide1,None,warning_flag,grasped_obj
 
     def view_grasp(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=300,hard_level=0.   ):
         self.restore_simulation_state()
@@ -215,7 +217,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         delta=[0, 0, 0.003]
         decoded_fingers=self.decode_finger_ctrl(hand_fingers)
-        max_fingers=self.max_finger_ctrl()
+        # max_fingers=self.max_finger_ctrl()
         self.d.ctrl = decoded_fingers
         shake_amp = .003
         shake_f = 20  # Hz
