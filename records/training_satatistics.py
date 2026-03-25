@@ -138,33 +138,33 @@ class MovingRate():
 
 class TrainingTracker:
     def __init__(self,name='',track_label_balance=False,track_prediction_balance=False,decay_rate=0.01,track_history=False):
-        try:
-            self.name=name
+        # try:
+        self.name=name
 
-            self.running_loss_ = None
+        self.running_loss_ = None
 
-            '''confession matrix'''
-            self.confession_matrix=ConfessionMatrix()
+        '''confession matrix'''
+        self.confession_matrix=ConfessionMatrix()
 
-            '''balance indicator'''
-            self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
-            self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
+        '''balance indicator'''
+        self.label_balance_indicator=self.load_label_balance_indicator() if track_label_balance else None
+        self.prediction_balance_indicator=self.load_prediction_balance_indicator() if track_prediction_balance else None
 
-            self.loss_moving_average_=self.load_loss_moving_average()
-            self.moving_accuracy=self.load_moving_accuracy()
+        self.loss_moving_average_=self.load_loss_moving_average()
+        self.moving_accuracy=self.load_moving_accuracy()
 
-            if self.loss_moving_average_ is None: self.loss_moving_average_=1.0
-            self.convergence=self.load_convergence()
-            self.momentum=self.load_momentum()
-            self.decay_rate=decay_rate
-            self.counter=self.load_counter()
-            self.last_loss=None
+        if self.loss_moving_average_ is None: self.loss_moving_average_=1.0
+        self.convergence=self.load_convergence()
+        self.momentum=self.load_momentum()
+        self.decay_rate=decay_rate
+        self.counter=self.load_counter()
+        self.last_loss=None
 
-            self.track_history=track_history
+        self.track_history=track_history
 
-            self.tmp_counter=0
-        except Exception as e:
-            print(str(e))
+        self.tmp_counter=0
+        # except Exception as e:
+        #     print(str(e))
 
     @property
     def accuracy(self):
@@ -195,6 +195,7 @@ class TrainingTracker:
             if self.prediction_balance_indicator is not None: self.update_prediction_balance_indicator(prediction_)
 
             instance_accuracy=(TP_mask.sum()+TN_mask.sum()).item()/(TP_mask.sum()+FP_mask.sum()+FN_mask.sum()+TN_mask.sum()).item()
+
             self.moving_accuracy = (1 - self.decay_rate) * self.moving_accuracy + self.decay_rate*instance_accuracy
 
             return TP_mask,FP_mask,FN_mask,TN_mask

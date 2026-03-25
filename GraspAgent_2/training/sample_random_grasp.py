@@ -523,14 +523,15 @@ def generate_random_CH_poses(size):
     # values = torch.tensor([-0.5, 0.,0.2, 0.5])
     # fingers_=sample_vectors(size,3,values).cuda()
 
-    fingers_ = (0.5-torch.rand((size, 3), device='cuda')**2)*1.5
-    fingers_=torch.clip(fingers_,max=0.5)
+    delta = torch.randn((size, 3), device='cuda')
+
+    delta[:,-1]-=0.5
 
     # values = torch.tensor([ 0.,0.3,0.5,0.7, 1.])
     # transition_=sample_vectors(size, 1, values).cuda()
     transition_ = torch.rand((size, 1), device='cuda')**2
 
-    sampled_pose = torch.cat([alpha_,beta_, fingers_, transition_], dim=1)
+    sampled_pose = torch.cat([alpha_,beta_, delta, transition_], dim=1)
     return sampled_pose
 
 def generate_random_SH_poses(size):
@@ -543,9 +544,9 @@ def generate_random_SH_poses(size):
     beta_ = random_unit_circle(size)
     beta_ = F.normalize(beta_, dim=-1)
 
-    fingers_ = (torch.rand((size, 3), device='cuda')-0.5)*1.5
+    fingers_ = (torch.rand((size, 3), device='cuda')-0.5)
 
-    transition_ = torch.rand((size, 1), device='cuda')
+    transition_ = torch.rand((size, 1), device='cuda')**2
 
     sampled_pose = torch.cat([alpha_,beta_, fingers_, transition_], dim=1)
     return sampled_pose
@@ -631,7 +632,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     ref_pose[:,2]=torch.clip(ref_pose[:,2],max=0.)
 
     ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
-    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
+    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-1,1)
 
     # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
     annealing_factor[annealing_factor>0.95]=1.0
@@ -654,8 +655,6 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
     sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
 
-    # '''clip fingers to scope'''
-    sampled_pose[:,5:5+3]=torch.clamp(sampled_pose[:,5:5+3],max=0.5)
     sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
     return sampled_pose

@@ -76,7 +76,7 @@ def draw_point(viewer, pos, radius=0.02, rgba=[1, 0, 0, 1]):
 
 
 class MojocoMultiFingersEnv():
-    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,max_obj_per_scene=2,key=""):
+    def __init__(self,obj_nums_in_scene=3,root = "shadow_dexee/" ,max_obj_per_scene=2,key="",objects_path=None):
         super().__init__()
         '''
 
@@ -84,14 +84,14 @@ class MojocoMultiFingersEnv():
         '''
 
         self.root=root
-        self.objects_path = root+"/mesh/"
-        self.object_nums_all = len(os.listdir(self.objects_path))
+        self.objects_path = root if objects_path is None else objects_path
+        self.object_nums_all = len(os.listdir(self.objects_path+"/mesh/"))
+        print(f'Available # objects: {self.object_nums_all}')
+        self.tmp_xml='/'+key+'_tmp.xml'
         self.obj_nums_in_scene = obj_nums_in_scene
         assert obj_nums_in_scene <= self.object_nums_all, f'{self.object_nums_all}'
         self.m=None
         self.d=None
-
-
 
         '''camera info'''
         self.height = 600
@@ -103,10 +103,10 @@ class MojocoMultiFingersEnv():
 
         # self.ini_renderer()
 
-
         self.far_hand_pos = [10, 10., 10.]
         self.far_hand_quat = [0, 1, 0, 0]
         self.default_finger_joints = None
+        self.default_ctrl = None
 
         self.objects = deque([])
         self.objects_poses = []
@@ -126,13 +126,15 @@ class MojocoMultiFingersEnv():
 
         self.last_hand_geom_id = self.m.ngeom - 1
 
+        self.max_obj_score=1.0
+
         assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
     def step_obj_prop(self,obj):
         # old_val=self.obj_dict[str(obj)]
         # new_val=old_val+step_val
         # new_val=max(min(new_val,1.0),0)
-        self.obj_dict[str(obj)]=self.obj_dict[str(obj)]*0.5+0.5
+        self.obj_dict[str(obj)]=self.obj_dict[str(obj)]*0.5+0.5 if str(obj) in self.obj_dict else 0.5
         # '''confidence-aware'''
         #Small values behave like low trust → slow learning
         #Large values behave like high confidence → fast adaptation
@@ -142,6 +144,7 @@ class MojocoMultiFingersEnv():
 
 
     def update_obj_info(self,score,decay=0.99):
+        decay=1-self.max_obj_score+self.max_obj_score*decay
         for obj in self.objects:
             if str(obj) in self.obj_dict:
                 self.obj_dict[str(obj)]=max(decay*self.obj_dict[str(obj)]+(1-decay)*score,0.001)
@@ -151,12 +154,13 @@ class MojocoMultiFingersEnv():
                 #         print(f"Key: {key}, type: {type(key)}, Value: {value}, type: {type(value)}")
                 assert len(self.obj_dict) <= self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}, {obj}'
             else:
-                self.obj_dict[str(obj)]=1
+                self.obj_dict[str(obj)]=0.5
 
     def load_obj_dict(self):
         if os.path.exists(self.dict_file_path):
             with open(self.dict_file_path, "r") as f:
                 data = json.load(f)
+                self.max_obj_score = max(data.values())
             return data if data is not None else {}
         else:
             return {}
@@ -175,6 +179,8 @@ class MojocoMultiFingersEnv():
         for k in self.obj_dict:
             if self.obj_dict[k] < epsilon:
                 self.obj_dict[k] = epsilon
+
+        self.max_obj_score = max(self.obj_dict.values())
 
         with open(self.dict_file_path, "w") as f:
             json.dump(self.obj_dict, f, indent=4)
@@ -229,12 +235,14 @@ class MojocoMultiFingersEnv():
             if selected_index is None:
                 for j in range(1000):
                     new_obj_id,prob=self.sample_random_obj()
+
                     if new_obj_id not in self.objects :
                         file_exist = self.check_file_exist(new_obj_id)
                         if  file_exist:
                            break
                         else:
-                            self.obj_dict.pop(new_obj_id)
+                            if str(new_obj_id) in self.obj_dict:
+                                self.obj_dict.pop(new_obj_id)
                             continue
                 else: assert False
                 print('Newly added object ID: ', new_obj_id, ' prob: ',prob)
@@ -476,23 +484,25 @@ class MojocoMultiFingersEnv():
             return pc
 
     def check_file_exist(self,idx):
-        path=self.root+'/mesh/mesh_' + str(idx) + '.xml'
+        # path=self.root+'/mesh/mesh_' + str(idx) + '.xml'
+        path=self.objects_path+'/mesh/mesh_'+ str(idx) + '.xml'
         return os.path.exists(path)
 
 
     def prepare_obj_mesh(self):
         tree = ET.parse(self.root+self.scene_xml_file)
         root = tree.getroot()
+
         if self.objects is not None:
             for idx in self.objects:
                 new_mesh = ET.Element('include')
-                new_mesh.set('file', 'mesh/mesh_' + str(idx) + '.xml')
+                new_mesh.set('file', self.objects_path+'/mesh/mesh_' + str(idx) + '.xml')
                 root.insert(1, new_mesh)
-        tree.write(self.root+'/temp.xml')
+        tree.write(self.objects_path+self.tmp_xml)
 
     def initiate_mojoco(self):
 
-        self.m = mujoco.MjModel.from_xml_path(self.root+'/temp.xml')
+        self.m = mujoco.MjModel.from_xml_path(self.objects_path+self.tmp_xml)
 
         self.d = mujoco.MjData(self.m)
         mujoco.mj_forward(self.m, self.d)
@@ -604,7 +614,24 @@ class MojocoMultiFingersEnv():
                 # print(f"⚠️ Interference between geom {c.geom1} and geom {c.geom2}, depth = {c.dist:.6f}")
 
         return contact_with_obj,contact_with_floor
+    def get_grasped_obj(self):
+        k = 3 + 4 + len(self.default_finger_joints)
+        objects_poses = self.d.qpos[k:]
+        max_elevation = None
+        grasped_obj = None
+        for i in range(len(self.objects)):
+            n = ((len(self.objects) - i - 1) * 7)
+            pose = objects_poses[n:n + 3]
+            # quat = objects_poses[n + 3:n + 7]
+            if max_elevation is None:
+                max_elevation = pose[-1]
+                grasped_obj = self.objects[i]
+            else:
+                if pose[-1] > max_elevation:
+                    max_elevation = pose[-1]
+                    grasped_obj = self.objects[i]
 
+        return grasped_obj
     def check_valid_grasp(self,margin=0,minimum_contact_points=2,view=False):
         is_hand_geom= lambda x: x>=1 and x<=self.last_hand_geom_id
         contact_with_floor=False
@@ -686,14 +713,13 @@ class MojocoMultiFingersEnv():
 
     def check_collision(self,hand_pos,hand_quat,hand_fingers=None,view=False):
         self.restore_simulation_state()
-        if hand_fingers is None: hand_fingers=self.default_finger_joints
-        else: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+
 
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
 
 
-        self.d.qpos =hand_pos + hand_quat + hand_fingers + self.objects_poses
+        self.d.qpos =hand_pos + hand_quat + self.default_finger_joints + self.objects_poses
 
         self.d.ctrl*=0
 
@@ -703,6 +729,7 @@ class MojocoMultiFingersEnv():
         contact_with_obj, contact_with_floor = self.check_hand_contact()
 
         if view:
+            print(f'contact_with_obj , contact_with_floor: {contact_with_obj , contact_with_floor}')
             self.static_view(1000)
 
         return  contact_with_obj , contact_with_floor
@@ -868,12 +895,14 @@ class MojocoMultiFingersEnv():
 
         if fingers is not None: self.d.ctrl=self.decode_finger_ctrl(fingers)
 
+
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             viewer.opt.frame = mujoco.mjtFrame.mjFRAME_WORLD  # show world frame
             # optional: show contact points
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
 
             while viewer.is_running():
+
                 step_start = time.time()
                 # self.d.qpos[k:]=list(self.objects_poses)
 

@@ -120,7 +120,7 @@ class GANWrapper():
             self.generator_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
                                          weight_decay=weight_decay_)
         else:
-            self.generator_optimizer = torch.optim.Adam(param_group,
+            self.generator_optimizer = torch.optim.Adam(param_group,lr=self.learning_rate,
                                                         betas=(beta1, beta2), eps=1e-8,
                                                         weight_decay=weight_decay_)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
@@ -131,7 +131,7 @@ class GANWrapper():
             self.generator_optimizer = torch.optim.AdamW(self.generator.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
                                          weight_decay=weight_decay_)
         else:
-            self.generator_optimizer = torch.optim.AdamW(param_group,
+            self.generator_optimizer = torch.optim.AdamW(param_group,lr=self.learning_rate,
                                                         betas=(beta1, beta2), eps=1e-8,
                                                         weight_decay=weight_decay_)
         if load_check_point: self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
@@ -152,11 +152,15 @@ class GANWrapper():
                                                  weight_decay=weight_decay)
         self.critic_optimizer = load_opt(self.critic_optimizer, self.module_key + '_critic_optimizer')
 
-    def generator_sgd_optimizer(self, learning_rate=None,weight_decay_=weight_decay,momentum=0.0):
+    def generator_sgd_optimizer(self, param_group=None,learning_rate=None,weight_decay_=weight_decay,momentum=0.0):
         if learning_rate is not None: self.learning_rate = learning_rate
 
-        self.generator_optimizer = torch.optim.SGD(self.generator.parameters(), lr=self.learning_rate,
-                                                    weight_decay=weight_decay_,momentum=momentum)
+        if param_group is None:
+            self.generator_optimizer = torch.optim.SGD(self.generator.parameters(), lr=self.learning_rate,
+                                                       weight_decay=weight_decay_, momentum=momentum)
+        else:
+            self.generator_optimizer = torch.optim.SGD(param_group, lr=self.learning_rate,
+                                                        weight_decay=weight_decay_,momentum=momentum)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key + '_generator_optimizer')
 
     def model_time_stamp(self):

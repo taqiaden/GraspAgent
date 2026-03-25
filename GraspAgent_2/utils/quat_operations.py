@@ -166,13 +166,31 @@ def quat_from_two_frames(v1, u1, v2, u2):
             q[3] = 0.25 * s
 
     return q / np.linalg.norm(q)
+
+
 def quat_between(v_from, v_to):
     v_from = v_from / torch.norm(v_from)
     v_to = v_to / torch.norm(v_to)
-    cross = torch.cross(v_from, v_to,dim=-1)
+
     dot = torch.dot(v_from, v_to)
-    w = torch.sqrt((torch.norm(v_from)**2) * (torch.norm(v_to)**2)) + dot
-    quat = torch.cat([torch.tensor([w],device=v_from.device), cross])
+
+    # Handle the case of opposite vectors
+    if dot < -0.999999:  # Using a small epsilon for numerical stability
+        # Find a perpendicular axis (any vector perpendicular to v_from)
+        # For opposite vectors, we need a 180° rotation around any axis perpendicular to v_from
+        axis = torch.cross(v_from, torch.tensor([1., 0., 0.], device=v_from.device))
+        if torch.norm(axis) < 0.000001:  # If v_from is parallel to [1,0,0], try another axis
+            axis = torch.cross(v_from, torch.tensor([0., 1., 0.], device=v_from.device))
+        axis = axis / torch.norm(axis)
+
+        # 180° rotation quaternion: [cos(90°), sin(90°)*axis] = [0, axis]
+        quat = torch.cat([torch.tensor([0.], device=v_from.device), axis])
+        return quat / torch.norm(quat)
+
+    # Original formula works for all other cases
+    cross = torch.cross(v_from, v_to)
+    w = torch.sqrt((torch.norm(v_from) ** 2) * (torch.norm(v_to) ** 2)) + dot
+    quat = torch.cat([w.unsqueeze(0), cross])
     return quat / torch.norm(quat)
 
 def quat_mul(q1, q2):

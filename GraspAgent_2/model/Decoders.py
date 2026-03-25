@@ -238,23 +238,23 @@ class ContextGate_1d(nn.Module):
 
         self.context_proj = nn.Sequential(
             nn.Linear(in_c1, 128, bias=True),
-            nn.LayerNorm(128),
+            # nn.LayerNorm(128),
             # nn.SiLU(),
             # nn.Linear(128, 128, bias=True),
-            nn.SiLU(),
+            nn.LeakyReLU(0.2),
             nn.Linear(128, 64, bias=True),
-            nn.LayerNorm(64),
-            nn.SiLU(),
+            # nn.LayerNorm(64),
+            nn.LeakyReLU(0.2),
 
         )
 
         self.cond_proj = nn.Sequential(
             nn.Linear(in_c2, 128, bias=True),
-            nn.LayerNorm(128),
-            nn.SiLU(),
+            # nn.LayerNorm(128),
+            nn.LeakyReLU(0.2),
             nn.Linear(128, 64, bias=True),
-            nn.LayerNorm(64),
-            nn.SiLU(),
+            # nn.LayerNorm(64),
+            nn.LeakyReLU(0.2),
             # nn.Linear(128, 64, bias=True),
 
         )
@@ -305,10 +305,12 @@ class ContextGate_2d(nn.Module):
         mid_c+=mid_c%2
 
         self.gamma = nn.Sequential(
+            nn.SiLU(),
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.beta = nn.Sequential(
+            nn.SiLU(),
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
         ).to('cuda')
 
@@ -322,20 +324,17 @@ class ContextGate_2d(nn.Module):
 
         self.cond_proj =nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
-            LayerNorm2D(mid_c),
-            nn.SiLU(),
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
+            # LayerNorm2D(mid_c),
+            # nn.SiLU(),
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
         self.d = nn.Sequential(
             nn.SiLU(),
             nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            # LayerNorm2D(48),
-            ParameterizedSine() if cyclic else nn.SiLU(),
-            nn.Conv2d(48, 32, kernel_size=1),
             # LayerNorm2D(32),
             ParameterizedSine() if cyclic else nn.SiLU(),
-            nn.Conv2d(32, out_c, kernel_size=1)
+            nn.Conv2d(48, out_c, kernel_size=1)
         ).to('cuda')
 
 
@@ -390,7 +389,7 @@ class ContextGate_2d_2(nn.Module):
         ).to('cuda')
         self.contx_proj = nn.Sequential(
             nn.Conv2d(in_c1, in_c1, kernel_size=1),
-            LayerNorm2D(in_c1),
+            # LayerNorm2D(in_c1),
             nn.SiLU(),
         ).to('cuda')
 
@@ -592,26 +591,39 @@ class att_res_conv_normalized(nn.Module):
 
         # self.activation=activation
         self.key = nn.Sequential(
+            # nn.InstanceNorm2d(in_c1 ),
+            activation_function,
             nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+            # nn.InstanceNorm2d(in_c1 // bottle_neck_factor),
+            # activation_function,
+            # nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
 
 
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.value = nn.Sequential(
+            # nn.InstanceNorm2d(in_c1),
+            activation_function,
             nn.Conv2d(in_c1, in_c1 // bottle_neck_factor, kernel_size=1),
+            # nn.InstanceNorm2d(in_c1 // bottle_neck_factor),
+            # activation_function,
+            # nn.Conv2d(in_c1// bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
         ).to('cuda')
 
 
 
         # self.Q_LN = LayerNorm2D(in_c2).to('cuda')
         self.query = nn.Sequential(
-            nn.Conv2d(in_c2, in_c1 // (bottle_neck_factor*2), kernel_size=1),
+            nn.Conv2d(in_c2, in_c1 // (bottle_neck_factor), kernel_size=1),
+            # LayerNorm2D(in_c1 // (bottle_neck_factor)),
             nn.SiLU(),
-            nn.Conv2d(in_c1 // (bottle_neck_factor*2), in_c1 // bottle_neck_factor, kernel_size=1),
+            nn.Conv2d(in_c1 // (bottle_neck_factor), in_c1 // bottle_neck_factor, kernel_size=1),
+            # LayerNorm2D(in_c1 // (bottle_neck_factor)),
+            # nn.SiLU(),
+            # nn.Conv2d(in_c1 // (bottle_neck_factor), in_c1 // bottle_neck_factor, kernel_size=1),
+
         ).to('cuda')
-
-
 
         self.att = nn.Sequential(
             nn.Conv2d(in_c1 // bottle_neck_factor, in_c1 // bottle_neck_factor, kernel_size=1),
@@ -620,7 +632,7 @@ class att_res_conv_normalized(nn.Module):
         ).to('cuda')
 
         self.res = nn.Sequential(
-            nn.Conv2d(in_c1 + in_c2, 32, kernel_size=1, bias=False),
+            nn.Conv2d(in_c1 , 32, kernel_size=1),
             # LayerNorm2D(32),
             activation_function,
         ).to('cuda')
@@ -630,14 +642,14 @@ class att_res_conv_normalized(nn.Module):
 
 
         self.d = nn.Sequential(
-            nn.Conv2d(32+(in_c1 // bottle_neck_factor), 32, kernel_size=1,bias=False),
+            nn.Conv2d(32+(in_c1 // bottle_neck_factor), 32, kernel_size=1),
             # LayerNorm2D(32),
             activation_function,
-            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            nn.Conv2d(32, out_c, kernel_size=1),
             # LayerNorm2D(16),
-            nn.Dropout2d(drop_out_ratio),
-            activation_function,
-            nn.Conv2d(16, out_c, kernel_size=1),
+            # nn.Dropout2d(drop_out_ratio),
+            # activation_function,
+            # nn.Conv2d(16, out_c, kernel_size=1),
         ).to('cuda')
 
         self.in_c1=in_c1
@@ -648,9 +660,11 @@ class att_res_conv_normalized(nn.Module):
         # normalzied_query_input=self.Q_LN(query_input)
         # query_input=self.Q_LN(query_input)
 
+
+
         '''residual'''
-        inputs = torch.cat([key_value_input, query_input], dim=1)
-        res = self.res(inputs)
+        # inputs = torch.cat([key_value_input, query_input], dim=1)
+        res = self.res(key_value_input)
 
         '''key value from input1'''
         # key = self.key(normalized_key_value)
@@ -674,7 +688,7 @@ class att_res_conv_normalized(nn.Module):
             # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = torch.sigmoid(att_map)
         else:
-            # att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
+            att_map = F.normalize(att_map, p=2, dim=1, eps=1e-8)
             att_map = F.softmax(att_map*self.scale,dim=1)
         # att_map = F.sigmoid(att_map*self.scale)
 
@@ -689,6 +703,87 @@ class att_res_conv_normalized(nn.Module):
         x = torch.cat([x, res], dim=1)
 
         output = self.d(x)
+        return output
+class multi_film_decoder(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c, relu_negative_slope=0.,  drop_out_ratio=0.0,
+                 activation=None,use_sigmoid=False,bottle_neck_factor=2,normalization=None):
+        super().__init__()
+        if activation is None:
+            activation_function = nn.LeakyReLU(
+                negative_slope=relu_negative_slope) if relu_negative_slope > 0. else nn.ReLU()
+        else:
+            activation_function = activation
+        self.use_sigmoid=use_sigmoid
+
+        # self.activation=activation
+        self.context1 = nn.Sequential(
+            nn.Conv2d(in_c1, in_c1 , kernel_size=1),
+        ).to('cuda')
+
+        self.context2 = nn.Sequential(
+            activation_function,
+            nn.Conv2d(in_c1, in_c1 , kernel_size=1),
+        ).to('cuda')
+
+        self.context3 = nn.Sequential(
+            activation_function,
+            nn.Conv2d(in_c1, in_c1 , kernel_size=1),
+        ).to('cuda')
+
+        self.approach_gamma = nn.Sequential(
+            nn.Conv2d(3, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.beta_gamma = nn.Sequential(
+            nn.Conv2d(2, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.fingers_gamma = nn.Sequential(
+            nn.Conv2d(3, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.transition_beta = nn.Sequential(
+            nn.Conv2d(1, in_c1, kernel_size=1),
+        ).to('cuda')
+
+        self.point_beta = nn.Sequential(
+            nn.Conv2d(1, in_c1, kernel_size=1),
+        ).to('cuda')
+
+
+        self.d = nn.Sequential(
+            activation_function,
+            nn.Conv2d(in_c1, 32, kernel_size=1,bias=False),
+            # LayerNorm2D(32),
+            activation_function,
+            nn.Conv2d(32, 16, kernel_size=1,bias=False),
+            # LayerNorm2D(16),
+            activation_function,
+            nn.Conv2d(16, out_c, kernel_size=1),
+        ).to('cuda')
+
+        self.in_c1=in_c1
+
+    def forward(self, context, pose):
+
+        approach=pose[:,0:3]
+        beta=pose[:,3:5]
+        fingers=pose[:,5:8]
+        transition=pose[:,8:9]
+        point=pose[:,9:]
+
+        approach = self.approach_gamma(approach)
+        beta=self.beta_gamma(beta)
+        fingers=self.fingers_gamma(fingers)
+        transition=self.transition_beta(transition)
+        point=self.point_beta(point)
+
+
+        context = self.context1(context)*approach+point
+        context=self.context2(context)*beta+transition
+        context=self.context3(context)*fingers
+
+        output = self.d(context)
         return output
 
 class Quality_Net_2d(nn.Module):

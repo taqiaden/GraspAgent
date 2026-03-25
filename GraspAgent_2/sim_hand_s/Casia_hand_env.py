@@ -59,9 +59,9 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 -  0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th =   1.5
-            j_fm =   1.5
-            j_rl =   1.5
+            j_th =   1.1
+            j_fm =   1.7
+            j_rl =   1.7
         return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def  decode_finger_ctrl(self,fingers):
@@ -72,9 +72,9 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 - fingers[2] * 0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th = fingers[0] *  1.5
-            j_fm = fingers[1] *  1.5
-            j_rl = fingers[2] *  1.5
+            j_th = fingers[0] *  1.1
+            j_fm = fingers[1] *  1.7
+            j_rl = fingers[2] *  1.7
         return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def check_fingers_scope(self,fingers):
@@ -141,13 +141,13 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         for i in range(600):
             #Rise phase
-            if 150 < i < 350:
+            if 200 < i < 400:
                 self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
             # shake phase
-            if 500 > i > 350:
-                if i==351:
-                    grasp_success, n_grasp_contact1, self_collide1,max_force1,max_penetration1 = self.check_valid_grasp(minimum_contact_points=2)
+            if 500 > i > 400:
+                if i==401:
+                    grasp_success, n_grasp_contact1, self_collide1,max_force1,max_penetration1 = self.check_valid_grasp(minimum_contact_points=0)
                     if not grasp_success or not shake: break
                 # self.d.ctrl = max_fingers #if i < 400 else decoded_fingers
                 t = i * self.m.opt.timestep
@@ -158,7 +158,6 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 # shake = shake_amp * np.sin(2 * np.pi * shake_f * t)
                 self.d.mocap_pos[0] += shake  # vertical shake (z)
             mujoco.mj_step(self.m, self.d)
-
 
             qpos = self.d.qpos
             qvel = self.d.qvel
@@ -175,7 +174,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 warning_flag = True
 
         if grasp_success:
-            stable_grasp,n_grasp_contact2,self_collide2,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=2)
+            stable_grasp,n_grasp_contact2,self_collide2,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=0)
             # print(f'---test------------------------------{max_force1,max_penetration1,max_force2,max_penetration2}')
             grasped_obj = self.get_grasped_obj()
             if update_obj_prob and not warning_flag:
@@ -210,7 +209,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.d.qpos = hand_pos + hand_quat + self.default_finger_joints + obj_pose
         self.d.ctrl *= 0
         mujoco.mj_step(self.m, self.d)
-        # self.static_view(1000)
+        self.static_view(1000)
 
         ini_contact_with_obj, ini_contact_with_floor = self.check_hand_contact()
         # self.static_view(1000)
@@ -241,11 +240,11 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
                 step_start = time.time()
 
 
-                if 150 < i < 350:
+                if 200 < i < 400:
                     self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
 
                 # shake phase
-                if 500 > i > 350:
+                if 500 > i > 400:
                     # self.d.ctrl = max_fingers #if i<400 else decoded_fingers
 
                     t = i * self.m.opt.timestep
@@ -279,7 +278,7 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
 
         # After stepping
         # grasp_success = self.check_grasped_obj()
-        grasp_success,n_grasp_contact,self_collide,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=2,view=False)
+        grasp_success,n_grasp_contact,self_collide,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=0,view=False)
         # if grasp_success:grasp_success= self.safety_fingers_check()
         # print(Fore.CYAN,f'final d.mocap_quat[0] {self.d.mocap_quat[0]}',Fore.RESET)
         # print(Fore.CYAN,f'final d.qpos[3:3+4] {self.d.qpos[3:3 + 4]}',Fore.RESET)
@@ -561,11 +560,11 @@ if __name__ == "__main__":
             # quat = trimesh.transformations.quaternion_from_euler(*rpy)
             quat=np.array(quat)
 
-            k_r=kinematics.kinematic_plan_exist(quat,  shifted_point )
-            print(f'kinematic plan result: {k_r}')
             fingers[0]=1.
             fingers[1]=1.
             fingers[2]=1.
+
+            env.manual_view(pos=shifted_point.tolist(), quat=quat.tolist(), fingers=fingers)
 
             env.passive_viewer(pos=shifted_point.tolist(), quat=quat.tolist(),fingers=fingers)
 

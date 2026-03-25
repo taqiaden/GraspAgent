@@ -34,6 +34,20 @@ class SynthesisedData:
         self.importance=[]
         self.grasped_objects=[]
 
+    def unique_obj_max_scores(self):
+        best_indices = {}
+
+        for i, (obj, imp) in enumerate(zip(self.grasped_objects, self.importance)):
+            if obj not in best_indices or imp > self.importance[best_indices[obj]]:
+                best_indices[obj] = i
+
+        # Keep original order of first occurrences
+        indices_to_keep = sorted(best_indices.values())
+
+        importance = [self.importance[i] for i in indices_to_keep]
+
+        return importance
+
     def filter_best_grasps(self):
         best_indices = {}
 
@@ -44,6 +58,8 @@ class SynthesisedData:
         # Keep original order of first occurrences
         indices_to_keep = sorted(best_indices.values())
 
+        importance = [self.importance[i] for i in indices_to_keep]
+
         self.grasp_target_points = [self.grasp_target_points[i] for i in indices_to_keep]
         self.grasp_parameters = [self.grasp_parameters[i] for i in indices_to_keep]
         self.target_indexes =  [self.target_indexes[i] for i in indices_to_keep]
@@ -51,7 +67,7 @@ class SynthesisedData:
         self.grasped_objects=[self.grasped_objects[i] for i in indices_to_keep]
 
     def save_npz(self, filename):
-        self.filter_best_grasps()
+        # self.filter_best_grasps()
         """Save as compressed NumPy arrays"""
         # Convert lists to numpy arrays
         np.savez_compressed(
@@ -66,7 +82,7 @@ class SynthesisedData:
         )
 
     def load_npz(self, filename):
-        self.filter_best_grasps()
+        # self.filter_best_grasps()
         """Load from npz file"""
         data = np.load(filename,allow_pickle=True)
         self.obj_ids = data['obj_ids'].tolist()
@@ -88,7 +104,8 @@ class SynthesisedData:
         if len(self.importance)!=len(self.target_indexes): self.importance=[0.5]*len(self.target_indexes)
         # selected_idx = random.randint(0, len(self.target_indexes) - 1)
 
-        selected_idx = random.choices(range(len(self.importance)), weights=self.importance)[0]
+        # selected_idx = random.choices(range(len(self.importance)), weights=self.importance)[0]
+        selected_idx = self.importance.index(max(self.importance))
 
         target_index=self.target_indexes.pop(selected_idx)
         target_point=self.grasp_target_points.pop(selected_idx)
@@ -144,7 +161,7 @@ class DynamicDataManagement:
             id =self.low_quality_samples_tracker.pop()
             path =self.folder_dir+str(id)+'.npz'
             obj.save_npz(path)
-            print(Fore.LIGHTMAGENTA_EX,'Replace data point, path :',path,f' , size({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
+            print(Fore.LIGHTMAGENTA_EX,'Replace data point, path :',path,f' , grasped_objects({obj.grasped_objects}), instances({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
         else:
             path =self.folder_dir+str(self.last_id+1)+'.npz'
             obj.save_npz(path)
@@ -153,18 +170,25 @@ class DynamicDataManagement:
 
             self.last_id=self.last_id+1
 
-            print(Fore.LIGHTMAGENTA_EX,'Save new data point, path :',path,f' , size({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
+            print(Fore.LIGHTMAGENTA_EX,'Save new data point, path :',path,f' , grasped_objects({obj.grasped_objects}),  instances({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
 
     def update_old_record(self,obj:SynthesisedData):
         id=obj.id
         path = self.folder_dir + str(id) + '.npz'
         obj.save_npz(path)
 
-        print(Fore.LIGHTMAGENTA_EX,'Update dynamic data, path :',path,f' , samples({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
+        print(Fore.LIGHTMAGENTA_EX,'Update dynamic data, path :',path,f' , grasped_objects({obj.grasped_objects}), instances({len(obj.target_indexes)}) #obj={len(obj.obj_ids)}',Fore.RESET)
 
     def load_random_sample(self):
-        id = random.randint(1, self.last_id)
-        return self.load_data_point(id)
+        for i in range(10):
+            id = random.randint(1, self.last_id)
+            try:
+                data=self.load_data_point(id)
+                return data
+            except Exception as e:
+                print(Fore.RED,f'{str(e)}', Fore.RESET)
+                self.low_quality_samples_tracker.append(id)
+        return None
 
     def load_data_point(self,id):
         path =self.folder_dir+str(id)+'.npz'
