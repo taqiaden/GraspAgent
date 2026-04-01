@@ -59,22 +59,22 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
             j_rl = 0.091 -  0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th =   1.1
-            j_fm =   1.7
-            j_rl =   1.7
+            j_th =   1.5
+            j_fm =   1.5
+            j_rl =   1.5
         return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def  decode_finger_ctrl(self,fingers):
         # print(args)
         if self.is_tendon_control:
             j_th = 0.091 - fingers[0] * 0.027
-            j_fm = 0.091 - fingers[1] * 0.037  # forefinger and midmiddle finger
+            j_fm = 0.091 - fingers[1] * 0.037  # forefinger and mid_middle finger
             j_rl = 0.091 - fingers[2] * 0.037  # ring finger and little finger
         else:
             # j form 0 to 1 represent open to close
-            j_th = fingers[0] *  1.1
-            j_fm = fingers[1] *  1.7
-            j_rl = fingers[2] *  1.7
+            j_th = fingers[0] *  1.5
+            j_fm = fingers[1] *  1.5
+            j_rl = fingers[2] *  1.5
         return [j_th, j_fm, j_fm, j_rl, j_rl]
 
     def check_fingers_scope(self,fingers):
@@ -101,9 +101,9 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.restore_simulation_state()
 
         if obj_pose is None: obj_pose=self.objects_poses
-
-        in_scope = self.check_fingers_scope(hand_fingers)
-        if not in_scope: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+        in_scope=True
+        # in_scope = self.check_fingers_scope(hand_fingers)
+        # if not in_scope: hand_fingers = self.clip_fingers_to_scope(hand_fingers)
         grasped_obj=None
         # v2 = quat_rotate_vector(hand_quat, [0, 1, 0])
         # if v2[-1]<0:in_scope=False
@@ -140,6 +140,12 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         shake_f = 20  # Hz
 
         for i in range(600):
+            if i==200:
+                _, collide_with_floor = self.check_hand_contact()
+                if collide_with_floor:
+                    # self.static_view(1000)
+                    return in_scope, False, ini_contact_with_obj, collide_with_floor, None, None, None, warning_flag, grasped_obj
+
             #Rise phase
             if 200 < i < 400:
                 self.d.mocap_pos[0] = self.d.mocap_pos[0] + delta
@@ -193,8 +199,8 @@ class CasiaHandEnv(MojocoMultiFingersEnv):
         self.restore_simulation_state()
         if obj_pose is None: obj_pose=self.objects_poses
 
-        in_scope = self.check_fingers_scope(hand_fingers)
-        if not in_scope:hand_fingers = self.clip_fingers_to_scope(hand_fingers)
+        in_scope =True# self.check_fingers_scope(hand_fingers)
+        # if not in_scope:hand_fingers = self.clip_fingers_to_scope(hand_fingers)
         # v2 = quat_rotate_vector(hand_quat, [0, 1, 0])
         # if v2[-1]<0:in_scope=False
 
@@ -347,7 +353,8 @@ def sample_quat(size,f=0.5,ref_quat=None):
 if __name__ == "__main__":
     root_dir = os.getcwd()  # current working directory
 
-    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=5,is_tendon_control=False)
+    # env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_hand_s/speed_hand/",max_obj_per_scene=5,is_tendon_control=False)
+    env=CasiaHandEnv(root=root_dir + "/GraspAgent_2/sim_dexee/hands_and_objects/",max_obj_per_scene=5,is_tendon_control=False)
 
     env.view_geom_names_and_ids()
 
@@ -560,9 +567,10 @@ if __name__ == "__main__":
             # quat = trimesh.transformations.quaternion_from_euler(*rpy)
             quat=np.array(quat)
 
-            fingers[0]=1.
-            fingers[1]=1.
-            fingers[2]=1.
+            # fingers[0]=1.
+            # fingers[1]=1.
+            # fingers[2]=1.
+            fingers=[1,1,1.]
 
             env.manual_view(pos=shifted_point.tolist(), quat=quat.tolist(), fingers=fingers)
 

@@ -74,7 +74,7 @@ class ParallelGripperPoseSampler(nn.Module):
         self.beta = ContextGate_2d(in_c1=64, in_c2= 1+3+3, out_c=2,
                                       relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
             'cuda')
-        self.transition_=ContextGate_2d(in_c1=64, in_c2=1+5+3, out_c=1,
+        self.fingers=ContextGate_2d(in_c1=64, in_c2=1+5+3, out_c=3,
                                           relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False).to(
             'cuda')
 
@@ -151,8 +151,8 @@ class ParallelGripperPoseSampler(nn.Module):
         # quat_embedding=self.normalize_quat_embedding(quat_embedding)
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
-        transition=self.transition_(features,torch.cat([alpha,delta,beta,depth], dim=1))
-        transition=F.softplus(transition)
+        fingers=self.fingers(features,torch.cat([alpha,delta,beta,depth], dim=1))
+        # transition=F.softplus(transition)
         # transition=(F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)+math.sqrt(3))/(2*math.sqrt(3))
         # transition=(transition-0.5)*3
         # encoded_transition=self.transition_encoding(transition)
@@ -179,7 +179,7 @@ class ParallelGripperPoseSampler(nn.Module):
         # fingers=self.proj_fingers(fingers_embedding)
         # transition=self.proj_transition(transition_embedding)
 
-        pose = torch.cat([alpha,beta,delta,transition], dim=1)
+        pose = torch.cat([alpha,beta,delta,fingers], dim=1)
         # print(pose.shape)
         # print(fingers.shape)
 
@@ -231,22 +231,22 @@ class CH_G(nn.Module):
         #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
         #     'cuda')
 
-        self.grasp_quality_=att_res_conv_normalized(in_c1=64, in_c2=9, out_c=1,
+        self.grasp_quality_=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
                                relu_negative_slope=0., activation=None,
                                drop_out_ratio=0., use_sigmoid=False).to(
             'cuda')
 
-        self.grasp_collision_=att_res_conv_normalized(in_c1=64, in_c2=9, out_c=1,
+        self.grasp_collision_=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
                                relu_negative_slope=0., activation=None,
                                drop_out_ratio=0., use_sigmoid=False).to(
             'cuda')
 
-        self.grasp_collision2=att_res_conv_normalized(in_c1=64, in_c2=9, out_c=1,
+        self.grasp_collision2=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
                                relu_negative_slope=0., activation=None,
                                drop_out_ratio=0., use_sigmoid=False).to(
             'cuda')
 
-        self.grasp_collision3=att_res_conv_normalized(in_c1=64, in_c2=9, out_c=1,
+        self.grasp_collision3=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
                                relu_negative_slope=0., activation=None,
                                drop_out_ratio=0., use_sigmoid=False).to(
             'cuda')
@@ -322,7 +322,7 @@ class CH_G(nn.Module):
 
             features2 = self.back_bone2_(standarized_depth_)
 
-            gripper_pose_B=torch.cat([model_B_poses[:,0:8],standarized_depth_],dim=1)
+            gripper_pose_B=torch.cat([model_B_poses,standarized_depth_],dim=1)
 
             B_grasp_quality=self.grasp_quality_(features2,gripper_pose_B)
 
@@ -393,7 +393,7 @@ class CH_G(nn.Module):
         # encoded_depth = self.pos_encoder(depth_data)  # 10
 
 
-        detached_gripper_pose=torch.cat([detached_gripper_pose[:,0:8],depth_data],dim=1)
+        detached_gripper_pose=torch.cat([detached_gripper_pose,depth_data],dim=1)
         # detached_gripper_pose_without_fingers=torch.cat([detached_gripper_pose[:,0:5],detached_gripper_pose[:,8:]],dim=1)
         # detached_gripper_pose=self.condition_encoder(detached_gripper_pose)
         # s=torch.cat([encoded_quat,fingers,transition],dim=1)
@@ -419,7 +419,7 @@ class CH_G(nn.Module):
         print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
 
         if model_B_poses is not None:
-            model_B_poses=torch.cat([model_B_poses[:,0:8],depth_data],dim=1)
+            model_B_poses=torch.cat([model_B_poses,depth_data],dim=1)
             B_grasp_quality=self.grasp_quality_(features2.detach(),model_B_poses)
         else:
             B_grasp_quality=None
@@ -489,7 +489,7 @@ class CH_D(nn.Module):
 
         # gan_init_with_norms(self.att_block_)
 
-        self.att_block = ContextGate_1d(in_c1=512 + 3, in_c2=6 + 3+2 ).to('cuda')
+        self.att_block = ContextGate_1d(in_c1=512 + 3, in_c2=6 + 3+5 ).to('cuda')
         # add_spectral_norm_selective(self.att_block_)
 
         # self.att_block_.apply(init_weights_he_normal)
@@ -652,7 +652,7 @@ class CH_D(nn.Module):
         xyz_list = torch.stack(xyz_list)[:, None, :].repeat(1, 2, 1)  #
 
         # pose = torch.cat([pose, depth_data_list], dim=-1)
-        pose=torch.cat([pose[:,:,0:8],xyz_list],dim=-1)
+        pose=torch.cat([pose,xyz_list],dim=-1)
 
         # feature_list = torch.stack(feature_list, dim=0)  # n,2,64
         # depth_data_list = torch.stack(depth_data_list, dim=0)  # n,2,64

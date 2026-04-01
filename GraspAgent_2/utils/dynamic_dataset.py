@@ -34,6 +34,9 @@ class SynthesisedData:
         self.importance=[]
         self.grasped_objects=[]
 
+        self.uniqueness=[]
+
+
     def unique_obj_max_scores(self):
         best_indices = {}
 
@@ -45,8 +48,9 @@ class SynthesisedData:
         indices_to_keep = sorted(best_indices.values())
 
         importance = [self.importance[i] for i in indices_to_keep]
+        uniqueness = [self.uniqueness[i] for i in indices_to_keep]
 
-        return importance
+        return importance,uniqueness
 
     def filter_best_grasps(self):
         best_indices = {}
@@ -70,6 +74,7 @@ class SynthesisedData:
         # self.filter_best_grasps()
         """Save as compressed NumPy arrays"""
         # Convert lists to numpy arrays
+
         np.savez_compressed(
             filename,
             obj_ids=np.array(self.obj_ids),
@@ -79,6 +84,7 @@ class SynthesisedData:
             target_indexes=np.array(self.target_indexes),
             importance=np.array(self.importance),
             grasped_objects=np.array(self.grasped_objects),
+            uniqueness=np.array(self.uniqueness),
         )
 
     def load_npz(self, filename):
@@ -92,6 +98,7 @@ class SynthesisedData:
         self.target_indexes = data['target_indexes'].tolist()
         self.importance = (data['importance']+0.00001).tolist() if 'importance' in data else [0.5]*len(self.target_indexes)
         self.grasped_objects = data['grasped_objects'].tolist() if 'grasped_objects' in data else [None]*len(self.target_indexes)
+        self.uniqueness = (data['uniqueness']+0.00001).tolist() if 'uniqueness' in data else [.0]*len(self.target_indexes)
 
     @classmethod
     def from_npz(cls, filename):
@@ -105,13 +112,14 @@ class SynthesisedData:
         # selected_idx = random.randint(0, len(self.target_indexes) - 1)
 
         # selected_idx = random.choices(range(len(self.importance)), weights=self.importance)[0]
-        selected_idx = self.importance.index(max(self.importance))
+        selected_idx = self.importance.index(max(self.importance)) if max(self.importance)>0.5 else self.uniqueness.index(max(self.uniqueness))
 
         target_index=self.target_indexes.pop(selected_idx)
         target_point=self.grasp_target_points.pop(selected_idx)
         grasp_parameters=self.grasp_parameters.pop(selected_idx)
         importance=self.importance.pop(selected_idx)
         grasped_objects=self.grasped_objects.pop(selected_idx)
+        uniqueness=self.uniqueness.pop(selected_idx)
 
         return target_index,target_point,grasp_parameters,importance,grasped_objects
 

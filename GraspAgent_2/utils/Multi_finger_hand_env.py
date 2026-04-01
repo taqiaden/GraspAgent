@@ -490,8 +490,10 @@ class MojocoMultiFingersEnv():
 
 
     def prepare_obj_mesh(self):
-        tree = ET.parse(self.root+self.scene_xml_file)
+        tree = ET.parse(self.root+'/scene.xml')
         root = tree.getroot()
+        include_elem = root.find('include')
+        include_elem.set('file', self.hand_xml_file)
 
         if self.objects is not None:
             for idx in self.objects:
@@ -842,6 +844,7 @@ class MojocoMultiFingersEnv():
 
 
     def get_stable_object_pose(self,obj_pos_quat,threshold=1e-4,window_size=20,stablize=True):
+
         self.d.mocap_pos[0] = self.far_hand_pos
         self.d.mocap_quat[0] = self.far_hand_quat
 

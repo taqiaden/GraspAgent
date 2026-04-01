@@ -1,6 +1,8 @@
 import os
+import statistics
 import zipfile
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from colorama import Fore
@@ -61,11 +63,13 @@ def pairwise_cosine_distance(X, eps=1e-8):
     return dist_matrix
 
 class OnlingClustering():
-    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,inti_centers=None,is_quat=None):
+    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,inti_centers=None,is_quat=None,repulsive=True):
         self.N=number_of_centers
         self.key_name=key_name
         self.vector_size=vector_size
         self.decay_rate=decay_rate
+
+        self.repulsive=repulsive
 
 
         self.save_path=self.key_name+'_online_centers'
@@ -230,6 +234,13 @@ class OnlingClustering():
 
             self.centers[idx] = F.normalize(c_norm + repulse, dim=0)
 
+    def get_uniqueness_score(self,new_vector):
+        index, min_dist = self.get_closest_center(new_vector)
+        u=1-self.update_rates
+        u=(u[index]-torch.min(u))/(torch.max(u)-torch.min(u))
+        # print(f'-----{u}')
+
+        return u
 
     def update(self,new_vector):
         if not self.use_euclidean_dist:
@@ -256,7 +267,7 @@ class OnlingClustering():
                 new_center = self.interpolate( old_center, new_vector)
                 self.centers[index] = new_center
                 self.step_decay_rate(index)
-                self.repulse_center(idx=index,beta=self.decay_rate/5)
+                if self.repulsive: self.repulse_center(idx=index, beta=self.decay_rate / 5)
 
         self.save()
 
@@ -300,7 +311,9 @@ class OnlingClustering():
             print(Fore.LIGHTCYAN_EX,f'new_centers of {self.key_name}',Fore.RESET)
             print(self.centers)
             print('Update_rates %:')
-            print(((self.update_rates/self.update_rates.sum())*100).tolist())
+            print(self.update_rates)
+
+            # print(((self.update_rates/self.update_rates.sum())*100).tolist())
             print(f'metrics: {self.metrics}')
             if self.centers is not None and self.centers.shape[0]>=self.N:
                 try:

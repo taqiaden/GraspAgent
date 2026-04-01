@@ -506,12 +506,11 @@ def generate_random_CH_poses(size):
 
     # values = torch.tensor([-1., 0., 1.])
     # alpha_=sample_vectors(size,3,values).cuda()
-    alpha_ = (torch.rand((size,3),device='cuda')-0.5)*2
-    # alpha_ = torch.zeros((size,3),device='cuda')
-    # alpha_[:, -1] = -1
-    alpha_[:, -1] = -1#*(torch.abs(alpha_[:, -1])**0.5)
-    alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
+    alpha_ = torch.randn((size,3),device='cuda')
+    alpha_[:, -1] = -1*torch.abs(alpha_[:, -1])
+    # alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
     alpha_ = F.normalize(alpha_, dim=-1)
+
 
     beta_ = random_unit_circle(size)
     # beta_[:,1]=beta_[:,1].abs()*-1
@@ -523,15 +522,15 @@ def generate_random_CH_poses(size):
     # values = torch.tensor([-0.5, 0.,0.2, 0.5])
     # fingers_=sample_vectors(size,3,values).cuda()
 
-    delta = torch.randn((size, 3), device='cuda')
-
+    delta = torch.randn((size, 3), device='cuda')/2
+    delta[:,0:2]/=5
     delta[:,-1]-=0.5
 
     # values = torch.tensor([ 0.,0.3,0.5,0.7, 1.])
     # transition_=sample_vectors(size, 1, values).cuda()
-    transition_ = torch.rand((size, 1), device='cuda')**2
+    fingers = torch.randn((size, 3), device='cuda')+0.5
 
-    sampled_pose = torch.cat([alpha_,beta_, delta, transition_], dim=1)
+    sampled_pose = torch.cat([alpha_,beta_, delta, fingers], dim=1)
     return sampled_pose
 
 def generate_random_SH_poses(size):
@@ -631,8 +630,8 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
 
     ref_pose[:,2]=torch.clip(ref_pose[:,2],max=0.)
 
-    ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
-    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-1,1)
+    # ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
+    # ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-1,1)
 
     # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
     annealing_factor[annealing_factor>0.95]=1.0
@@ -645,7 +644,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     # sampling_ratios[:,-1]=1-sampling_ratios[:,-1]
     # sampling_ratios[:,3:5]/=2
 
-    sampled_pose=generate_random_CH_poses(ref_pose[0,0].numel()).reshape(600,600,9).permute(2,0,1)[None,...]
+    sampled_pose=generate_random_CH_poses(ref_pose[0,0].numel()).reshape(600,600,11).permute(2,0,1)[None,...]
 
     sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
 
@@ -655,7 +654,7 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
     sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
 
-    sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
+    # sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
     return sampled_pose
 

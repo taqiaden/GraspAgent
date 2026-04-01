@@ -67,7 +67,7 @@ generator_expo = 1.0
 m = 0.2
 
 def c_loss(pred,label):
-    loss=(1*binary_l1(pred+0.5,label))**2
+    loss=(1*binary_l1(pred+0.5,label))#**2
     print(f'test------------------------(  {pred+0.5},    {label}')
     # loss=bce_with_logits(pred,label)\
 
@@ -77,7 +77,7 @@ def c_loss(pred,label):
     return loss
 
 def c_loss2(pred, label):
-    loss=(1*binary_l1(pred+0.5,label))**2
+    loss=(1*binary_l1(pred+0.5,label))#**2
     # loss=bce_with_logits(pred,label)
     # loss=sigmoid_focal_loss(pred, label, gamma=2.0, alpha=0.5)
 
@@ -720,8 +720,8 @@ class TrainGraspGAN:
         # exit()
 
         # obj_features=features[0].reshape(64,-1).permute(1,0)[~floor_mask]
-        # approach=gripper_pose[0,0:3].reshape(3,-1).permute(1,0)[~floor_mask]
-        # repulsive_loss=cosine_repulsion_loss(approach)*0.1 if len(pairs)==self.batch_size else torch.tensor([0.],device=approach.device)
+        orientation=gripper_pose[0,0:5].reshape(5,-1).permute(1,0)[~floor_mask]
+        diversity_loss=cosine_repulsion_loss(orientation)*0.1 if len(pairs)==self.batch_size else torch.tensor([0.],device=orientation.device)
 
         gripper_pose_PW = gripper_pose[0].permute(1, 2, 0).reshape(360000,self.n_param)
         # gripper_pose_ref_PW = gripper_pose_ref[0].permute(1, 2, 0).reshape(360000,self.n_param)
@@ -949,17 +949,19 @@ class TrainGraspGAN:
             forbidden_value = 0.
             distance = torch.abs(grasp_quality_obj_x - forbidden_value)
             loss = torch.relu(0.5 - distance).mean()
+            # loss = ((2*torch.relu(0.5 - distance))**2).mean()
 
             return loss
 
         if len(pairs) == self.batch_size:
-            repulsive_loss=get_repulsive_loss()
 
             gripper_sampling_loss = self.get_generator_loss(cropped_spheres,
                 depth, clean_depth, gripper_pose, gripper_pose_ref,
                 pairs,floor_mask,latent_vector)
 
             assert not torch.isnan(gripper_sampling_loss).any(), f'{gripper_sampling_loss}'
+
+            repulsive_loss=get_repulsive_loss()#.clamp(max=gripper_sampling_loss.item())
 
             print(Fore.LIGHTYELLOW_EX,
                   f'gripper_sampling_loss={gripper_sampling_loss.item()}, gripper_quality_loss_={gripper_quality_loss_.item()}, gripper_collision_loss={gripper_collision_loss.item()}, MDL={MDL.item()}, repulsive_loss={repulsive_loss.item()}',
@@ -991,7 +993,7 @@ class TrainGraspGAN:
         norm2=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone2_.parameters(), max_norm=float('inf'))
         # norm3=torch.nn.utils.clip_grad_norm_(self.gan.generator.back_bone3_.parameters(), max_norm=float('inf'))
 
-        print(Fore.LIGHTGREEN_EX,f' G norm : {norm}, backbone1:{norm1}, bacckbone2: {norm2}, ',Fore.RESET)
+        print(Fore.LIGHTGREEN_EX,f' G norm : {norm}, backbone1:{norm1}, backbone2: {norm2}, ',Fore.RESET)
 
         # params2 = list(self.gan.generator.back_bone.parameters()) + \
         #          list(self.gan.generator.grasp_quality.parameters())+ \
@@ -1252,10 +1254,8 @@ class TrainGraspGAN:
                 all_pairs.append(
                     (target_index, target_point, gripper_pose_PW[target_index], importance, gen_grasped_obj))
 
-
-
             elif ref_success:
-                importance=0.11 if importance is None else max(0.01,importance*.5)
+                importance=max(0.01,1-grasp_quality[target_index].item()) if importance is None else max(0.01,importance*0.5)
                 if importance>0.1:
                     all_pairs.append((target_index, target_point, gripper_pose_ref_PW[target_index],importance,ref_grasped_obj))
 
@@ -1307,7 +1307,10 @@ class TrainGraspGAN:
                 # elif ref_success:
                 # margin=torch.clip(ref_quality-gen_quality,0) if ref_success else torch.clip(gen_quality-ref_quality,0)
                 # margin=1-gen_quality if ref_success else gen_quality
-                margin=0.1 if gen_initial_collision or ref_initial_collision else importance+0.1
+                # margin=0.1 if gen_initial_collision or ref_initial_collision else importance*0.9+0.1
+                margin=1-grasp_quality[target_index]
+                # margin = 1 - abs(0.5 - grasp_quality[target_index].item()) * 2
+
                 # margin=target_ref_pose[-1].item() if k>0 else target_generated_pose[-1].item()
                 d_pairs.append((target_index, k, margin, sim, target_point))
 
@@ -1362,6 +1365,8 @@ class TrainGraspGAN:
                 synthesised_data_obj.importance.append(importance)
                 synthesised_data_obj.grasped_objects.append(grasped_object)
 
+                synthesised_data_obj.uniqueness.append(0.)
+
             if self.loaded_synthesised_data is not None:
                 synthesised_data_obj.id = self.loaded_synthesised_data.id
                 for n in range(len(self.loaded_synthesised_data.target_indexes)):
@@ -1374,12 +1379,15 @@ class TrainGraspGAN:
                     synthesised_data_obj.importance.append(self.loaded_synthesised_data.importance[n])
                     synthesised_data_obj.grasped_objects.append(self.loaded_synthesised_data.grasped_objects[n])
 
+                    synthesised_data_obj.uniqueness.append(0.)
+
+
             # synthesised_data_obj.filter_best_grasps()
             if self.loaded_synthesised_data is None:
                 # if max(synthesised_data_obj.importance) >= 0.5:
                 self.DDM.save_data_point(synthesised_data_obj)
             else:
-                importance=synthesised_data_obj.unique_obj_max_scores()
+                importance,uniqueness=synthesised_data_obj.unique_obj_max_scores()
                 ave_impo = sum(importance) / len(importance)
                 self.Ave_importance.update(ave_impo)
                 ave_samples = len(importance)
