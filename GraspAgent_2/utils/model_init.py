@@ -1,10 +1,11 @@
 import math
 
 from torch import nn
+import spconv.pytorch as spconv
 
 def gan_init_with_norms(m):
     # conv layers
-    if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+    if isinstance(m, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         if m.weight is not None:
             m.weight.data.normal_(0.0, 0.02)
         if m.bias is not None:
@@ -106,7 +107,7 @@ def orthogonal_init_all(model, gain=1.0):
                       or torch.nn.init.calculate_gain('leaky_relu', 0.2) if LeakyReLU is used).
     """
     for m in model.modules():
-        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear,spconv.SparseConv3d)):
             nn.init.orthogonal_(m.weight, gain=gain)
             if m.bias is not None:
                 nn.init.zeros_(m.bias)

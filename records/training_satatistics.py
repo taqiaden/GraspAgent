@@ -1,3 +1,5 @@
+import math
+
 import torch
 from colorama import Fore
 from Configurations.dynamic_config import save_key, get_float
@@ -68,20 +70,24 @@ class ConfessionMatrix():
         print(f'TP={int((self.TP/total)*1000)/10}%, FP={int((self.FP/total)*1000)/10}%, FN={int((self.FN/total)*1000)/10}%, TN={int((self.TN/total)*1000)/10}%')
 
 class MovingRate():
-    def __init__(self,name='000',decay_rate=0.01,initial_val=0.0):
+    def __init__(self,name='000',decay_rate=0.01,initial_val=0.0,track_history=False,load_last=True):
         self.name=name
         self.decay_rate = decay_rate
         self.counter = 0
         self.moving_rate=initial_val
         self.momentum=0.0
         self.convergence=0.0
+        self.var_x=0.
+
+        self.initial_val=initial_val
 
         '''load latest'''
-        self.upload(initial_val)
+        if load_last: self.upload(initial_val)
         # print('tes------------------',self.moving_rate)
         # self.set_decay_rate()
 
         self.last_value=None
+        self.track_history=track_history
 
 
     @property
@@ -95,33 +101,46 @@ class MovingRate():
         with torch.no_grad():
             self.moving_rate=(1-self.decay_rate)*self.moving_rate+self.decay_rate*value
             self.momentum=(1-self.decay_rate)*self.momentum+self.decay_rate*(value**2)
+            delta=value-self.moving_rate
+            self.var_x=(1-self.decay_rate)*self.var_x+self.decay_rate*(delta**2)
             if self.last_value is not None:
                 change = value - self.last_value
                 self.convergence = self.decay_rate * change + self.convergence * (1 - self.decay_rate)
             self.last_value=value
             self.counter+=1
 
-
+    def lower_rejection_criteria(self,x,k=2.0,report=True):
+        threshold=self.moving_rate-k*math.sqrt(self.var_x)
+        if report: print(f'Drop criteria for {self.name},',Fore.YELLOW,f' x={x}, moving average= {self.moving_rate}, threshold={threshold}',Fore.RESET)
+        return x<threshold
 
     def save(self):
         save_key('moving_rate_', self.moving_rate, config_file=self.name)
         save_key('counter_', self.counter, config_file=self.name)
         save_key('momentum_', self.momentum, config_file=self.name)
         save_key('convergence_', self.convergence, config_file=self.name)
+        save_key('var_x_', self.var_x, config_file=self.name)
 
         '''append to history records'''
-        save_new_data_point(self.moving_rate, self.name + '_moving_rate.txt')
-        save_new_data_point(self.counter, self.name + '_counter.txt')
-        save_new_data_point(self.momentum, self.name + '_momentum.txt')
-        save_new_data_point(self.convergence, self.name + '_convergence.txt')
+        if self.track_history:
+            save_new_data_point(self.moving_rate, self.name + '_moving_rate.txt')
+            save_new_data_point(self.counter, self.name + '_counter.txt')
+            save_new_data_point(self.momentum, self.name + '_momentum.txt')
+            save_new_data_point(self.var_x, self.name + '_var_x.txt')
+            save_new_data_point(self.convergence, self.name + '_convergence.txt')
 
 
     def upload(self,initial_val):
         try:
             self.moving_rate=get_float('moving_rate_',config_file=self.name,default=initial_val)
-            self.counter = get_float('counter_', config_file=self.name)
-            self.momentum = get_float('momentum_', config_file=self.name)
-            self.convergence = get_float('convergence_', config_file=self.name)
+
+            if  math.isnan(self.moving_rate) : self.moving_rate=self.initial_val
+            else:
+                self.counter = get_float('counter_', config_file=self.name)
+                self.momentum = get_float('momentum_', config_file=self.name)
+                self.convergence = get_float('convergence_', config_file=self.name)
+                self.var_x = get_float('_var_x', config_file=self.name)
+
         except Exception as e:
             print(Fore.RED,f' Error when getting a moving rate of {self.name} : {str(e)}',Fore.RESET)
             self.moving_rate=initial_val
@@ -130,10 +149,11 @@ class MovingRate():
         self.moving_rate=truncate(self.moving_rate)
         self.momentum=truncate(self.momentum)
         self.convergence=truncate(self.convergence)
+        self.var_x=truncate(self.var_x)
 
         # self.set_decay_rate()
         print(Fore.LIGHTBLUE_EX,end='')
-        print(f'{self.name} moving rate = {self.moving_rate}, momentum = {self.momentum}, decay rate = {self.decay_rate}, convergence={self.convergence}',end='')
+        print(f'{self.name} moving rate = {self.moving_rate}, momentum = {self.momentum}, decay rate = {self.decay_rate}, convergence={self.convergence}, var={self.var_x}',end='')
         print(Fore.RESET)
 
 class TrainingTracker:
@@ -153,9 +173,14 @@ class TrainingTracker:
         self.loss_moving_average_=self.load_loss_moving_average()
         self.moving_accuracy=self.load_moving_accuracy()
 
-        if self.loss_moving_average_ is None: self.loss_moving_average_=1.0
+        if math.isnan(self.loss_moving_average_):
+            self.loss_moving_average_=.0
+
         self.convergence=self.load_convergence()
         self.momentum=self.load_momentum()
+        if math.isnan(self.convergence):self.convergence=0.
+        if math.isnan(self.momentum): self.momentum = 0.
+
         self.decay_rate=decay_rate
         self.counter=self.load_counter()
         self.last_loss=None

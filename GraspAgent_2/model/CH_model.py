@@ -198,7 +198,7 @@ class CH_G(nn.Module):
                                   relu_negative_slope=0.,activation=None,IN_affine=False,activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
-        self.back_bone.apply(init_weights_he_normal)
+        self.back_bone.apply(gan_init_with_norms)
         # add_spectral_norm_selective(self.back_bone)
 
         # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
@@ -222,6 +222,7 @@ class CH_G(nn.Module):
 
 
         self.CH_PoseSampler = ParallelGripperPoseSampler()
+        self.CH_PoseSampler.apply(gan_init_with_norms)
 
         # self.query = nn.Sequential(
         #     nn.Conv2d(14, 5, kernel_size=1),
@@ -482,7 +483,7 @@ class CH_D(nn.Module):
         # self.att_block_ = ContextGate_1d(in_c1=64, in_c2=10, out_c=1  ).to('cuda')
 
         self.back_bone = SparseEncoderIN().to('cuda')
-        self.back_bone.apply(init_weights_he_normal)
+        self.back_bone.apply(gan_init_with_norms)
         # add_spectral_norm_selective(self.sparse_encoder)
 
         # add_spectral_norm_selective(self.att_block_)
@@ -490,6 +491,8 @@ class CH_D(nn.Module):
         # gan_init_with_norms(self.att_block_)
 
         self.att_block = ContextGate_1d(in_c1=512 + 3, in_c2=6 + 3+5 ).to('cuda')
+        self.att_block.apply(gan_init_with_norms)
+
         # add_spectral_norm_selective(self.att_block_)
 
         # self.att_block_.apply(init_weights_he_normal)
@@ -711,112 +714,14 @@ class CH_D2(nn.Module):
 
         self.back_bone.apply(init_weights_he_normal)
 
-        # gan_init_with_norms(self.back_bone)
-
-        # self.att_block_ = ContextGate_1d(in_c1=64, in_c2=10, out_c=1  ).to('cuda')
-
-        # self.sparse_encoder = SparseEncoderIN().to('cuda')
-        # self.sparse_encoder.apply(init_weights_he_normal)
-        # add_spectral_norm_selective(self.sparse_encoder)
-
-        # add_spectral_norm_selective(self.att_block_)
-
-        # gan_init_with_norms(self.att_block_)
 
         self.att_block = ContextGate_1d_2(in_c1=64, in_c2=6+1).to('cuda')
 
-        # self.d = nn.Sequential(
-        #     nn.Linear(64+3+9+1+3, 64),
-        #     # nn.LayerNorm(64),
-        #     nn.SiLU(),
-        #     nn.Linear(64, 32),
-        #     # nn.LayerNorm(32),
-        #     nn.SiLU(),
-        #     nn.Linear(32, 1)
-        # ).to('cuda')
+
 
         add_spectral_norm_selective(self.att_block)
 
-        # self.att_block_.apply(init_weights_he_normal)
 
-        # self.point_net_backbone=PointNetEncoder(use_instance_norm=True).to('cuda')
-        # replace_activations(self.point_net_backbone,nn.LeakyReLU(0.2))
-        # self.point_net_backbone.apply(init_weights_he_normal)
-        # add_spectral_norm_selective(self.point_net_backbone)
-
-        # self.query = nn.Sequential(
-        #     nn.Linear(14, 7),
-        # ).to('cuda')
-        # gan_init_with_norms(self.att_block)
-
-        # self.condition_encoder = nn.Sequential(
-        #     nn.Linear(10+40+1, 128),
-        #     nn.LayerNorm(128),
-        #     nn.SiLU()
-        # ).to('cuda')
-        # self.att_block = film_fusion_1d(in_c1=64, in_c2=51, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False).to('cuda')
-        # self.att_block_ = film_fusion_1d(in_c1=64, in_c2=15, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,use_sin=False,bias=False).to('cuda')
-        # gan_init_with_norms(self.att_block_)
-
-        # self.depth_encoding_ =ScalerEncoding_1d(in_c=1)
-        # self.transition_encoding_ =ScalerEncoding_1d(in_c=1)
-        # self.fingers_encoding_ =ScalerEncoding_1d(in_c=3)
-        # self.quat_encoding_ =ScalerEncoding_1d(in_c=10,shared=False,out=40)
-
-        # self.f1 = film_fusion_1d(in_c1=64, in_c2=10, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
-        # self.f2 = film_fusion_1d(in_c1=64, in_c2=10+1, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
-        # self.f3 = film_fusion_1d(in_c1=64, in_c2=30, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=True).to('cuda')
-
-        # self.att_block = nn.Sequential(
-        #     nn.Linear(64+10+40+1+8, 128),
-        #     nn.SiLU(),
-        #     nn.Linear(128, 64),
-        #     nn.SiLU(),
-        #     nn.Linear(64, 1),
-        # ).to('cuda')
-
-        # self.att_block2 = film_fusion_1d(in_c1=64, in_c2=40+1, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU()).to('cuda')
-        # add_spectral_norm_selective(self.att_block)
-        # add_spectral_norm_selective(self.f1)
-        # add_spectral_norm_selective(self.f2)
-        # add_spectral_norm_selective(self.f3)
-
-        # add_spectral_norm_selective(self.att_block2)
-
-        # self.pos_encoder = LearnableRBFEncoding2D( num_centers=10,init_sigma=0.1)  # for 3D position
-        # self.dir_encoder = PositionalEncoding_2d( num_freqs=4)  # for 2D/3D viewing direction
-
-        self.pos_encoder = LearnableRBFEncoding1d(num_centers=10, init_sigma=0.1)  # for 3D position
-        self.dir_encoder = PositionalEncoding_1d(num_freqs=4)  # for 2D/3D viewing direction
-
-        self.cond_proj = nn.Sequential(
-            nn.Linear(9, 128),
-            nn.SiLU(),
-            nn.Linear(128, 128),
-            nn.SiLU(),
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        self.contx_proj = nn.Sequential(
-            nn.Linear(1024, 128),
-            nn.SiLU(),
-            # nn.Linear(128, 128),
-            # nn.SiLU(),
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        # self.cond_proj.apply(init_weights_he_normal)
-        # self.contx_proj.apply(init_weights_he_normal)
-        scaled_he_init_all(self.cond_proj)
-        scaled_he_init_all(self.contx_proj)
-
-        # self.ln=LayerNorm2D(64).to('cuda')
 
     def forward(self, depth, pose, pairs, target_mask, cropped_spheres, latent_vector=None, detach_backbone=False):
         max_ = 1.3

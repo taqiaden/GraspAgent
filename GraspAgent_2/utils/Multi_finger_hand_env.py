@@ -130,11 +130,13 @@ class MojocoMultiFingersEnv():
 
         assert len(self.obj_dict)<=self.object_nums_all, f'{len(self.obj_dict)}, {self.object_nums_all}'
 
-    def step_obj_prop(self,obj):
+    def step_obj_prop(self,obj,scale=1.0):
         # old_val=self.obj_dict[str(obj)]
         # new_val=old_val+step_val
         # new_val=max(min(new_val,1.0),0)
-        self.obj_dict[str(obj)]=self.obj_dict[str(obj)]*0.5+0.5 if str(obj) in self.obj_dict else 0.5
+        scale=max(0.01,scale)
+        self.obj_dict[str(obj)]=max(self.obj_dict[str(obj)],0.01)*0.5+0.5*scale if str(obj) in self.obj_dict else 0.5
+
         # '''confidence-aware'''
         #Small values behave like low trust → slow learning
         #Large values behave like high confidence → fast adaptation
@@ -230,62 +232,64 @@ class MojocoMultiFingersEnv():
 
         self.save_simulation_state()
 
-    def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True,drop_far_from_others=False):
+    def drop_new_obj(self,selected_index=None,obj_pose=None,obj_quat=None,stablize=True,drop_far_from_others=False,n=1,view=False):
         while True:
-            if selected_index is None:
-                for j in range(1000):
-                    new_obj_id,prob=self.sample_random_obj()
 
-                    if new_obj_id not in self.objects :
-                        file_exist = self.check_file_exist(new_obj_id)
-                        if  file_exist:
-                           break
+            for el in range(n):
+                if selected_index is None:
+                    for j in range(1000):
+                        new_obj_id,prob=self.sample_random_obj()
+
+                        if new_obj_id not in self.objects :
+                            file_exist = self.check_file_exist(new_obj_id)
+                            if  file_exist:
+                               break
+                            else:
+                                if str(new_obj_id) in self.obj_dict:
+                                    self.obj_dict.pop(new_obj_id)
+                                continue
+                    else: assert False
+                    print('Newly added object ID: ', new_obj_id, ' prob: ',prob)
+                else: new_obj_id=selected_index
+
+                self.objects.append(new_obj_id)
+
+                if obj_pose is None or n>1:
+                    if len(self.objects)>1:
+                        if drop_far_from_others:
+                            xy_farthest=farthest_point_from_points(self.obj_xy_positions, xmin=-.3, xmax=0.3, ymin=-0.3, ymax=0.3, resolution=200)
+                            obj_pose = [xy_farthest[0], xy_farthest[1], 0.2+0.2*el]
                         else:
-                            if str(new_obj_id) in self.obj_dict:
-                                self.obj_dict.pop(new_obj_id)
-                            continue
-                else: assert False
-                print('Newly added object ID: ', new_obj_id, ' prob: ',prob)
-            else: new_obj_id=selected_index
-
-            self.objects.append(new_obj_id)
-
-            if obj_pose is None:
-                if len(self.objects)>1:
-                    if drop_far_from_others:
-                        xy_farthest=farthest_point_from_points(self.obj_xy_positions, xmin=-.3, xmax=0.3, ymin=-0.3, ymax=0.3, resolution=200)
-                        obj_pose = [xy_farthest[0], xy_farthest[1], 0.2]
+                            obj_pose=[(np.random.random()-0.5)*0.8,(np.random.random()-0.5)*0.8,0.2+0.2*el]
                     else:
-                        obj_pose=[(np.random.random()-0.5)*0.8,(np.random.random()-0.5)*0.8,0.2]
-                else:
-                    obj_pose = [(np.random.random() - 0.5)*0.8, (np.random.random() - 0.5)*0.8, 0.2]
+                        obj_pose = [(np.random.random() - 0.5)*0.8, (np.random.random() - 0.5)*0.8, 0.2+0.2*el]
 
-            if obj_quat is None:
-                r=np.random.random()
-                if r<0.3:
-                    obj_quat = torch.randn((4,))
-                    obj_quat[[1, 2]] *= 0
-                    obj_quat = obj_quat / torch.norm(obj_quat)
-                    obj_quat = obj_quat.tolist()
-                    # print(obj_quat)
-                elif r>0.7:
-                    obj_quat = torch.randn((4,))
-                    obj_quat = obj_quat / torch.norm(obj_quat)
-                    obj_quat = obj_quat.tolist()
-                else:
-                    basis_quats = torch.tensor([
-                        [1., 0., 0., 0.],
-                        [0., 1., 0., 0.],
-                        [0., 0., 1., 0.],
-                        [0., 0., 0., 1.]
-                    ])  # shape [4,4]
+                if obj_quat is None or n>1:
+                    r=np.random.random()
+                    if r<0.3:
+                        obj_quat = torch.randn((4,))
+                        obj_quat[[1, 2]] *= 0
+                        obj_quat = obj_quat / torch.norm(obj_quat)
+                        obj_quat = obj_quat.tolist()
+                        # print(obj_quat)
+                    elif r>0.7:
+                        obj_quat = torch.randn((4,))
+                        obj_quat = obj_quat / torch.norm(obj_quat)
+                        obj_quat = obj_quat.tolist()
+                    else:
+                        basis_quats = torch.tensor([
+                            [1., 0., 0., 0.],
+                            [0., 1., 0., 0.],
+                            [0., 0., 1., 0.],
+                            [0., 0., 0., 1.]
+                        ])  # shape [4,4]
 
-                    # Select one at random
-                    idx = torch.randint(0, 4, (1,))
-                    obj_quat = basis_quats[idx][0].tolist()
-                    # print(obj_quat)
+                        # Select one at random
+                        idx = torch.randint(0, 4, (1,))
+                        obj_quat = basis_quats[idx][0].tolist()
+                        # print(obj_quat)
 
-            self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
+                self.objects_poses=obj_pose+obj_quat+self.objects_poses # new object at the begining
 
             while len(self.objects)>self.max_obj_per_scene:
                 print('Remove object ID: ', self.objects[0])
@@ -295,6 +299,12 @@ class MojocoMultiFingersEnv():
             self.prepare_obj_mesh()
             self.initialize()
 
+            if view:
+                self.d.mocap_pos[0] = self.far_hand_pos
+                self.d.mocap_quat[0] = self.far_hand_quat
+                self.d.qpos = self.far_hand_pos + self.far_hand_quat + self.default_finger_joints + self.objects_poses
+                self.static_view(1000)
+
             new_poses=self.get_stable_object_pose(self.objects_poses,stablize=stablize) if stablize else self.d.qpos[7 + len(self.default_finger_joints):]
             if new_poses is not None:
                 self.objects_poses=new_poses.tolist()
@@ -302,6 +312,12 @@ class MojocoMultiFingersEnv():
             else:
                 self.remove_all_objects()
             # break
+        if view:
+            self.d.mocap_pos[0] = self.far_hand_pos
+            self.d.mocap_quat[0] = self.far_hand_quat
+            self.d.qpos = self.far_hand_pos + self.far_hand_quat + self.default_finger_joints + self.objects_poses
+            self.static_view(1000)
+
 
         self.save_simulation_state()
 
@@ -643,8 +659,8 @@ class MojocoMultiFingersEnv():
         in_contact_with_hand=False
         max_penetration=0.
         # contacts = [] # store (pos, force)
-        geom_groups=[0]*len(self.contact_pads_geom_ids)
-        is_contact_pad = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids)
+        geom_groups=[0]*len(self.contact_pads_geom_ids) if self.contact_pads_geom_ids is not None else [0]
+        is_contact_pad = lambda n: any(n == x or (isinstance(x, list) and n in x) for x in self.contact_pads_geom_ids) if self.contact_pads_geom_ids is not None else None
         for i in range(self.d.ncon):
             c = self.d.contact[i]
             max_penetration=max(max_penetration,abs(c.dist))
@@ -657,10 +673,11 @@ class MojocoMultiFingersEnv():
                 else:
                     in_contact_with_hand=True
                     pad_geom_id=None
-                    if is_contact_pad(c.geom1):
-                        pad_geom_id=c.geom1
-                    elif is_contact_pad(c.geom2):
-                        pad_geom_id=c.geom2
+                    if self.contact_pads_geom_ids is not None:
+                        if is_contact_pad(c.geom1):
+                            pad_geom_id=c.geom1
+                        elif is_contact_pad(c.geom2):
+                            pad_geom_id=c.geom2
 
                     if pad_geom_id is not None:
                         force = np.zeros(6)
@@ -672,13 +689,15 @@ class MojocoMultiFingersEnv():
                         # f = np.array(force[:3])  # world-frame force
                         # p = np.array(c.pos)  # world-frame contact point
                         # contacts.append((p, f))
-                        group_id=find_group(pad_geom_id,self.contact_pads_geom_ids)
-                        geom_groups[group_id]+=1
+                        if self.contact_pads_geom_ids is not None:
+                            group_id=find_group(pad_geom_id,self.contact_pads_geom_ids)
+                            geom_groups[group_id]+=1
                         n_contact+=1
             elif c.dist < margin and first_is_hand_point and second_is_hand_point :
-                if find_group(c.geom1,self.contact_pads_geom_ids)!=find_group(c.geom2,self.contact_pads_geom_ids):
-                    '''check collision between groups'''
-                    self_collide=True
+                if self.contact_pads_geom_ids is not None:
+                    if find_group(c.geom1,self.contact_pads_geom_ids)!=find_group(c.geom2,self.contact_pads_geom_ids):
+                        '''check collision between groups'''
+                        self_collide=True
 
 
         contacted_groups = sum(x > 0 for x in geom_groups)
@@ -843,14 +862,14 @@ class MojocoMultiFingersEnv():
                 print(f"Body '{body_name}' is massless (mass=0)")
 
 
-    def get_stable_object_pose(self,obj_pos_quat,threshold=1e-4,window_size=20,stablize=True):
+    def get_stable_object_pose(self,obj_pos_quat,threshold=1e-2,window_size=20,stablize=True):
 
         self.d.mocap_pos[0] = self.far_hand_pos
         self.d.mocap_quat[0] = self.far_hand_quat
 
         self.d.qpos= self.far_hand_pos+ self.far_hand_quat+self.default_finger_joints+obj_pos_quat
 
-        # self.m.opt.timestep = 0.01
+
         counter=0
         last_obj_pos=None
         for i in range(1000):
@@ -878,7 +897,6 @@ class MojocoMultiFingersEnv():
             print(Fore.RED,f'Cannot find a stable obj state, diff={diff}',Fore.RESET)
             # return None
 
-        # self.m.opt.timestep = 0.002
 
         return  self.d.qpos[7 + len(self.default_finger_joints):]
 

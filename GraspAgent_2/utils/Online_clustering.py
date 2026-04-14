@@ -63,7 +63,7 @@ def pairwise_cosine_distance(X, eps=1e-8):
     return dist_matrix
 
 class OnlingClustering():
-    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,inti_centers=None,is_quat=None,repulsive=True):
+    def __init__(self,key_name,number_of_centers=10,vector_size=3,decay_rate=0.01,use_euclidean_dist=False,static_centers=None,is_quat=None,repulsive=True):
         self.N=number_of_centers
         self.key_name=key_name
         self.vector_size=vector_size
@@ -73,9 +73,11 @@ class OnlingClustering():
 
 
         self.save_path=self.key_name+'_online_centers'
-        self.centers=self.load(inti_centers)
+        self.centers=self.load(static_centers) if static_centers is None else static_centers
+        self.static=True if static_centers is not None else False
 
         self.update_rates=self.load_update_rates()
+
 
         # assert self.update_rates.shape[0]==self.centers.shape[0], f'{self.update_rates.shape}, {self.centers.shape}'
         self.is_quat=is_quat if is_quat is not None else False
@@ -85,7 +87,8 @@ class OnlingClustering():
 
         self.repulse_lr=1e-3
 
-        self.metrics=self.load_metrics()
+        if static_centers is None:
+            self.metrics=self.load_metrics()
     def load_metrics(self):
         if os.path.exists(self.save_path+'_metrics'):
             return torch.load(self.save_path+'_metrics')
@@ -106,15 +109,21 @@ class OnlingClustering():
 
     def load_update_rates(self):
         if os.path.exists(self.save_path+'_update_rates'):
-            return torch.load(self.save_path+'_update_rates')
+            val=torch.load(self.save_path+'_update_rates')
+
+            if val.shape[0]!=self.centers.shape[0] or val.ndim!=1: val=torch.zeros((self.centers.shape[0],),device='cuda')
+            return val
         else:
             if self.centers is None: return None
-            return torch.ones((self.centers.shape[0],),device='cuda')
+            return torch.zeros((self.centers.shape[0],),device='cuda')
 
     def save(self):
-        torch.save(self.centers,self.save_path)
+        if not self.static:
+            torch.save(self.centers,self.save_path)
+            torch.save(self.metrics,self.save_path+'_metrics')
+
         torch.save(self.update_rates,self.save_path+'_update_rates')
-        torch.save(self.metrics,self.save_path+'_metrics')
+
 
 
     def interpolate(self,old_center,new_center):
@@ -143,6 +152,7 @@ class OnlingClustering():
         return mean_dist_per_center,min_dist_per_center
 
     def conditional_drop(self):
+        if  self.static: return
 
         mean_dist_per_center, min_dist_per_center=self.centers_separation()
 
@@ -165,7 +175,7 @@ class OnlingClustering():
 
         print(Fore.RED,f'Remove redundant taxonomy for {self.key_name} at index {index}',Fore.RESET)
 
-        self.save()
+        # self.save()
 
     def step_decay_rate(self,index):
         step=torch.zeros_like(self.update_rates)
@@ -235,17 +245,51 @@ class OnlingClustering():
             self.centers[idx] = F.normalize(c_norm + repulse, dim=0)
 
     def get_uniqueness_score(self,new_vector):
-        index, min_dist = self.get_closest_center(new_vector)
-        u=1-self.update_rates
-        u=(u[index]-torch.min(u))/(torch.max(u)-torch.min(u))
-        # print(f'-----{u}')
+        # dist =self.get_dist_to_centers(new_vector)
+        # dist=(dist-dist.min())/(dist.max()-dist.min())
+        # sim=1-dist
+        # sim=sim/sim.sum()
+
+        sim = torch.matmul(self.centers, new_vector)
+
+        # Convert to [0, 1] and apply temperature
+        sim = (sim + 1) / 2
+        sim = F.softmax(sim / .1, dim=0)
+
+
+        # print(1-(self.update_rates.squeeze()*sim).sum(),'////////////////////////////////////////////////////',sim)
+        r=self.update_rates.squeeze()
+        # r=(r-r.min())/(r.max()-r.min())
+        u=1-(r*sim).sum()
+
+        # index, min_dist = self.get_closest_center(new_vector)
+        # u=1-self.update_rates
+        # u=(u[index])#-torch.min(u))/(torch.max(u)-torch.min(u))
+        # u = u[index]/torch.mean(u)
+        # print(f'-----{u},/////////////////////////////////////{new_vector}')
 
         return u
 
     def update(self,new_vector):
         if not self.use_euclidean_dist:
+
             new_vector=F.normalize(new_vector,p=2,dim=0,eps=1e-8)
-        if self.centers is None:
+
+        if self.static:
+            '''smooth update'''
+            sim = torch.matmul(self.centers, new_vector)
+
+            # Convert to [0, 1] and apply temperature
+            sim = (sim + 1) / 2
+            sim = F.softmax(sim / .1, dim=0)
+
+            self.update_rates=self.update_rates*(1-self.decay_rate)+sim*self.decay_rate
+
+            # index, min_dist = self.get_closest_center(new_vector)
+            # self.step_decay_rate(index)
+
+
+        elif self.centers is None:
             self.centers=new_vector.clone()[None,:]
             self.update_rates=torch.ones_like(self.centers[:,0:1])
         elif self.centers.shape[0]<self.N:
@@ -267,24 +311,28 @@ class OnlingClustering():
                 new_center = self.interpolate( old_center, new_vector)
                 self.centers[index] = new_center
                 self.step_decay_rate(index)
-                if self.repulsive: self.repulse_center(idx=index, beta=self.decay_rate / 5)
+                if self.repulsive: self.repulse_center(idx=index, beta=self.decay_rate/5 )
 
-        self.save()
+        # self.save()
 
-    def get_closest_center(self,new_values):
+    def get_dist_to_centers(self,new_values):
         if self.is_quat:
             dist = quaternion_angular_distance(self.centers, new_values)
-            index=dist.argmin()
         elif self.use_euclidean_dist:
             dist = torch.norm(self.centers - new_values.unsqueeze(0), dim=1)  # [n]
-            index = torch.argmin(dist)
         else:
             dist = -torch.matmul(self.centers, new_values)  # [n]
-            index = torch.argmin(dist)
+            # dist =(1+torch.cosine_similarity(self.centers.unsqueeze(0), new_values.unsqueeze(0), dim=-1))/2
+        return dist
 
-        self.metrics[0]=(1-self.decay_rate)*self.metrics[0]+self.decay_rate*dist.mean()
-        self.metrics[1]=(1-self.decay_rate)*self.metrics[1]+self.decay_rate*dist.std()
-        self.metrics[2]=(1-self.decay_rate)*self.metrics[2]+self.decay_rate*dist.min()
+    def get_closest_center(self,new_values):
+        dist =self.get_dist_to_centers(new_values)
+        index = torch.argmin(dist)
+
+        if not self.static:
+            self.metrics[0]=(1-self.decay_rate)*self.metrics[0]+self.decay_rate*dist.mean()
+            self.metrics[1]=(1-self.decay_rate)*self.metrics[1]+self.decay_rate*dist.std()
+            self.metrics[2]=(1-self.decay_rate)*self.metrics[2]+self.decay_rate*dist.min()
 
         return index,dist.min()
 
@@ -308,18 +356,21 @@ class OnlingClustering():
 
     def view(self):
         if self.centers is not None:
-            print(Fore.LIGHTCYAN_EX,f'new_centers of {self.key_name}',Fore.RESET)
-            print(self.centers)
-            print('Update_rates %:')
+            if not self.static:
+                print(Fore.LIGHTCYAN_EX,f'new_centers of {self.key_name}',Fore.RESET)
+                print(self.centers)
+                print(f'metrics: {self.metrics}')
+                if self.centers is not None and self.centers.shape[0] >= self.N:
+                    try:
+                        self.conditional_drop()
+                    except Exception as e:
+                        print(str(e))
+
+            print(f'{self.key_name} centers Update frequency:')
             print(self.update_rates)
 
             # print(((self.update_rates/self.update_rates.sum())*100).tolist())
-            print(f'metrics: {self.metrics}')
-            if self.centers is not None and self.centers.shape[0]>=self.N:
-                try:
-                    self.conditional_drop()
-                except Exception as e:
-                    print(str(e))
+
 
                 # self.vector_repulsive_update()
 

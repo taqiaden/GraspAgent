@@ -15,7 +15,7 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
         self.hand_xml_file = "wonik_allegro/right_hand.xml"
         super().__init__(root=root,max_obj_per_scene=max_obj_per_scene,key='allegro_hand',objects_path=objects_path)
         self.root = root
-        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0]
+        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.default_ctrl = None
 
         # self.last_hand_geom_id=101
@@ -23,16 +23,15 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
         # self.contact_pads_geom_ids=[[23,28,34],[55,60,66],[87,92,98]] # (pad1,pad2,pad3)
 
     def  decode_fingers_initial_state(self,fingers):
-        return [  0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0]
+        return  [  0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def  decode_finger_ctrl(self,fingers):
-        return [  0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0]
+        return  [  0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0]
 
     def  close_grip(self,fingers):
         return [  0, 0, 0, 0, 0, 0, 0, 0, 0]
     def check_collision(self,hand_pos,hand_quat,hand_fingers=None,view=False):
         self.restore_simulation_state()
-
 
         self.d.mocap_pos[0] = hand_pos
         self.d.mocap_quat[0] = hand_quat
@@ -267,7 +266,7 @@ if __name__ == "__main__":
     from GraspAgent_2.training.SH_training import process_pose
 
     quat, fingers, shifted_point = process_pose(target_point, target_pose, view=True)
-
+    shifted_point[-1]=0.5
     env.manual_view(pos=shifted_point,quat=quat,fingers=fingers)
 
     # approach_ref = torch.tensor([0.0, 0., 1.0], device='cuda')

@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import tensor
+
 from GraspAgent_2.hands_config.sh_config import fingers_range, fingers_min, fingers_max
 from GraspAgent_2.utils.Online_clustering import OnlingClustering
 from GraspAgent_2.utils.quat_operations import bulk_quat_mul, signed_cosine_distance
@@ -347,7 +349,6 @@ def sample_ch_quat(size):
 
     return quat
 
-
 def sample_mixed_tensors(base, n, device='cuda', smooth=False, noise_rate=0.0):
     """
     Sample a tensor of shape [n, 4] by mixing given base vectors equally,
@@ -386,7 +387,6 @@ def sample_mixed_tensors(base, n, device='cuda', smooth=False, noise_rate=0.0):
     samples = F.normalize(samples, dim=-1)
 
     return samples
-
 
 def sample_from_two(A, B, ratio_of_A):
     """
@@ -537,17 +537,65 @@ def generate_random_SH_poses(size):
 
     alpha_ = torch.randn((size,3),device='cuda')
     alpha_[:, -1] = -1#*torch.abs(alpha_[:, -1])
-    alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
+    alpha_[:, 0:2]/=3
     alpha_ = F.normalize(alpha_, dim=-1)
 
     beta_ = random_unit_circle(size)
     beta_ = F.normalize(beta_, dim=-1)
 
-    fingers_ = (torch.rand((size, 3), device='cuda')-0.5)
+    fingers_ = beta_peak_intensity_tensor(size, 3, torch.tensor([0.,0,0]).cuda(),[-0.5,0.5], peak_intensity=30.0)
 
-    transition_ = torch.rand((size, 1), device='cuda')**2
+    transition_ = beta_peak_intensity_tensor(size, 1, torch.tensor([0.6]).cuda(),[0.,1.], peak_intensity=30.0)
 
     sampled_pose = torch.cat([alpha_,beta_, fingers_, transition_], dim=1)
+    return sampled_pose
+
+def generate_random_SH_3F_poses(size):
+
+    alpha_ = torch.randn((size,3),device='cuda')
+    alpha_[:, -1] = -1*(1-alpha_[:, -1].clamp(-1,1))/2
+    # alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
+    alpha_ = F.normalize(alpha_, dim=-1)
+
+    beta_ = random_unit_circle(size)
+    beta_ = F.normalize(beta_, dim=-1)
+
+    gamma = torch.randn((size,2),device='cuda')/3
+    # gamma=gamma*gamma.abs()
+
+
+    s = 1-torch.rand((size, 4), device='cuda')**2
+    b=beta_peak_intensity_tensor(size, 5, torch.tensor([0.6,1.3,1.3,1.3,1.3]).cuda(),[-0.262,1.57], peak_intensity=10.0)
+
+    fingers_ = torch.randn((size, 18), device='cuda')/3
+
+    # fingers_[:,0:1]=beta_peak_intensity_tensor(size, 1, torch.tensor([0.]).cuda(),[-1.05,1.05], peak_intensity=10.0)
+    fingers_[:,0:1]=(torch.rand((size, 1), device='cuda')-0.5)*2*1.05
+
+    fingers_[:, 1:2]=(1-torch.rand((size, 1), device='cuda')**2)*1.2
+
+    fingers_[:, 3:4] =beta_peak_intensity_tensor(size, 1, torch.tensor([0.698]).cuda(),[-.7,0.7], peak_intensity=10.0)
+    # fingers_[:, 3:4] =(torch.rand((size, 1), device='cuda')-0.5)*2*0.698
+    fingers_[:, 4] = b[:,0]
+
+    fingers_[:, 6] = b[:,1]
+    fingers_[:, 7] = s[:,0]
+
+    fingers_[:, 9] = b[:,2]
+    fingers_[:, 10] = s[:,1]
+    fingers_[:, 11] -= 0.5
+    fingers_[:, 12] = b[:,3]
+    fingers_[:, 13] = s[:,2]
+    fingers_[:, 14:15]=(1-torch.rand((size, 1), device='cuda')**2)*0.785
+    fingers_[:, 15] -= 0.5
+    fingers_[:, 16] = b[:,4]
+    fingers_[:, 17] = s[:,3]
+
+    delta = torch.randn((size, 3), device='cuda')/2
+    # delta[:,-1]+=0.35
+
+    sampled_pose = torch.cat([alpha_,beta_,delta,gamma, fingers_], dim=1)
+
     return sampled_pose
 
 
@@ -657,7 +705,35 @@ def ch_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,alpha=
     # sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
     return sampled_pose
+def sh_3F_pose_interpolation( gripper_pose, annealing_factor):
 
+    ref_pose = gripper_pose.detach().clone()
+    n=ref_pose.shape[1]
+    assert ref_pose.shape[0]==1
+
+    assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
+
+    # ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
+    # ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
+    # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
+
+    annealing_factor[annealing_factor>0.5]=1.
+    # sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
+
+    sampling_ratios=annealing_factor
+
+    sampled_pose=generate_random_SH_3F_poses(ref_pose[0,0].numel()).reshape(600,600,n).permute(2,0,1)[None,...]
+
+    sampled_pose = sampled_pose * sampling_ratios + (1 - sampling_ratios) * ref_pose
+    assert not torch.isnan(sampled_pose).any(), f'{sampled_pose}, {sampling_ratios.min()}, {sampled_pose.max()}'
+
+    # max_angle_rad=2*np.pi*tou
+    sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
+    sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
+
+    # sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
+
+    return sampled_pose
 
 def sh_pose_interpolation( gripper_pose, annealing_factor):
 
@@ -668,12 +744,12 @@ def sh_pose_interpolation( gripper_pose, annealing_factor):
     assert not torch.isnan(ref_pose).any(), f'{ref_pose}'
 
     ref_pose[:,-1]=torch.clip(ref_pose[:,-1],0,1)
-    ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
+    # ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-.5,0.5)
 
     # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
-    annealing_factor[annealing_factor>0.95]=1.
-
-    sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
+    annealing_factor[annealing_factor>0.5]=1.
+    sampling_ratios=annealing_factor
+    # sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
 
 
     sampled_pose=generate_random_SH_poses(ref_pose[0,0].numel()).reshape(600,600,9).permute(2,0,1)[None,...]
@@ -685,7 +761,7 @@ def sh_pose_interpolation( gripper_pose, annealing_factor):
     sampled_pose[:, 0:3] = F.normalize(sampled_pose[:, 0:3], dim=1)
     sampled_pose[:, 3:5] = F.normalize(sampled_pose[:, 3:5], dim=1)
 
-    sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
+    # sampled_pose[:,-1]=torch.clamp(sampled_pose[:,-1],min=0.0,max=0.99)
 
     return sampled_pose
 
@@ -718,3 +794,15 @@ def pose_interpolation1d( gripper_pose, objects_mask,annealing_factor=0.99):
     sampled_pose[:, 5:] = torch.clamp(sampled_pose[:, 5:], 0.01, 0.99)
 
     return sampled_pose[None,...]
+
+if __name__ == "__main__":
+
+    r=beta_peak_intensity_tensor(1000, 3, torch.tensor([0,-1,1]).cuda(),[-2,2], peak_intensity=30.0)
+    data=r[:,0].cpu().numpy()
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    plt.hist(data, bins=30, edgecolor='black', alpha=0.7)
+    plt.xlabel('Values')
+    plt.ylabel('Frequency')
+    plt.grid(True, alpha=0.3)
+    plt.show()

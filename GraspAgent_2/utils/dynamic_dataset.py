@@ -112,7 +112,9 @@ class SynthesisedData:
         # selected_idx = random.randint(0, len(self.target_indexes) - 1)
 
         # selected_idx = random.choices(range(len(self.importance)), weights=self.importance)[0]
-        selected_idx = self.importance.index(max(self.importance)) if max(self.importance)>0.5 else self.uniqueness.index(max(self.uniqueness))
+        selected_idx = self.importance.index(max(self.importance))
+
+        # selected_idx = self.importance.index(max(self.importance)) if max(self.importance)>0.5 else self.uniqueness.index(max(self.uniqueness))
 
         target_index=self.target_indexes.pop(selected_idx)
         target_point=self.grasp_target_points.pop(selected_idx)

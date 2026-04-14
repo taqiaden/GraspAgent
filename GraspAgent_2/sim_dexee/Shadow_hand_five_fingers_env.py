@@ -7,31 +7,33 @@ import torch
 
 from GraspAgent_2.hands_config.sh_config import fingers_max, fingers_min
 from GraspAgent_2.utils.Multi_finger_hand_env import MojocoMultiFingersEnv
-from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_between
+from GraspAgent_2.utils.quat_operations import quat_rotate_vector, quat_between, grasp_frame_to_quat
+
 
 class ShadowHandEnv(MojocoMultiFingersEnv):
     def __init__(self,root,max_obj_per_scene=2,objects_path=None):
         self.hand_xml_file = "shadow_hand/right_hand.xml"
-        super().__init__(root=root,max_obj_per_scene=max_obj_per_scene,key='shadow_hand',objects_path=objects_path)
+        super().__init__(root=root,max_obj_per_scene=max_obj_per_scene,key='shadow_hand_3F',objects_path=objects_path)
         self.root = root
         self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0,0,0,0,0,0]
         self.default_ctrl = None
 
         # self.last_hand_geom_id=101
 
-        self.contact_pads_geom_ids=[[23,28,34],[55,60,66],[87,92,98]] # (pad1,pad2,pad3)
+        # self.contact_pads_geom_ids=[[23,28,34],[55,60,66],[87,92,98]] # (pad1,pad2,pad3)
 
     def  decode_fingers_initial_state(self,fingers):
-        return [  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+        return fingers[0:2]+[  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0,0,0,0,0,0]
 
     def  decode_finger_ctrl(self,fingers):
-        return [0, 0, 0, 0, 0, 0, 0, 0, 0]
+        return fingers[0:2]+[0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0,0,0,0,0]
         return [fingers[0]*1.746-0.873, -1.4, 0, fingers[1]*1.746-0.873, -1.4, 0, fingers[2]*1.746-0.873, -1.4, 0]
 
-    def  close_grip(self,fingers):
-        return [fingers[0]*1.746-0.873, 0.785, 0.5, fingers[1]*1.746-0.873, 0.785, 0.5, fingers[2]*1.746-0.873, 0.785 , 0.5]
+
     def check_collision(self,hand_pos,hand_quat,hand_fingers=None,view=False):
         self.restore_simulation_state()
+        hand_fingers[0]=min(max(hand_fingers[0],-0.523599),0.174533)
+        hand_fingers[1]=min(max(hand_fingers[1],-0.698132),0.488692)
 
 
         self.d.mocap_pos[0] = hand_pos
@@ -57,8 +59,11 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
 
         if obj_pose is None: obj_pose=self.objects_poses
 
-        in_scope = max(hand_fingers)<=1. and min(hand_fingers)>=0.
-        if not in_scope: hand_fingers = torch.clamp(torch.tensor(hand_fingers),min=0.01,max=0.99).tolist()
+        in_scope =True# max(hand_fingers)<=1. and min(hand_fingers)>=0.
+        # if not in_scope: hand_fingers = torch.clamp(torch.tensor(hand_fingers),min=0.01,max=0.99).tolist()
+        hand_fingers[0]=min(max(hand_fingers[0],-0.523599),0.174533)
+        hand_fingers[1]=min(max(hand_fingers[1],-0.698132),0.488692)
+
         grasped_obj=None
 
         warning_flag = False
@@ -81,9 +86,9 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
             return in_scope, False, ini_contact_with_obj, ini_contact_with_floor,None,None,None,warning_flag,grasped_obj
         # print('+++++++++++++++++++++++++++++++++++++++++++++++++++',self.default_finger_joints)
         delta=[0, 0, 0.003]
-        decoded_fingers = self.close_grip(hand_fingers)
+        # decoded_fingers = self.close_grip(hand_fingers)
         # max_fingers = self.max_finger_ctrl()
-        self.d.ctrl = decoded_fingers
+        self.d.ctrl = hand_fingers
         shake_amp = .003
         shake_f = 20  # Hz
 
@@ -132,13 +137,13 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
             stable_grasp,n_grasp_contact2,self_collide2,max_force2,max_penetration2 = self.check_valid_grasp(minimum_contact_points=0)
             # print(f'---test------------------------------{max_force1,max_penetration1,max_force2,max_penetration2}')
             grasped_obj = self.get_grasped_obj()
-            if update_obj_prob and not warning_flag:
+            if update_obj_prob is not None and not warning_flag:
 
                 # print(f'grasped_obj_: {grasped_obj}')
 
                 # s=1.0 if stable_grasp else 0.9
                 # if stable_grasp:print(Fore.GREEN,f"object {grasped_obj} grasped successfully",Fore.RESET)
-                self.step_obj_prop(grasped_obj)
+                self.step_obj_prop(grasped_obj,scale=update_obj_prob)
 
             return in_scope,grasp_success,ini_contact_with_obj, ini_contact_with_floor,min(n_grasp_contact1,n_grasp_contact2),self_collide1 or self_collide2,stable_grasp,warning_flag,grasped_obj
         else:
@@ -149,8 +154,11 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
 
         if obj_pose is None: obj_pose = self.objects_poses
 
-        in_scope = max(hand_fingers) <= 1. and min(hand_fingers) >= 0.
-        if not in_scope: hand_fingers = torch.clamp(torch.tensor(hand_fingers), min=0.01, max=0.99).tolist()
+        in_scope = True#max(hand_fingers) <= 1. and min(hand_fingers) >= 0.
+        hand_fingers[0]=min(max(hand_fingers[0],-0.523599),0.174533)
+        hand_fingers[1]=min(max(hand_fingers[1],-0.698132),0.488692)
+
+        # if not in_scope: hand_fingers = torch.clamp(torch.tensor(hand_fingers), min=0.01, max=0.99).tolist()
         grasped_obj = None
 
         warning_flag = False
@@ -171,9 +179,9 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
         # self.static_view(1000)
 
         delta=[0, 0, 0.003]
-        decoded_fingers=self.close_grip(hand_fingers)
+        # decoded_fingers=self.close_grip(hand_fingers)
         # max_fingers=self.max_finger_ctrl()
-        self.d.ctrl = decoded_fingers
+        self.d.ctrl = hand_fingers
         shake_amp = .003
         shake_f = 20  # Hz
 
@@ -275,7 +283,17 @@ if __name__ == "__main__":
     # quat = quat_between(approach_ref, torch.tensor([0., 0., -1.], device='cuda')).cpu().tolist()
     print(quat)
     # quat=[1,0,0,0]
-    # env.check_collision(hand_pos=shifted_point, hand_quat=quat,view=True)
+
+    import torch.nn.functional as F
+    alpha = F.normalize(torch.tensor([0.5,0.5,-1.]).cuda(), p=2, dim=0, eps=1e-8)
+    beta = F.normalize(torch.tensor([-1.,1.]).cuda(), p=2, dim=0, eps=1e-8)
+
+    approach_ref = torch.tensor([0.0, 0., 1.0], device='cuda')
+
+    default_quat = quat_between(approach_ref, torch.tensor([0., 0., -1.], device='cuda'))
+    quat = grasp_frame_to_quat(alpha, beta, default_quat).cpu().tolist()
+
+    env.check_collision(hand_pos=shifted_point, hand_quat=quat,hand_fingers=[0,0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0,0,0,0,0,0],view=True)
 
     env.view_grasp(shifted_point,quat, hand_fingers=fingers)
 
