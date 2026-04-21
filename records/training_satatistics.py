@@ -111,8 +111,13 @@ class MovingRate():
 
     def lower_rejection_criteria(self,x,k=2.0,report=True):
         threshold=self.moving_rate-k*math.sqrt(self.var_x)
-        if report: print(f'Drop criteria for {self.name},',Fore.YELLOW,f' x={x}, moving average= {self.moving_rate}, threshold={threshold}',Fore.RESET)
+        if report: print(f'lower criteria for {self.name},',Fore.YELLOW,f' x={x}, moving average= {self.moving_rate}, threshold={threshold}',Fore.RESET)
         return x<threshold
+
+    def upper_rejection_criteria(self,x,k=2.0,report=True):
+        threshold=self.moving_rate+k*math.sqrt(self.var_x)
+        if report: print(f'Upper criteria for {self.name},',Fore.YELLOW,f' x={x}, moving average= {self.moving_rate}, threshold={threshold}',Fore.RESET)
+        return x>threshold
 
     def save(self):
         save_key('moving_rate_', self.moving_rate, config_file=self.name)
@@ -134,7 +139,7 @@ class MovingRate():
         try:
             self.moving_rate=get_float('moving_rate_',config_file=self.name,default=initial_val)
 
-            if  math.isnan(self.moving_rate) : self.moving_rate=self.initial_val
+            if  math.isnan(self.moving_rate) or math.isinf(self.moving_rate): self.moving_rate=self.initial_val
             else:
                 self.counter = get_float('counter_', config_file=self.name)
                 self.momentum = get_float('momentum_', config_file=self.name)

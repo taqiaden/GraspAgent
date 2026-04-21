@@ -79,6 +79,7 @@ class GANWrapper():
         self.generator=generator
         self.critic_optimizer=None
         self.generator_optimizer=None
+        self.sampler_optimizer=None
         self.learning_rate=1*1e-5
         self.generator_model_name=self.module_key+'_generator'
 
@@ -125,6 +126,18 @@ class GANWrapper():
                                                         weight_decay=weight_decay_)
         self.generator_optimizer = load_opt(self.generator_optimizer, self.module_key+'_generator_optimizer')
 
+    def sampler_adam_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay):
+        if learning_rate is not None: self.learning_rate=learning_rate
+        if param_group is None:
+            self.sampler_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.learning_rate, betas=(beta1, beta2), eps=1e-8,
+                                         weight_decay=weight_decay_)
+        else:
+            self.sampler_optimizer = torch.optim.Adam(param_group,lr=self.learning_rate,
+                                                        betas=(beta1, beta2), eps=1e-8,
+                                                        weight_decay=weight_decay_)
+        self.sampler_optimizer = load_opt(self.sampler_optimizer, self.module_key+'_sampler_optimizer')
+
+
     def generator_adamW_optimizer(self,param_group=None,learning_rate=None,beta1=0.9,beta2=0.999,weight_decay_=weight_decay,load_check_point=True):
         if learning_rate is not None: self.learning_rate=learning_rate
         if param_group is None:
@@ -169,6 +182,8 @@ class GANWrapper():
     def export_optimizers(self):
         export_optm(self.generator_optimizer, self.module_key + '_generator_optimizer')
         export_optm(self.critic_optimizer, self.module_key + '_critic_optimizer')
+        export_optm(self.sampler_optimizer, self.module_key + '_sampler_optimizer')
+
 
 class ActorCriticWrapper():
     def __init__(self,module_key,actor,critic=None):

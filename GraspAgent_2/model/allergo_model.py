@@ -18,40 +18,25 @@ from models.resunet import res_unet
 import torch
 import torch.nn as nn
 
+Allergo_model_key = 'Allergo_model'
 
-SH_model_key = 'SH_3F_model'
-
-
-
-
-class SHPoseSampler(nn.Module):
+class ALlergoPoseSampler(nn.Module):
     def __init__(self):
         super().__init__()
 
         self.delta = ContextGate_2d(in_c1=64, in_c2= 1, out_c=3,
-                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
+                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=True,bias=True).to(
             'cuda')
 
         self.alpha = ContextGate_2d(in_c1=64, in_c2= 1+3, out_c=3,
-                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
+                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=True,bias=True).to(
             'cuda')
         self.beta = ContextGate_2d(in_c1=64, in_c2= 4+3, out_c=2,
-                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
+                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=True,bias=True).to(
             'cuda')
 
-        self.gamma = ContextGate_2d(in_c1=64, in_c2= 7+2, out_c=2,
-                                      relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
-            'cuda')
-        self.fingers_A=ContextGate_2d(in_c1=64, in_c2=9+2, out_c=5,
-                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False,bias=True).to(
-            'cuda')
-
-        self.fingers_B=ContextGate_2d(in_c1=64, in_c2=11+5, out_c=9,
-                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False,bias=True).to(
-            'cuda')
-
-        self.fingers_C=ContextGate_2d(in_c1=64, in_c2=16+9, out_c=4,
-                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False,bias=True).to(
+        self.fingers=ContextGate_2d(in_c1=64, in_c2=9, out_c=16,
+                                          relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=True,bias=True).to(
             'cuda')
 
     def forward(self, features,depth,latent_vector):
@@ -64,14 +49,9 @@ class SHPoseSampler(nn.Module):
         beta = self.beta(features,torch.cat([depth,delta,alpha], dim=1))
         beta = F.normalize(beta, dim=1)
 
+        fingers= self.fingers(features, torch.cat([depth,delta,alpha,beta], dim=1))
 
-        gamma=self.gamma(features,torch.cat([depth,delta,alpha,beta], dim=1))
-
-        fingers_A= self.fingers_A(features, torch.cat([depth,delta,alpha,beta,gamma], dim=1))
-        fingers_B= self.fingers_B(features, torch.cat([depth,delta,alpha,beta,gamma,fingers_A], dim=1))
-        fingers_C= self.fingers_C(features, torch.cat([depth,delta,alpha,beta,gamma,fingers_A,fingers_B], dim=1))
-
-        pose = torch.cat([alpha,beta,delta,gamma,fingers_A,fingers_B,fingers_C], dim=1) #28
+        pose = torch.cat([alpha,beta,delta,fingers], dim=1) #28
 
         return pose
 
@@ -80,11 +60,11 @@ def depth_standardization(depth,mask):
     depth_ = (depth.clone() - mean_)*10
     return depth_[None,None]
 
-class SH_G(nn.Module):
+class Allergo_G(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0., activation=nn.SiLU(), IN_affine=False,
+                                  relu_negative_slope=0., activation=None, IN_affine=False,
                                   activate_skip=False).to('cuda')
 
         self.back_bone.apply(init_weights_he_normal)
@@ -98,21 +78,21 @@ class SH_G(nn.Module):
         self.back_bone2_.apply(orthogonal_init_all)
 
 
-        self.SH_PoseSampler_ = SHPoseSampler()
-        self.SH_PoseSampler_.apply(init_weights_he_normal)
+        self.AllergoPoseSampler_ = ALlergoPoseSampler()
+        self.AllergoPoseSampler_.apply(init_weights_he_normal)
 
-        self.grasp_quality_ =ContextGate_2d( 64, 29, 1, in_c3=0, relu_negative_slope=0.,
+        self.grasp_quality_ =ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
 
-        self.grasp_collision_ = ContextGate_2d( 64, 29, 1, in_c3=0, relu_negative_slope=0.,
-        activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
-
-
-        self.grasp_collision2 =ContextGate_2d( 64, 29, 1, in_c3=0, relu_negative_slope=0.,
+        self.grasp_collision_ = ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
 
 
-        self.grasp_collision3 = ContextGate_2d( 64, 29, 1, in_c3=0, relu_negative_slope=0.,
+        self.grasp_collision2 =ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
+        activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
+
+
+        self.grasp_collision3 = ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
 
 
@@ -181,7 +161,7 @@ class SH_G(nn.Module):
 
         depth_data = standarized_depth_
 
-        gripper_pose = self.SH_PoseSampler_(features, depth_data, latent_vector)
+        gripper_pose = self.AllergoPoseSampler_(features, depth_data, latent_vector)
 
         detached_gripper_pose = gripper_pose.detach().clone()
 
@@ -199,11 +179,6 @@ class SH_G(nn.Module):
 
         grasp_quality = self.grasp_quality_(features2, detached_gripper_pose)
 
-        # grasp_quality=grasp_quality-grasp_quality[~target_mask].mean()+self.bias
-        # grasp_quality=grasp_quality*self.scale
-        #
-        # print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
-
 
         if model_B_poses is not None:
             gripper_pose_B = torch.cat([model_B_poses, depth_data], dim=1)
@@ -214,47 +189,14 @@ class SH_G(nn.Module):
 
         return gripper_pose, grasp_quality, grasp_collision, features2.detach(), B_grasp_quality
 
-class ScalerEncoding_1d(nn.Module):
-    def __init__(self,in_c,out_per_channel=10,shared=True,out=10):
-        super().__init__()
-        self.shared=shared
-        self.mlp = nn.Sequential(
-            nn.Linear(1, out_per_channel),
-            nn.SiLU()
-        ).to('cuda') if shared else nn.Sequential(
-            nn.Linear(in_c, out),
-            nn.SiLU()
-        ).to('cuda')
-
-
-    def forward(self, x):
-        if self.shared:
-            x=self.mlp(x[...,None])
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
-            return x.flatten(start_dim=-2)
-        else:
-            x = self.mlp(x)
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
-            return x
-
-class ScalerEncoding_2d(nn.Module):
-    def __init__(self,in_c,out_per_channel=10,shared=True,out=10):
-        super().__init__()
-        self.mlp = ScalerEncoding_1d(in_c,out_per_channel,shared,out)
-
-    def forward(self, x):
-        x=x.permute(0,2,3,1)
-        x=self.mlp(x).permute(0,3,1,2)
-        return x
-
-class SH_D(nn.Module):
+class Allergo_D(nn.Module):
     def __init__(self):
         super().__init__()
 
 
         self.back_bone = SparseEncoderIN().to('cuda')
 
-        self.att_block = ContextGate_1d(in_c1=512, in_c2=28  ).to('cuda')
+        self.att_block = ContextGate_1d(in_c1=512, in_c2=24  ).to('cuda')
 
 
         self.back_bone.apply(init_weights_he_normal)
@@ -294,12 +236,6 @@ class SH_D(nn.Module):
 
 
         xyz_list = torch.stack(xyz_list)[:, None, :].repeat(1, 2, 1)  #
-
-        # pose = torch.cat([pose, xyz_list], dim=-1)
-
-
-
-        # anchor = torch.cat([anchor[:, None], xyz_list[:, 0:1]], dim=-1)
         scores = self.att_block(anchor[:, None], pose)
 
         return None, None, scores

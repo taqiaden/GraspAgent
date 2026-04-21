@@ -33,8 +33,8 @@ configure_smbclient()
 
 maximum_scope_samples=100000
 
-gripper_feasible_pose_rate = MovingRate('gripper_feasible_pose', min_decay=0.01,initial_val=0.5)
-suction_feasible_pose_rate = MovingRate('suction_feasible_pose', min_decay=0.01,initial_val=0.5)
+gripper_feasible_pose_rate = MovingRate('gripper_feasible_pose', initial_val=0.5)
+suction_feasible_pose_rate = MovingRate('suction_feasible_pose',initial_val=0.5)
 
 
 def catch_random_grasp_point():

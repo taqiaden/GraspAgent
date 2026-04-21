@@ -53,7 +53,7 @@ class ShadowHandEnv(MojocoMultiFingersEnv):
             self.static_view(1000)
 
         return  contact_with_obj , contact_with_floor
-    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=True,update_obj_prob=False):
+    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=True,update_obj_prob=None):
 
         self.restore_simulation_state()
 

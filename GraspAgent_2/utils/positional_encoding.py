@@ -3,12 +3,11 @@ from torch import nn
 import torch.nn.functional as F
 
 class LearnableRBFEncoding2D(nn.Module):
-    def __init__(self, num_centers=16, init_sigma=0.1,with_layer_norm=True):
+    def __init__(self, num_centers=16, init_sigma=0.1):
         super().__init__()
         self.centers = nn.Parameter(torch.linspace(0, 1, num_centers)).to('cuda')
         self.log_sigma = nn.Parameter(torch.log(torch.tensor(init_sigma))).to('cuda')
 
-        self.norm = nn.LayerNorm(num_centers).to('cuda') if with_layer_norm else None
 
     def forward(self, x):
         B, C, W, H = x.shape
@@ -46,7 +45,7 @@ def depth_sin_cos_encoding(depth, n_freqs=5, max_freq=10.0):
     return encoding
 
 class LearnableRBFEncoding1d(nn.Module):
-    def __init__(self, num_centers=16, init_sigma=0.1, device='cuda',use_ln=True):
+    def __init__(self, num_centers=16, init_sigma=0.1, device='cuda'):
         super().__init__()
         self.num_centers = num_centers
         self.register_parameter(
@@ -58,8 +57,6 @@ class LearnableRBFEncoding1d(nn.Module):
             nn.Parameter(torch.log(torch.tensor(init_sigma, device=device)))
         )
 
-
-        self.ln = nn.LayerNorm(num_centers).to('cuda') if use_ln else None
 
     def forward(self, x):
         # x shape: [*, D] (any number of leading dims)
@@ -75,12 +72,6 @@ class LearnableRBFEncoding1d(nn.Module):
         diff = x_exp - centers  # [*, D, num_centers]
         rbf = torch.exp(-0.5 * (diff / sigma) ** 2)
 
-        # if softmax:
-        #     # Apply LN across the last dimension (num_centers)
-        #     # rbf = self.ln(rbf)
-        #     rbf=F.softmax(rbf,dim=-1)
-
-        # Flatten last two dims: each feature D expands to D*num_centers
         rbf = rbf.reshape(*prefix, D * self.num_centers)
         return rbf
 
@@ -124,7 +115,7 @@ class PositionalEncoding_1d(nn.Module):
     def forward(self, x):
         """
         x: [..., dim]  (any number of leading dimensions, last dim = coordinate/features)
-        returns: [..., dim * (2*num_freqs + 1)]
+        returns: [..., dim * (2*num_freqs )]
         """
         orig_shape = x.shape
         dim = x.shape[-1]
@@ -132,14 +123,14 @@ class PositionalEncoding_1d(nn.Module):
         # Flatten leading dimensions
         x_flat = x.reshape(-1, dim)  # [*, dim]
 
-        out = [x_flat]
+        out = []
         for freq in self.freq_bands:
             out.append(torch.sin(freq * x_flat))
             out.append(torch.cos(freq * x_flat))
 
         encoded = torch.cat(out, dim=-1)
         # Restore leading dimensions
-        final_shape = orig_shape[:-1] + (dim * (2 * self.num_freqs + 1),)
+        final_shape = orig_shape[:-1] + (dim * (2 * self.num_freqs ),)
         return encoded.view(final_shape)
 
 

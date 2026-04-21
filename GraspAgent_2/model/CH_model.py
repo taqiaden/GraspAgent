@@ -133,57 +133,21 @@ class ParallelGripperPoseSampler(nn.Module):
     #     self.proj_transition.apply(lambda m: init_orthogonal(m, scale=1/6))
 
     def forward(self, features,depth,latent_vector):
-        # encoded_depth=self.depth_encoding(depth)
-        # quat = self.quat_(features,torch.cat([depth,latent_vector], dim=1))
-        # # quat=expmap_to_quat_map_2d(quat)
-        # quat = torch.where(quat[:,0:1] >= 0, quat, -quat)
-        # quat = F.normalize(quat, dim=1)
+
         delta= self.delta(features, depth)
 
-        alpha = self.alpha(features,torch.cat([depth,delta], dim=1))
+        alpha = self.alpha(features,torch.cat([depth,delta], dim=1).detach())
         alpha = F.normalize(alpha, dim=1)
 
-        beta = self.beta(features,torch.cat([depth,delta,alpha], dim=1))
+        beta = self.beta(features,torch.cat([depth,delta,alpha], dim=1).detach())
         beta = F.normalize(beta, dim=1)
 
-        # encoded_quat=sign_invariant_quat_encoding_2d(quat)
-        # encoded_quat=self.quat_encoding(encoded_quat)
-        # quat_embedding=self.normalize_quat_embedding(quat_embedding)
 
-        # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
-        fingers=self.fingers(features,torch.cat([alpha,delta,beta,depth], dim=1))
-        # transition=F.softplus(transition)
-        # transition=(F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)+math.sqrt(3))/(2*math.sqrt(3))
-        # transition=(transition-0.5)*3
-        # encoded_transition=self.transition_encoding(transition)
-        # transition=F.tanh(transition)
-        # encoded_transition=self.pos_encoder(transition)
-        # fingers=F.tanh(fingers)/2
-        # fingers=F.normalize(fingers.unflatten(1,(3,3)),p=2,dim=1).sum(dim=1)/(2*math.sqrt(3))
-        # fingers = F.normalize(fingers, dim=1)
-        # finger1=fingers[:,0:3]
-        # finger2=fingers[:,2:5]
-        # finger3=fingers[:,[4,5,0]]
-        # finger1=F.normalize(finger1,p=2, dim=1,eps=1e-8).sum(dim=1,keepdim=True)
-        # finger2=F.normalize(finger2,p=2, dim=1,eps=1e-8).sum(dim=1,keepdim=True)
-        # finger3=F.normalize(finger3,p=2, dim=1,eps=1e-8).sum(dim=1,keepdim=True)
-        # fingers=torch.cat([finger1,finger2,finger3],dim=1)/math.sqrt(3)
+        fingers=self.fingers(features,torch.cat([alpha,delta,beta,depth], dim=1).detach())
 
-        # fingers_scale= self.fingers_scale(features, torch.cat([alpha,beta,transition,fingers,depth], dim=1))
-        # fingers_scale=F.normalize(fingers_scale,p=2,dim=1).sum(dim=1,keepdim=True)
-        #
-        # fingers=fingers*(1+fingers_scale)
-        # fingers=F.sigmoid(fingers)
-
-        # quat=self.proj_quat_(quat_embedding)
-        # fingers=self.proj_fingers(fingers_embedding)
-        # transition=self.proj_transition(transition_embedding)
 
         pose = torch.cat([alpha,beta,delta,fingers], dim=1)
-        # print(pose.shape)
-        # print(fingers.shape)
 
-        # exit()
         return pose
 
 def depth_standardization(depth,mask):
@@ -195,7 +159,7 @@ class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0.,activation=None,IN_affine=False,activate_skip=False).to('cuda')
+                                  relu_negative_slope=0.,activation=nn.ReLU(),IN_affine=False,activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
         self.back_bone.apply(gan_init_with_norms)
@@ -232,24 +196,24 @@ class CH_G(nn.Module):
         #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
         #     'cuda')
 
-        self.grasp_quality_=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
-                               relu_negative_slope=0., activation=None,
-                               drop_out_ratio=0., use_sigmoid=False).to(
+        self.grasp_quality_=ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
+                               relu_negative_slope=0., activation=nn.SiLU(), normalize=False
+                               ).to(
             'cuda')
 
-        self.grasp_collision_=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
-                               relu_negative_slope=0., activation=None,
-                               drop_out_ratio=0., use_sigmoid=False).to(
+        self.grasp_collision_=ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
+                               relu_negative_slope=0., activation=nn.SiLU(), normalize=False
+                               ).to(
             'cuda')
 
-        self.grasp_collision2=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
-                               relu_negative_slope=0., activation=None,
-                               drop_out_ratio=0., use_sigmoid=False).to(
+        self.grasp_collision2=ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
+                               relu_negative_slope=0., activation=nn.SiLU(), normalize=False
+                               ).to(
             'cuda')
 
-        self.grasp_collision3=att_res_conv_normalized(in_c1=64, in_c2=12, out_c=1,
-                               relu_negative_slope=0., activation=None,
-                               drop_out_ratio=0., use_sigmoid=False).to(
+        self.grasp_collision3=ContextGate_2d(in_c1=64, in_c2=12, out_c=1,
+                               relu_negative_slope=0., activation=nn.SiLU(), normalize=False
+                               ).to(
             'cuda')
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
@@ -414,10 +378,10 @@ class CH_G(nn.Module):
         # grasp_collision=self.sig(grasp_collision)
 
         grasp_quality=self.grasp_quality_(features2,detached_gripper_pose)
-        grasp_quality=grasp_quality-grasp_quality[~target_mask].mean()+self.bias
-        grasp_quality=grasp_quality*self.scale
+        # grasp_quality=grasp_quality-grasp_quality[~target_mask].mean()+self.bias
+        # grasp_quality=grasp_quality*self.scale
 
-        print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
+        # print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
 
         if model_B_poses is not None:
             model_B_poses=torch.cat([model_B_poses,depth_data],dim=1)
@@ -447,11 +411,11 @@ class ScalerEncoding_1d(nn.Module):
     def forward(self, x):
         if self.shared:
             x=self.mlp(x[...,None])
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
+            x=F.normalize(x,p=2,dim=-1,eps=1e-8)
             return x.flatten(start_dim=-2)
         else:
             x = self.mlp(x)
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
+            x=F.normalize(x,p=2,dim=-1,eps=1e-8)
             return x
 
 class ScalerEncoding_2d(nn.Module):
@@ -467,114 +431,18 @@ class ScalerEncoding_2d(nn.Module):
 class CH_D(nn.Module):
     def __init__(self):
         super().__init__()
-        # self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=True,
-        #                           relu_negative_slope=0.2, activation=None, IN_affine=False, activate_skip=False).to(
-        #     'cuda')
-        # self.back_bone.SN_on_encoder()
-        # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
-        # gan_init_with_norms(self.back_bone)
 
-        # self.back_bone=add_spectral_norm_selective(self.back_bone)
-        #
-        # self.back_bone.apply(init_weights_he_normal)
-
-        # gan_init_with_norms(self.back_bone)
-
-        # self.att_block_ = ContextGate_1d(in_c1=64, in_c2=10, out_c=1  ).to('cuda')
 
         self.back_bone = SparseEncoderIN().to('cuda')
-        self.back_bone.apply(gan_init_with_norms)
-        # add_spectral_norm_selective(self.sparse_encoder)
 
-        # add_spectral_norm_selective(self.att_block_)
+        self.att_block = ContextGate_1d(in_c1=512 , in_c2=11 ).to('cuda')
 
-        # gan_init_with_norms(self.att_block_)
+        # self.scaler_encoder=ScalerEncoding_1d(6,out_per_channel=10)
 
-        self.att_block = ContextGate_1d(in_c1=512 + 3, in_c2=6 + 3+5 ).to('cuda')
-        self.att_block.apply(gan_init_with_norms)
 
-        # add_spectral_norm_selective(self.att_block_)
+        self.back_bone.apply(init_weights_he_normal)
+        self.att_block.apply(init_weights_he_normal)
 
-        # self.att_block_.apply(init_weights_he_normal)
-
-        # self.point_net_backbone=PointNetEncoder(use_instance_norm=True).to('cuda')
-        # replace_activations(self.point_net_backbone,nn.LeakyReLU(0.2))
-        # self.point_net_backbone.apply(init_weights_he_normal)
-        # add_spectral_norm_selective(self.point_net_backbone)
-
-        # self.query = nn.Sequential(
-        #     nn.Linear(14, 7),
-        # ).to('cuda')
-        # gan_init_with_norms(self.att_block)
-
-        # self.condition_encoder = nn.Sequential(
-        #     nn.Linear(10+40+1, 128),
-        #     nn.LayerNorm(128),
-        #     nn.SiLU()
-        # ).to('cuda')
-        # self.att_block = film_fusion_1d(in_c1=64, in_c2=51, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False).to('cuda')
-        # self.att_block_ = film_fusion_1d(in_c1=64, in_c2=15, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,use_sin=False,bias=False).to('cuda')
-        # gan_init_with_norms(self.att_block_)
-
-        # self.depth_encoding_ =ScalerEncoding_1d(in_c=1)
-        # self.transition_encoding_ =ScalerEncoding_1d(in_c=1)
-        # self.fingers_encoding_ =ScalerEncoding_1d(in_c=3)
-        # self.quat_encoding_ =ScalerEncoding_1d(in_c=10,shared=False,out=40)
-
-        # self.f1 = film_fusion_1d(in_c1=64, in_c2=10, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
-        # self.f2 = film_fusion_1d(in_c1=64, in_c2=10+1, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=False).to('cuda')
-        # self.f3 = film_fusion_1d(in_c1=64, in_c2=30, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU(),normalize=False,with_gate=True,bias=False,decode=True).to('cuda')
-
-        # self.att_block = nn.Sequential(
-        #     nn.Linear(64+10+40+1+8, 128),
-        #     nn.SiLU(),
-        #     nn.Linear(128, 64),
-        #     nn.SiLU(),
-        #     nn.Linear(64, 1),
-        # ).to('cuda')
-
-        # self.att_block2 = film_fusion_1d(in_c1=64, in_c2=40+1, out_c=1,
-        #                                relu_negative_slope=0.1, activation=nn.SiLU()).to('cuda')
-        # add_spectral_norm_selective(self.att_block)
-        # add_spectral_norm_selective(self.f1)
-        # add_spectral_norm_selective(self.f2)
-        # add_spectral_norm_selective(self.f3)
-
-        # add_spectral_norm_selective(self.att_block2)
-
-        # self.pos_encoder = LearnableRBFEncoding2D( num_centers=10,init_sigma=0.1)  # for 3D position
-        # self.dir_encoder = PositionalEncoding_2d( num_freqs=4)  # for 2D/3D viewing direction
-
-        self.pos_encoder = LearnableRBFEncoding1d(num_centers=10, init_sigma=0.1)  # for 3D position
-        self.dir_encoder = PositionalEncoding_1d(num_freqs=4)  # for 2D/3D viewing direction
-
-        self.cond_proj = nn.Sequential(
-            nn.Linear(9, 128),
-            nn.SiLU(),
-            nn.Linear(128, 128),
-            nn.SiLU(),
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        self.contx_proj = nn.Sequential(
-            nn.Linear(1024, 128),
-            nn.SiLU(),
-            # nn.Linear(128, 128),
-            # nn.SiLU(),
-            nn.Linear(128, 64),
-        ).to('cuda')
-
-        # self.cond_proj.apply(init_weights_he_normal)
-        # self.contx_proj.apply(init_weights_he_normal)
-        scaled_he_init_all(self.cond_proj)
-        scaled_he_init_all(self.contx_proj)
-
-        # self.ln=LayerNorm2D(64).to('cuda')
 
     def forward(self, depth, pose, pairs, target_mask, cropped_spheres, latent_vector=None, detach_backbone=False):
         max_ = 1.3
@@ -582,27 +450,6 @@ class CH_D(nn.Module):
         standarized_depth_ = (depth.clone() - min_) / (max_ - min_)
         standarized_depth_ = (standarized_depth_ - 0.5) / 0.5
 
-        # standarized_depth_[latent_vector==0]*=0
-        # standarized_depth_=standarized_depth_.repeat(2,1,1,1)
-        # target_mask=target_mask.repeat(2,1,1,1)
-
-        # attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
-        # pose2=pose.clone()
-        # encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
-        # pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
-        # s=self.query(pose2)#.flatten(1,2)
-        # s = F.normalize(s, p=2, dim=-1, eps=1e-8)
-        # # s=F.softmax(s,dim=-1)
-        #
-        # attention_mask=attention_mask.repeat(1,7,1,1)
-        #
-        # i=0
-        # for pair in pairs:
-        #     index = pair[0]
-        #     h = index // 600
-        #     w = index % 600
-        #     attention_mask[0, 0, h, w] = True
-        #     i+=1
 
         if detach_backbone:
             with torch.no_grad():
@@ -613,39 +460,18 @@ class CH_D(nn.Module):
         print('D max val= ', anchor.max().item(), 'mean:', anchor.mean().item(),
               ' std:',
               anchor.std(dim=1).mean().item())
-        # depth_= depth_standardization(depth[0,0],target_mask[0,0])
-        # range = depth.max() - depth.min()
-        # center = depth.min() + range / 2
 
-        # local_diff3 = depth_ - F.avg_pool2d(depth_, kernel_size=3, stride=1, padding=1)
-        # local_diff5 = depth_ - F.avg_pool2d(depth_, kernel_size=5, stride=1, padding=2)
-        # local_diff7 = depth_ - F.avg_pool2d(depth_, kernel_size=7, stride=1, padding=3)
-        #
-        # Gx, Gy = sobel_gradients(depth_)
-        #
-        # encoded_depth = torch.cat([depth_, Gx, Gy, local_diff3, local_diff5, local_diff7], dim=1)
-
-        # input = torch.cat([standarized_depth_, target_mask], dim=1)
 
         depth_data = standarized_depth_
 
-        # if detach_backbone:
-        #     with torch.no_grad():
-        #         features = self.back_bone(input)  # *scale
-        # else:
-        #     features = self.back_bone(input)  # *scale
 
-        # print('D max val= ', features.max().item(), 'mean:', features.mean().item(), ' std:',
-        #       features.std(dim=1).mean().item())
-        # features=self.ln(features)
-        # features = features.flatten(2, 3)
         depth_data = depth_data.flatten(2, 3)
         feature_list = []
         depth_data_list = []
         xyz_list = []
         for pair in pairs:
             index = pair[0]
-            xyz = pair[4].float()
+            xyz = pair[3].float()
             xyz_list.append(xyz)
             # feature_list.append(features[:, :, index])
             depth_data_list.append(depth_data[:, :, index])
@@ -654,50 +480,10 @@ class CH_D(nn.Module):
         depth_data_list = torch.cat(depth_data_list, dim=0)[:, None, :].repeat(1, 2, 1)  #
         xyz_list = torch.stack(xyz_list)[:, None, :].repeat(1, 2, 1)  #
 
-        # pose = torch.cat([pose, depth_data_list], dim=-1)
-        pose=torch.cat([pose,xyz_list],dim=-1)
+        # anchor = torch.cat([anchor[:, None], xyz_list[:, 0:1]], dim=-1)
+        # pose=torch.cat([pose[:,:,0:5],self.scaler_encoder(pose[:,:,5:])],dim=-1)
 
-        # feature_list = torch.stack(feature_list, dim=0)  # n,2,64
-        # depth_data_list = torch.stack(depth_data_list, dim=0)  # n,2,64
-
-        # quat = pose[:,:, :4]
-        # fingers = pose[:,:, 4:4+3]
-        # transition = pose[:,:, 4+3:4+3+1]
-
-        # encoded_quat = sign_invariant_quat_encoding_1d(quat)  # 10
-
-        # encoded_transition = self.pos_encoder((transition+1)/2)  # 10
-        # encoded_depth=self.pos_encoder(depth_data_list) # 10
-        # encoded_fingers=self.pos_encoder(fingers) # 30
-
-        # transition2=self.transition_encoding_(transition)
-        # depth_data_list2=self.depth_encoding_(depth_data_list)
-        # fingers2=self.fingers_encoding_(fingers)
-        # encoded_quat2=self.quat_encoding_(encoded_quat)
-
-        # condition=(torch.cat([pose,depth_data_list], dim=-1))
-
-        # output = self.att_block(feature_list, torch.cat([encoded_quat,fingers,transition,depth_data_list], dim=-1))
-        # output = self.att_block_( feature_list,condition)
-
-        # output1 = self.f1( feature_list,encoded_quat)+feature_list
-        # output2 = self.f2( output1,torch.cat([encoded_transition,depth_data_list], dim=-1))+output1
-        # output = self.f3( output2,encoded_fingers)
-
-        # output = self.att_block2(output, torch.cat([fingers,transition,depth_data_list], dim=-1))
-
-        # positive_negative = self.cond_proj(pose)
-        # positive_negative=F.normalize(positive_negative,p=2,dim=-1,eps=1e-8)
-        # anchor=self.contx_proj(point_global_features)
-        # anchor=F.normalize(anchor,p=2,dim=-1,eps=1e-8)
-        #
-        # scores=anchor[:,None]*positive_negative
-        # scores=scores.sum(dim=-1)
-
-        # scores = self.att_block( point_global_features[:,None],pose)
-
-        anchor = torch.cat([anchor[:, None], xyz_list[:, 0:1]], dim=-1)
-        scores = self.att_block(anchor, pose)
+        scores = self.att_block(anchor[:, None], pose)
 
         return None, None, scores
 
@@ -710,16 +496,16 @@ class CH_D2(nn.Module):
         replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
-        add_spectral_norm_selective(self.back_bone)
+        # add_spectral_norm_selective(self.back_bone)
 
         self.back_bone.apply(init_weights_he_normal)
 
 
-        self.att_block = ContextGate_1d_2(in_c1=64, in_c2=6+1).to('cuda')
+        self.att_block = ContextGate_1d(in_c1=64, in_c2=6+1).to('cuda')
 
 
 
-        add_spectral_norm_selective(self.att_block)
+        # add_spectral_norm_selective(self.att_block)
 
 
 
@@ -791,7 +577,7 @@ class CH_D2(nn.Module):
         xyz_list=[]
         for pair in pairs:
             index = pair[0]
-            xyz=pair[4].float()
+            xyz=pair[3].float()
             xyz_list.append(xyz)
             feature_list.append(features[:, :, index])
             depth_data_list.append(depth_data[:, :, index])

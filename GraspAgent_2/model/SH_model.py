@@ -77,55 +77,7 @@ class SHPoseSampler(nn.Module):
                                           relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False,bias=True).to(
             'cuda')
 
-        # self.fingers_scale=ContextGate_2d(in_c1=64, in_c2=1+5+1+3, out_c=3,
-        #                                   relu_negative_slope=0.1, activation=None,use_sin=False,normalize=False).to(
-        #     'cuda')
 
-        # self.quat_ =att_conv_normalized2(in_c1=64, in_c2=1, out_c=4,
-        #                      relu_negative_slope=0., activation=nn.SiLU(), normalization=norm_free).to(
-        #     'cuda')
-        # self.transition_ =att_conv_normalized2(in_c1=64, in_c2=1+4, out_c=1*3,
-        #                      relu_negative_slope=0., activation=nn.SiLU(), normalization=norm_free).to(
-        #     'cuda')
-        # self.fingers =att_conv_normalized2(in_c1=64, in_c2=1+4+1, out_c=3*3,
-        #                      relu_negative_slope=0., activation=nn.SiLU(), normalization=norm_free).to(
-        #     'cuda')
-        self.depth_encoding=ScalerEncoding_2d(in_c=1)
-        self.transition_encoding=ScalerEncoding_2d(in_c=1)
-        self.quat_encoding=ScalerEncoding_2d(in_c=10,shared=False,out=40)
-
-        # self.fingers_scale = film_fusion_2d(in_c1=64, in_c2=32+32+11, out_c=32,
-        #                                   relu_negative_slope=0.1, activation=None,normalize=True,final_linear=False).to(
-        #     'cuda')
-
-
-
-        # self.proj_quat_=nn.Conv2d(32, 4, kernel_size=1).to('cuda')
-        # self.proj_fingers=nn.Conv2d(32, 3, kernel_size=1).to('cuda')
-        # self.proj_transition=nn.Conv2d(32, 1, kernel_size=1).to('cuda')
-
-        # self.normalize_quat_embedding= nn.Sequential(
-        #     nn.Conv2d(32, 32, kernel_size=1),
-        #     nn.Tanh()
-        # ).to('cuda')
-        #
-        # self.normalize_fingers_embedding= nn.Sequential(
-        #     nn.Conv2d(32, 32, kernel_size=1),
-        #     nn.Tanh()
-        # ).to('cuda')
-
-        # self.finger_encoder=EncodedScaler(min_val=0.1,max_val=1.7).to('cuda')
-        # self.transition_encoder=EncodedScaler(min_val=-1,max_val=1).to('cuda')
-
-        self.pos_encoder = LearnableRBFEncoding2D( num_centers=10,init_sigma=0.1)  # for 3D position
-        self.dir_encoder = PositionalEncoding_2d(num_freqs=4)  # for 2D/3D viewing direction
-
-    #     self.initialize_film_gen()
-    #
-    # def initialize_film_gen(self):
-    #     self.proj_quat_.apply(lambda m: init_orthogonal(m, scale=1))
-    #     self.proj_fingers.apply(lambda m: init_orthogonal(m, scale=1/4))
-    #     self.proj_transition.apply(lambda m: init_orthogonal(m, scale=1/6))
 
     def forward(self, features,depth,latent_vector):
         # encoded_depth=self.depth_encoding(depth)
@@ -137,7 +89,7 @@ class SHPoseSampler(nn.Module):
         alpha = self.alpha(features,depth)
         alpha = F.normalize(alpha, dim=1)
 
-        beta = self.beta(features,torch.cat([depth,alpha], dim=1))
+        beta = self.beta(features,torch.cat([depth,alpha], dim=1).detach())
         beta = F.normalize(beta, dim=1)
 
         # encoded_quat=sign_invariant_quat_encoding_2d(quat)
@@ -145,14 +97,14 @@ class SHPoseSampler(nn.Module):
         # quat_embedding=self.normalize_quat_embedding(quat_embedding)
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
-        transition=self.transition_(features,torch.cat([alpha,beta,depth], dim=1))
+        transition=self.transition_(features,torch.cat([alpha,beta,depth], dim=1).detach())
         transition=F.softplus(transition)
         # transition=(F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)+math.sqrt(3))/(2*math.sqrt(3))
         # transition=(transition-0.5)*3
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
-        fingers= self.fingers(features, torch.cat([alpha,beta,transition,depth], dim=1))
+        fingers= self.fingers(features, torch.cat([alpha,beta,transition,depth], dim=1).detach())
         # fingers=F.tanh(fingers)/2
         # fingers=F.normalize(fingers.unflatten(1,(3,3)),p=2,dim=1).sum(dim=1)/(2*math.sqrt(3))
         # fingers = F.normalize(fingers, dim=1)
@@ -190,7 +142,7 @@ class SH_G(nn.Module):
     def __init__(self):
         super().__init__()
         self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-                                  relu_negative_slope=0., activation=nn.SiLU(), IN_affine=False,
+                                  relu_negative_slope=0., activation=nn.ReLU(), IN_affine=False,
                                   activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
@@ -204,107 +156,26 @@ class SH_G(nn.Module):
                                     relu_negative_slope=0., activation=None, IN_affine=False, activate_skip=False).to(
             'cuda')
 
-        # self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
-        #                           relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
-        # self.back_bone2_.apply(init_weights_he_normal)
-        # self.back_bone3_.apply(init_weights_he_normal)
-
-        # add_spectral_norm_selective(self.back_bone2_)
-        # add_spectral_norm_selective(self.back_bone3_)
-
-        # replace_instance_with_groupnorm(self.back_bone2_, max_groups=16)
-        # replace_instance_with_groupnorm(self.back_bone3_, max_groups=16)
-        # orthogonal_init_all(self.back_bone_2,gain=gain)
 
         self.SH_PoseSampler = SHPoseSampler()
 
-        # self.query = nn.Sequential(
-        #     nn.Conv2d(14, 5, kernel_size=1),
-        # ).to('cuda')
-
-        # self.grasp_quality_=ContextGate_2d(in_c1=64, in_c2= 10, out_c=1,
-        #                                       relu_negative_slope=0., activation=nn.SiLU(), use_sin=False,normalize=False,bias=True).to(
-        #             'cuda')
-
-        self.grasp_quality_=ContextGate_2d_2( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
-        activation=None, use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
-
-        # self.grasp_quality_ = att_res_conv_normalized(in_c1=64, in_c2=10, out_c=1,
-        #                                               relu_negative_slope=0., activation=nn.SiLU(),
-        #                                               drop_out_ratio=0., use_sigmoid=False).to(
-        #     'cuda')
-
-        self.grasp_collision_ =ContextGate_2d_2( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
-        activation=None, use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
-
-        self.grasp_collision2 = ContextGate_2d_2( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
-        activation=None, use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
-
-        self.grasp_collision3 = ContextGate_2d_2( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
-        activation=None, use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
 
-        self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
-        self.bias = nn.Parameter(torch.tensor(-0.7, dtype=torch.float32, device='cuda'), requires_grad=True)
-
-        # replace_instance_with_groupnorm(self.grasp_quality_, max_groups=16)
-        # replace_instance_with_groupnorm(self.grasp_collision_, max_groups=16)
-        # replace_instance_with_groupnorm(self.grasp_collision2, max_groups=16)
-        # replace_instance_with_groupnorm(self.grasp_collision3, max_groups=16)
+        self.grasp_quality_=ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
+        activation=nn.SiLU(), use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
 
-        # self.grasp_collision_ =         Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
-        #     'cuda')
-        # self.grasp_collision2 =        Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
-        #     'cuda')
-        # self.grasp_collision3=          Quality_Net_2d(in_c1=64, in_c2=7, out_c=1,
-        #                                       relu_negative_slope=0.,activation=nn.SiLU()).to(
-        #     'cuda')
-        # add_spectral_norm_selective(self.grasp_quality)
-        # add_spectral_norm_selective(self.grasp_collision)
-        # add_spectral_norm_selective(self.grasp_collision2_)
-        # add_spectral_norm_selective(self.grasp_collision3_)
 
-        # self.grasp_quality.apply(init_weights_he_normal)
-        # self.grasp_collision.apply(init_weights_he_normal)
-        # self.grasp_collision2_.apply(init_weights_he_normal)
-        # self.grasp_collision3_.apply(init_weights_he_normal)
+        self.grasp_collision_ =ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
+        activation=nn.SiLU(), use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
-        self.depth_encoding = ScalerEncoding_2d(in_c=1)
-        self.transition_encoding = ScalerEncoding_2d(in_c=1)
-        self.fingers_encoding = ScalerEncoding_2d(in_c=3)
-        self.quat_encoding = ScalerEncoding_2d(in_c=10, shared=False, out=40)
+        self.grasp_collision2 = ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
+        activation=nn.SiLU(), use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
-        # self.grasp_collision_ = Grasp_ContextGate_2d(in_c1=64, rotation_size=10, transition_size=2,fingers_size=0, out_c=2,
-        #                                       relu_negative_slope=0.1,activation=None,normalize=True,use_sin=False).to(
-        #     'cuda')
+        self.grasp_collision3 = ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
+        activation=nn.SiLU(), use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
-        # self.grasp_collision_=nn.Sequential(
-        #     nn.Conv2d(64 + 51, 64, kernel_size=1),
-        #     siren(30),
-        #     nn.Conv2d(64, 32, kernel_size=1),
-        #     siren(10),
-        #     nn.Conv2d(32, 2, kernel_size=1)
-        # ).to('cuda')
-        # self.res = nn.Sequential(
-        #     nn.Conv2d(64+51, 64, kernel_size=1),
-        # ).to('cuda')
 
-        # self.condition_encoder = nn.Sequential(
-        #     nn.Conv2d(10+40+1, 128,kernel_size=1),
-        #     nn.SiLU()
-        # ).to('cuda')
-
-        # add_spectral_norm_selective(self.back_bone_2)
-        # add_spectral_norm_selective(self.grasp_quality_)
-        # add_spectral_norm_selective(self.grasp_collision_)
-
-        self.sig = nn.Sigmoid()
-
-        self.pos_encoder = LearnableRBFEncoding2D(num_centers=10, init_sigma=0.1)  # for 3D position
-        self.dir_encoder = PositionalEncoding_2d(num_freqs=4)  # for 2D/3D viewing direction
 
     def get_grasp_quality(self, depth, target_mask, model_B_poses):
         max_ = 1.3
@@ -322,9 +193,6 @@ class SH_G(nn.Module):
         return B_grasp_quality
 
     def forward(self, depth, target_mask, latent_vector=None, backbone=None, model_B_poses=None, detach_backbone=False):
-        # depth_= depth_standardization(depth[0,0],target_mask[0,0])
-        # range=depth.max()-depth.min()
-        # center=depth.min()+range/2
         max_ = 1.3
         min_ = 1.15
         standarized_depth_ = (depth.clone() - min_) / (max_ - min_)
@@ -333,13 +201,6 @@ class SH_G(nn.Module):
         print('Depth max=', standarized_depth_.max().item(), ', min=', standarized_depth_.min().item(), ', std=',
               standarized_depth_.std().item(), ', mean=', standarized_depth_.mean().item())
 
-        # print(standarized_depth_.mean())
-        # print(standarized_depth_.min())
-        # print(standarized_depth_.max())
-        # print('-----------------------------------------------------------------',standarized_depth_.std())
-        # exit()
-        # floor_elevation=standarized_depth_[0,0][~target_mask[0,0]].mean()
-        # scale_=scale_*5*torch.ones_like(standarized_depth_)
 
         input = torch.cat([standarized_depth_, target_mask], dim=1)
         # standarized_depth_2=standarized_depth_.clone()
@@ -370,31 +231,10 @@ class SH_G(nn.Module):
         gripper_pose = self.SH_PoseSampler(features, depth_data, latent_vector)
 
         detached_gripper_pose = gripper_pose.detach().clone()
-        # detached_gripper_pose[:,2] = torch.clip(detached_gripper_pose[:,2], max=0.)
-        # detached_gripper_pose[:,0:3] = F.normalize(detached_gripper_pose[:,0:3], p=2, dim=1, eps=1e-8)
-        # detached_gripper_pose[:,5:5+3]=torch.clip(detached_gripper_pose[:,5:5+3]+ 0.5,0,1)
 
-        # encoded_quat = sign_invariant_quat_encoding_2d(quat)  # 10
-
-        # fingers2=self.fingers_encoding(fingers)
-        # transition2=self.depth_encoding(transition)
-        # depth_data2=self.depth_encoding(depth_data)
-        # encoded_quat2=self.quat_encoding(encoded_quat)
-
-        # encoded_fingers = self.pos_encoder(fingers)  # 30
-        # encoded_transition = self.pos_encoder((transition + 1) / 2)  # 10
-        # encoded_depth = self.pos_encoder(depth_data)  # 10
 
         detached_gripper_pose = torch.cat([detached_gripper_pose, depth_data], dim=1)
-        # detached_gripper_pose_without_fingers = torch.cat([detached_gripper_pose[:, 0:5], detached_gripper_pose[:, 8:]],
-        #                                                   dim=1)
-        # detached_gripper_pose=self.condition_encoder(detached_gripper_pose)
-        # s=torch.cat([encoded_quat,fingers,transition],dim=1)
-        # s=self.query(s)
-        # # s = F.normalize(s, p=2, dim=1, eps=1e-8)
-        # # s=F.softmax(s,dim=1)
-        # s=s*target_mask
-        # input2=torch.cat([input,s],dim=1)
+
 
         grasp_collision = self.grasp_collision_(features2.detach(), detached_gripper_pose)
         grasp_collision = torch.cat(
@@ -408,10 +248,10 @@ class SH_G(nn.Module):
 
         grasp_quality = self.grasp_quality_(features2, detached_gripper_pose)
 
-        grasp_quality=grasp_quality-grasp_quality[~target_mask].mean()+self.bias
-        grasp_quality=grasp_quality*self.scale
-
-        print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
+        # grasp_quality=grasp_quality-grasp_quality[~target_mask].mean()+self.bias
+        # grasp_quality=grasp_quality*self.scale
+        #
+        # print(f'bias: {self.bias.item()}, scale: {self.scale.item()}')
 
 
         if model_B_poses is not None:
@@ -442,11 +282,11 @@ class ScalerEncoding_1d(nn.Module):
     def forward(self, x):
         if self.shared:
             x=self.mlp(x[...,None])
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
+            x=F.normalize(x,p=2,dim=-1,eps=1e-8)
             return x.flatten(start_dim=-2)
         else:
             x = self.mlp(x)
-            # x=F.normalize(x,p=2,dim=-1,eps=1e-8)
+            x=F.normalize(x,p=2,dim=-1,eps=1e-8)
             return x
 
 class ScalerEncoding_2d(nn.Module):
@@ -466,13 +306,12 @@ class SH_D(nn.Module):
 
         self.back_bone = SparseEncoderIN().to('cuda')
 
+        # self.scaler_encoder=ScalerEncoding_1d(4,out_per_channel=10)
 
-        self.att_block = ContextGate_1d_2(in_c1=512 + 3, in_c2=9 + 3 ).to('cuda')
+        self.att_block = ContextGate_1d(in_c1=512 , in_c2=9  ).to('cuda')
 
-
-
-        self.back_bone.apply(orthogonal_init_all)
-        self.att_block.apply(orthogonal_init_all)
+        self.back_bone.apply(init_weights_he_normal)
+        self.att_block.apply(init_weights_he_normal)
 
 
     def forward(self, depth, pose, pairs, target_mask, cropped_spheres, latent_vector=None, detach_backbone=False):
@@ -481,27 +320,6 @@ class SH_D(nn.Module):
         standarized_depth_ = (depth.clone() - min_) / (max_ - min_)
         standarized_depth_ = (standarized_depth_ - 0.5) / 0.5
 
-        # standarized_depth_[latent_vector==0]*=0
-        # standarized_depth_=standarized_depth_.repeat(2,1,1,1)
-        # target_mask=target_mask.repeat(2,1,1,1)
-
-        # attention_mask = torch.zeros_like(standarized_depth_, dtype=torch.bool)
-        # pose2=pose.clone()
-        # encoded_quat = sign_invariant_quat_encoding_1d(pose2[:,:,0:4])
-        # pose2=torch.cat([encoded_quat,pose2[:,:,4:]],dim=-1)
-        # s=self.query(pose2)#.flatten(1,2)
-        # s = F.normalize(s, p=2, dim=-1, eps=1e-8)
-        # # s=F.softmax(s,dim=-1)
-        #
-        # attention_mask=attention_mask.repeat(1,7,1,1)
-        #
-        # i=0
-        # for pair in pairs:
-        #     index = pair[0]
-        #     h = index // 600
-        #     w = index % 600
-        #     attention_mask[0, 0, h, w] = True
-        #     i+=1
 
         if detach_backbone:
             with torch.no_grad():
@@ -512,102 +330,39 @@ class SH_D(nn.Module):
         print('D max val= ', anchor.max().item(), 'mean:', anchor.mean().item(),
               ' std:',
               anchor.std(dim=1).mean().item())
-        # depth_= depth_standardization(depth[0,0],target_mask[0,0])
-        # range = depth.max() - depth.min()
-        # center = depth.min() + range / 2
-
-        # local_diff3 = depth_ - F.avg_pool2d(depth_, kernel_size=3, stride=1, padding=1)
-        # local_diff5 = depth_ - F.avg_pool2d(depth_, kernel_size=5, stride=1, padding=2)
-        # local_diff7 = depth_ - F.avg_pool2d(depth_, kernel_size=7, stride=1, padding=3)
-        #
-        # Gx, Gy = sobel_gradients(depth_)
-        #
-        # encoded_depth = torch.cat([depth_, Gx, Gy, local_diff3, local_diff5, local_diff7], dim=1)
-
-        # input = torch.cat([standarized_depth_, target_mask], dim=1)
 
         depth_data = standarized_depth_
 
-        # if detach_backbone:
-        #     with torch.no_grad():
-        #         features = self.back_bone(input)  # *scale
-        # else:
-        #     features = self.back_bone(input)  # *scale
 
-        # print('D max val= ', features.max().item(), 'mean:', features.mean().item(), ' std:',
-        #       features.std(dim=1).mean().item())
-        # features=self.ln(features)
-        # features = features.flatten(2, 3)
         depth_data = depth_data.flatten(2, 3)
         feature_list = []
         depth_data_list = []
         xyz_list = []
         for pair in pairs:
             index = pair[0]
-            xyz = pair[4].float()
+            xyz = pair[3].float()
             xyz_list.append(xyz)
             # feature_list.append(features[:, :, index])
             depth_data_list.append(depth_data[:, :, index])
 
-        # anchor = torch.cat(feature_list, dim=0)  # n,64
         depth_data_list = torch.cat(depth_data_list, dim=0)[:, None, :].repeat(1, 2, 1)  #
         xyz_list = torch.stack(xyz_list)[:, None, :].repeat(1, 2, 1)  #
 
-        pose = torch.cat([pose, xyz_list], dim=-1)
+        # pose=torch.cat([pose[:,:,0:5],self.scaler_encoder(pose[:,:,5:])],dim=-1)
 
-        # feature_list = torch.stack(feature_list, dim=0)  # n,2,64
-        # depth_data_list = torch.stack(depth_data_list, dim=0)  # n,2,64
-
-        # quat = pose[:,:, :4]
-        # fingers = pose[:,:, 4:4+3]
-        # transition = pose[:,:, 4+3:4+3+1]
-
-        # encoded_quat = sign_invariant_quat_encoding_1d(quat)  # 10
-
-        # encoded_transition = self.pos_encoder((transition+1)/2)  # 10
-        # encoded_depth=self.pos_encoder(depth_data_list) # 10
-        # encoded_fingers=self.pos_encoder(fingers) # 30
-
-        # transition2=self.transition_encoding_(transition)
-        # depth_data_list2=self.depth_encoding_(depth_data_list)
-        # fingers2=self.fingers_encoding_(fingers)
-        # encoded_quat2=self.quat_encoding_(encoded_quat)
-
-        # condition=(torch.cat([pose,depth_data_list], dim=-1))
-
-        # output = self.att_block(feature_list, torch.cat([encoded_quat,fingers,transition,depth_data_list], dim=-1))
-        # output = self.att_block_( feature_list,condition)
-
-        # output1 = self.f1( feature_list,encoded_quat)+feature_list
-        # output2 = self.f2( output1,torch.cat([encoded_transition,depth_data_list], dim=-1))+output1
-        # output = self.f3( output2,encoded_fingers)
-
-        # output = self.att_block2(output, torch.cat([fingers,transition,depth_data_list], dim=-1))
-
-        # positive_negative = self.cond_proj(pose)
-        # positive_negative=F.normalize(positive_negative,p=2,dim=-1,eps=1e-8)
-        # anchor=self.contx_proj(point_global_features)
-        # anchor=F.normalize(anchor,p=2,dim=-1,eps=1e-8)
-        #
-        # scores=anchor[:,None]*positive_negative
-        # scores=scores.sum(dim=-1)
-
-        # scores = self.att_block( point_global_features[:,None],pose)
-
-        anchor = torch.cat([anchor[:, None], xyz_list[:, 0:1]], dim=-1)
-        scores = self.att_block(anchor, pose)
+        scores = self.att_block(anchor[:,None], pose)
 
         return None, None, scores
 
 class SH_D2(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=False,
+        self.back_bone = res_unet(in_c=2, Batch_norm=None, Instance_norm=True,
                                   relu_negative_slope=0., activation=None, IN_affine=False,activate_skip=False).to('cuda')
 
-        # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
+        replace_instance_with_groupnorm(self.back_bone, max_groups=16)
 
-        add_spectral_norm_selective(self.back_bone)
+        # add_spectral_norm_selective(self.back_bone)
 
         self.back_bone.apply(init_weights_he_normal)
 
@@ -616,7 +371,7 @@ class SH_D2(nn.Module):
         self.att_block = ContextGate_1d_3(64, 10, out_c=1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=False, bias=False, cyclic=False)
 
-        add_spectral_norm_selective(self.att_block)
+        # add_spectral_norm_selective(self.att_block)
 
 
     def forward(self, depth, pose, pairs, target_mask, cropped_spheres, latent_vector=None, detach_backbone=False):
@@ -645,7 +400,7 @@ class SH_D2(nn.Module):
         xyz_list=[]
         for pair in pairs:
             index = pair[0]
-            xyz=pair[4].float()
+            xyz=pair[3].float()
             xyz_list.append(xyz)
             feature_list.append(features[:, :, index])
             depth_data_list.append(depth_data[:, :, index])

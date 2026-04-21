@@ -24,6 +24,7 @@ from scipy.spatial import ConvexHull
 from GraspAgent_2.hands_config.sh_config import fingers_max, fingers_min
 from GraspAgent_2.utils.quat_operations import random_quaternion, quat_mul, quat_rotate_vector
 from visualiztion import view_npy_open3d
+import time
 
 def pose_quat_to_matrix(position, quaternion):
     """
@@ -869,12 +870,15 @@ class MojocoMultiFingersEnv():
 
         self.d.qpos= self.far_hand_pos+ self.far_hand_quat+self.default_finger_joints+obj_pos_quat
 
-
+        start=time.time()
         counter=0
         last_obj_pos=None
         for i in range(1000):
             for j in range(window_size):
                 mujoco.mj_step(self.m, self.d)
+                time_out = time.time() - start
+                if time_out > 5 : assert False, f'failed stablizinbg objects'
+
             new_obj_pos=np.copy(self.d.qpos[7 + len(self.default_finger_joints):])
             if last_obj_pos is not None:
                 diff=np.mean(np.abs(last_obj_pos-new_obj_pos))
