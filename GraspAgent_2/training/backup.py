@@ -2120,6 +2120,7 @@ if __name__ == "__main__":
         config_path += ".ini"
 
     # Read config
+    # Read config
     config = read_config(config_path)
 
     print("Config path:", os.path.abspath(config_path))

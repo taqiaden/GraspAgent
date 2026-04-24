@@ -77,6 +77,8 @@ class SHPoseSampler(nn.Module):
                                           relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=False,bias=True).to(
             'cuda')
 
+        self.biases = nn.Parameter(torch.tensor([0.,0.,0.,0.], dtype=torch.float32, device='cuda'), requires_grad=True).reshape(1,-1,1,1)
+
 
 
     def forward(self, features,depth,latent_vector):
@@ -98,13 +100,15 @@ class SHPoseSampler(nn.Module):
 
         # fingers_embedding=self.normalize_fingers_embedding(fingers_embedding)
         transition=self.transition_(features,torch.cat([alpha,beta,depth], dim=1).detach())
-        transition=F.softplus(transition)
+        transition=F.tanh(transition)+self.biases[:,0:1]
         # transition=(F.normalize(transition,p=2,dim=1).sum(dim=1,keepdim=True)+math.sqrt(3))/(2*math.sqrt(3))
         # transition=(transition-0.5)*3
         # encoded_transition=self.transition_encoding(transition)
         # transition=F.tanh(transition)
         # encoded_transition=self.pos_encoder(transition)
         fingers= self.fingers(features, torch.cat([alpha,beta,transition,depth], dim=1).detach())
+        fingers=F.tanh(fingers)+self.biases[:,1:]
+
         # fingers=F.tanh(fingers)/2
         # fingers=F.normalize(fingers.unflatten(1,(3,3)),p=2,dim=1).sum(dim=1)/(2*math.sqrt(3))
         # fingers = F.normalize(fingers, dim=1)
@@ -141,7 +145,7 @@ def depth_standardization(depth,mask):
 class SH_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0., activation=nn.ReLU(), IN_affine=False,
                                   activate_skip=False).to('cuda')
 
@@ -149,16 +153,17 @@ class SH_G(nn.Module):
         self.back_bone.apply(init_weights_he_normal)
         # add_spectral_norm_selective(self.back_bone)
 
-        # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
-        self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=False,
+        self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                     relu_negative_slope=0., activation=None, IN_affine=False, activate_skip=False).to(
             'cuda')
+        # replace_instance_with_groupnorm(self.back_bone2_, max_groups=16)
 
 
         self.SH_PoseSampler = SHPoseSampler()
 
+        self.back_bone2_.apply(init_weights_he_normal)
 
 
         self.grasp_quality_=ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
@@ -175,6 +180,10 @@ class SH_G(nn.Module):
         self.grasp_collision3 = ContextGate_2d( 64, 10, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=False, bias=True, cyclic=False).to('cuda')
 
+        self.grasp_quality_.apply(init_weights_he_normal)
+        self.grasp_collision_.apply(init_weights_he_normal)
+        self.grasp_collision2.apply(init_weights_he_normal)
+        self.grasp_collision3.apply(init_weights_he_normal)
 
 
     def get_grasp_quality(self, depth, target_mask, model_B_poses):
@@ -209,12 +218,12 @@ class SH_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(input)  # if backbone is None else backbone(input)
+                features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
                 features2 = self.back_bone2_(standarized_depth_)  # *scale
                 # features3 = self.back_bone3_(input)#*scale
 
         else:
-            features = self.back_bone(input)  # if backbone is None else backbone(input)
+            features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
             features2 = self.back_bone2_(standarized_depth_)  # *scale
             # features3 = self.back_bone3_(input)  # *scale
 

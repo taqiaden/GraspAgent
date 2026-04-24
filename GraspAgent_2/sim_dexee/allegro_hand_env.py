@@ -15,10 +15,8 @@ class AllegroHandEnv(MojocoMultiFingersEnv):
         self.hand_xml_file = "wonik_allegro/right_hand.xml"
         super().__init__(root=root,max_obj_per_scene=max_obj_per_scene,key='allegro_hand',objects_path=objects_path)
         self.root = root
-        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0]
+        self.default_finger_joints = [  0, 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0]
         self.default_ctrl = [0., 0. ,0. ,0. ,0. ,0. ,0. ,0. ,0., 0. ,0. ,0. ,0., 0., 0. ,0.]
-
-
 
     def check_collision(self,hand_pos,hand_quat,hand_fingers=None,view=False):
         self.restore_simulation_state()
@@ -41,7 +39,7 @@ class AllegroHandEnv(MojocoMultiFingersEnv):
 
         return  contact_with_obj , contact_with_floor
 
-    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=True,update_obj_prob=None):
+    def check_graspness(self,hand_pos,hand_quat,hand_fingers,obj_pose=None,view=False,iterations=600,hard_level=0.,shake=False,update_obj_prob=None):
 
         self.restore_simulation_state()
 

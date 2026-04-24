@@ -6,6 +6,7 @@ from GraspAgent_2.model.CH_model import CH_model_key, CH_D, CH_G
 from GraspAgent_2.sim_hand_s.Casia_hand_env import CasiaHandEnv
 from GraspAgent_2.training.abstract_training_module import AbstractGraspAgentTraining
 from GraspAgent_2.training.sample_random_grasp import ch_pose_interpolation
+from GraspAgent_2.utils.model_init import init_weights_he_normal
 from GraspAgent_2.utils.quat_operations import  grasp_frame_to_quat, quat_between
 from check_points.check_point_conventions import GANWrapper
 from lib.cuda_utils import cuda_memory_report
@@ -109,10 +110,11 @@ class TrainGraspGAN(AbstractGraspAgentTraining):
 
         gan.critic_adam_optimizer(learning_rate=self.args.lr, beta1=0.9, beta2=0.999)
         # gan.critic_sgd_optimizer(learning_rate=self.args.lr*10,momentum=0.,weight_decay_=0.)
-        gan.generator_adam_optimizer(param_group=policy_params,learning_rate=self.args.lr, beta1=0.9, beta2=0.999)
-        # gan.generator_sgd_optimizer(param_group=policy_params,learning_rate=self.args.lr*10,momentum=0.,weight_decay_=0.)
+        # gan.generator_adam_optimizer(param_group=policy_params,learning_rate=self.args.lr, beta1=0.9, beta2=0.999)
+        gan.generator_sgd_optimizer(param_group=policy_params,learning_rate=self.args.lr*10,momentum=0.,weight_decay_=0.)
         gan.sampler_optimizer = torch.optim.SGD(sampler_params, lr=self.args.lr*10,
                                                momentum=0)
+        # gan.sampler_adam_optimizer(param_group=sampler_params,learning_rate=self.args.lr,beta1=0.9, beta2=0.999,weight_decay_=0.)
 
         # gan.sampler_optimizer =torch.optim.Adam(sampler_params, lr=self.args.lr   )
 

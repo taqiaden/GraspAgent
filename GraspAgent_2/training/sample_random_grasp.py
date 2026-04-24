@@ -601,17 +601,12 @@ def generate_random_SH_3F_poses(size):
 def generate_random_Allergo_poses(size):
 
     alpha_ = torch.randn((size,3),device='cuda')
-    alpha_[:, -1] = -1*(1-alpha_[:, -1].clamp(-1,1))/2
-    # alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
+    alpha_[:, -1] = -1*(1-alpha_[:, -1].clamp(-1,1).abs()**2)
+    alpha_[:, 0:2]=alpha_[:, 0:2]*torch.abs(alpha_[:, 0:2]**1)
     alpha_ = F.normalize(alpha_, dim=-1)
 
     beta_ = random_unit_circle(size)
     beta_ = F.normalize(beta_, dim=-1)
-
-
-
-    s = 1-torch.rand((size, 4), device='cuda')**2
-    b=beta_peak_intensity_tensor(size, 5, torch.tensor([0.6,1.3,1.3,1.3,1.3]).cuda(),[-0.262,1.57], peak_intensity=10.0)
 
     fingers_ = torch.rand((size, 16), device='cuda')-0.5
 
@@ -725,7 +720,7 @@ def allergo_pose_interpolation( gripper_pose, annealing_factor,taxonomies=None,a
     # ref_pose[:,5:5+3]=torch.clip(ref_pose[:,5:5+3],-1,1)
 
     # sampling_ratios = torch.clip(annealing_factor,0.01,0.99)
-    annealing_factor[annealing_factor>0.95]=1.0
+    annealing_factor[annealing_factor>0.5]=1.0
 
     sampling_ratios = 1 / (1 + ((1 - annealing_factor) * torch.rand_like(ref_pose)) / (annealing_factor * torch.rand_like(ref_pose)+1e-4))
     # r=torch.rand_like(ref_pose)

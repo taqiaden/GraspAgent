@@ -158,22 +158,25 @@ def depth_standardization(depth,mask):
 class CH_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0.,activation=nn.ReLU(),IN_affine=False,activate_skip=False).to('cuda')
 
         # gain = torch.nn.init.calculate_gain('leaky_relu', 0.1)
-        self.back_bone.apply(gan_init_with_norms)
+        self.back_bone.apply(init_weights_he_normal)
         # add_spectral_norm_selective(self.back_bone)
 
         # replace_instance_with_groupnorm(self.back_bone, max_groups=16)
         # gan_init_with_norms(self.back_bone)
 
-        self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=False,
+        self.back_bone2_ = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
         # self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
         #                           relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
         # self.back_bone2_.apply(init_weights_he_normal)
         # self.back_bone3_.apply(init_weights_he_normal)
+        self.back_bone2_.apply(init_weights_he_normal)
+
+        # replace_instance_with_groupnorm(self.back_bone2_, max_groups=16)
 
         # add_spectral_norm_selective(self.back_bone2_)
         # add_spectral_norm_selective(self.back_bone3_)
@@ -186,7 +189,7 @@ class CH_G(nn.Module):
 
 
         self.CH_PoseSampler = ParallelGripperPoseSampler()
-        self.CH_PoseSampler.apply(gan_init_with_norms)
+        # self.CH_PoseSampler.apply(gan_init_with_norms)
 
         # self.query = nn.Sequential(
         #     nn.Conv2d(14, 5, kernel_size=1),
@@ -234,10 +237,10 @@ class CH_G(nn.Module):
         # add_spectral_norm_selective(self.grasp_collision2_)
         # add_spectral_norm_selective(self.grasp_collision3_)
 
-        # self.grasp_quality.apply(init_weights_he_normal)
-        # self.grasp_collision.apply(init_weights_he_normal)
-        # self.grasp_collision2_.apply(init_weights_he_normal)
-        # self.grasp_collision3_.apply(init_weights_he_normal)
+        self.grasp_quality_.apply(init_weights_he_normal)
+        self.grasp_collision_.apply(init_weights_he_normal)
+        self.grasp_collision2.apply(init_weights_he_normal)
+        self.grasp_collision3.apply(init_weights_he_normal)
 
 
         self.depth_encoding=ScalerEncoding_2d(in_c=1)
@@ -319,12 +322,12 @@ class CH_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(input) #if backbone is None else backbone(input)
+                features = self.back_bone(standarized_depth_) #if backbone is None else backbone(input)
                 features2 = self.back_bone2_(standarized_depth_)#*scale
                 # features3 = self.back_bone3_(input)#*scale
 
         else:
-            features = self.back_bone(input) #if backbone is None else backbone(input)
+            features = self.back_bone(standarized_depth_) #if backbone is None else backbone(input)
 
 
             features2 = self.back_bone2_(standarized_depth_)#*scale

@@ -373,16 +373,27 @@ class ContextGate_2d(nn.Module):
 
         self.gamma = nn.Sequential(
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
-            LayerNorm2D(mid_c),
-            activation,
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
-        ).to('cuda') if normalize else nn.Sequential(
-            nn.Conv2d(in_c1, mid_c, kernel_size=1),
-            activation,
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
-        ).to('cuda')
+            # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda') #if normalize else nn.Sequential(
+        #     nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        #     activation,
+        #     nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        # ).to('cuda')
 
         self.beta = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+            # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda') #if normalize else nn.Sequential(
+        #     nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        #     activation,
+        #     nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        # ).to('cuda')
+
+        self.bias = nn.Sequential(
             nn.Conv2d(in_c1, mid_c, kernel_size=1),
             LayerNorm2D(mid_c),
             activation,
@@ -395,13 +406,103 @@ class ContextGate_2d(nn.Module):
 
         self.condition_proj =nn.Sequential(
             nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            # # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda')
+
+
+        self.d = nn.Sequential(
+            activation,
+            nn.Conv2d(mid_c + in_c3, 48, kernel_size=1,bias=True),
+            LayerNorm2D(48),
+            ParameterizedSine() if cyclic else activation,
+            nn.Conv2d(48, 32, kernel_size=1,bias=True),
+            LayerNorm2D(32),
+            ParameterizedSine() if cyclic else activation,
+            nn.Conv2d(32, out_c, kernel_size=1,bias=True)
+        ).to('cuda') if normalize else  nn.Sequential(
+            activation,
+            nn.Conv2d(mid_c + in_c3, 48, kernel_size=1,bias=True),
+            ParameterizedSine() if cyclic else activation,
+            nn.Conv2d(48, 32, kernel_size=1,bias=True),
+            ParameterizedSine() if cyclic else activation,
+            nn.Conv2d(32, out_c, kernel_size=1,bias=True)
+        ).to('cuda')
+
+        self.use_sin=use_sin
+
+
+
+    def forward(self, context, condition,additional_features=None):
+
+        condition = self.condition_proj(condition)
+
+        # condition=F.normalize(condition,p=2,dim=1,eps=1e-5)
+        # condition=torch.softmax(condition,dim=1)
+
+        gamma = self.gamma(context)
+        beta = self.beta(context)
+        # bias = self.bias(context)
+
+        x = condition * gamma+beta
+        # x=torch.softmax(x,dim=1)*beta+bias
+
+
+        if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
+
+        x = self.d(x)
+
+        return x
+
+class ContextGate_2d_2(nn.Module):
+    def __init__(self, in_c1, in_c2, out_c,in_c3=0, relu_negative_slope=0.,
+                 activation=None,use_sin=False,normalize=False,bias=True,cyclic=False):
+        super().__init__()
+
+        mid_c=max(in_c1,in_c2)
+        mid_c+=mid_c%2
+
+
+
+        self.gamma = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
             # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda') #if normalize else nn.Sequential(
+        #     nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        #     activation,
+        #     nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        # ).to('cuda')
+
+        self.beta = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+            # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        ).to('cuda') #if normalize else nn.Sequential(
+        #     nn.Conv2d(in_c1, mid_c, kernel_size=1),
+        #     activation,
+        #     nn.Conv2d(mid_c, mid_c, kernel_size=1),
+        # ).to('cuda')
+
+        self.bias = nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
+            LayerNorm2D(mid_c),
             activation,
             nn.Conv2d(mid_c, mid_c, kernel_size=1),
-            # LayerNorm2D(mid_c),
+        ).to('cuda') if normalize else nn.Sequential(
+            nn.Conv2d(in_c1, mid_c, kernel_size=1),
             activation,
             nn.Conv2d(mid_c, mid_c, kernel_size=1),
-            nn.Softmax(dim=1)
+        ).to('cuda')
+
+        self.condition_proj =nn.Sequential(
+            nn.Conv2d(in_c2, mid_c, kernel_size=1),
+            # # LayerNorm2D(mid_c),
+            # activation,
+            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
         ).to('cuda')
 
 
@@ -425,7 +526,6 @@ class ContextGate_2d(nn.Module):
 
         self.use_sin=use_sin
 
-        self.bias=bias
 
 
     def forward(self, context, condition,additional_features=None):
@@ -437,8 +537,10 @@ class ContextGate_2d(nn.Module):
 
         gamma = self.gamma(context)
         beta = self.beta(context)
+        bias = self.bias(context)
 
-        x = condition * gamma+beta #if self.bias else condition * gamma
+        x = condition * gamma
+        x=torch.softmax(x,dim=1)*beta+bias
 
 
         if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
@@ -447,86 +549,6 @@ class ContextGate_2d(nn.Module):
 
         return x
 
-class ContextGate_2d_2(nn.Module):
-    def __init__(self, in_c1, in_c2, out_c,in_c3=0, relu_negative_slope=0.,
-                 activation=None,use_sin=False,normalize=False,bias=True,cyclic=False):
-        super().__init__()
-
-        mid_c=max(in_c1,in_c2)
-        mid_c+=mid_c%2
-
-        self.gamma = nn.Sequential(
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
-        ).to('cuda')
-
-        self.beta = nn.Sequential(
-            nn.Conv2d(mid_c, mid_c, kernel_size=1),
-        ).to('cuda')
-
-        self.bias = nn.Sequential(
-            nn.Conv2d(in_c1, mid_c, kernel_size=1),
-        ).to('cuda')
-        self.contx_proj = nn.Sequential(
-            nn.Conv2d(in_c1, mid_c, kernel_size=1),
-            # LayerNorm2D(in_c1),
-            nn.SiLU(),
-        ).to('cuda')
-
-        self.cond_proj =nn.Sequential(
-            nn.Conv2d(in_c2, mid_c, kernel_size=1),
-            # LayerNorm2D(mid_c),
-            # nn.Softmax(dim=1),
-            # nn.Conv2d(mid_c, mid_c, kernel_size=1),
-        ).to('cuda')
-
-        self.d = nn.Sequential(
-            # nn.SiLU(),
-            nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            LayerNorm2D(48),
-            nn.SiLU(),
-            nn.Conv2d(48, 32, kernel_size=1),
-            LayerNorm2D(32),
-            ParameterizedSine() if cyclic else nn.SiLU(),
-            nn.Conv2d(32, out_c, kernel_size=1)
-        ).to('cuda') if normalize else nn.Sequential(
-            # nn.SiLU(),
-            nn.Conv2d(mid_c + in_c3, 48, kernel_size=1),
-            # LayerNorm2D(48),
-            nn.SiLU(),
-            nn.Conv2d(48, 32, kernel_size=1),
-            # LayerNorm2D(32),
-            ParameterizedSine() if cyclic else nn.SiLU(),
-            nn.Conv2d(32, out_c, kernel_size=1)
-        ).to('cuda')
-
-        self.use_sin=use_sin
-
-        self.use_bias=bias
-
-    def forward(self, context, condition,additional_features=None):
-
-        # context = self.contx_proj(context)
-        condition = self.cond_proj(condition)
-
-        # condition = F.normalize(condition, p=2, dim=1, eps=1e-8)
-        # condition = F.softmax(condition, dim=1)
-
-        gamma = self.gamma(context)
-        beta = self.beta(context)
-        # gamma = F.normalize(gamma, p=2, dim=1, eps=1e-8)
-
-        x = condition * gamma+beta #if self.bias else condition * gamma
-        x = F.normalize(x, p=2, dim=1, eps=1e-8)
-        x = F.softmax(x, dim=1)*beta
-
-        if self.use_bias:
-            bias = self.bias(context)
-            x=x+bias
-
-        if additional_features is not None: x=torch.cat([x,additional_features],dim=1)
-        x = self.d(x)
-
-        return x
 
 class siren(nn.Module):
     def __init__(self, w0=1.0):

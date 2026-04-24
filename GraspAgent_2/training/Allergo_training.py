@@ -2,8 +2,6 @@ import argparse
 import configparser
 import os
 import torch.nn.functional as F
-
-from GraspAgent_2.model.CH_model import CH_D
 from GraspAgent_2.model.allergo_model import Allergo_model_key, Allergo_G, Allergo_D
 from GraspAgent_2.sim_dexee.allegro_hand_env import AllegroHandEnv
 from GraspAgent_2.training.abstract_training_module import AbstractGraspAgentTraining
@@ -104,7 +102,7 @@ class TrainGraspGAN(AbstractGraspAgentTraining):
     def __init__(self, args,n_samples=None, epochs=1, learning_rate=5e-5):
 
         super().__init__(args=args, n_samples=n_samples, epochs=epochs ,model_key=Allergo_model_key,
-                         test_mode=True,pose_interpolation=allergo_pose_interpolation,
+                         test_mode=False,pose_interpolation=allergo_pose_interpolation,
                          process_pose=process_pose,n_param=24)
 
         '''model wrapper'''
@@ -121,7 +119,6 @@ class TrainGraspGAN(AbstractGraspAgentTraining):
 
         # gan.generator.back_bone.apply(init_weights_he_normal)
         # gan.generator.AllergoPoseSampler_.apply(init_weights_he_normal)
-
 
         # gan.generator.back_bone2_.apply(init_weights_he_normal)
         # gan.generator.grasp_quality_.apply(init_weights_he_normal)

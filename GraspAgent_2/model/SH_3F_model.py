@@ -83,7 +83,7 @@ def depth_standardization(depth,mask):
 class SH_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0., activation=nn.SiLU(), IN_affine=False,
                                   activate_skip=False).to('cuda')
 
@@ -162,12 +162,12 @@ class SH_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(input)  # if backbone is None else backbone(input)
+                features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
                 features2 = self.back_bone2_(standarized_depth_)  # *scale
                 # features3 = self.back_bone3_(input)#*scale
 
         else:
-            features = self.back_bone(input)  # if backbone is None else backbone(input)
+            features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
             features2 = self.back_bone2_(standarized_depth_)  # *scale
             # features3 = self.back_bone3_(input)  # *scale
 

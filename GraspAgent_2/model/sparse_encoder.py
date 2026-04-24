@@ -2,6 +2,7 @@ import numpy as np
 import spconv.pytorch as spconv
 import torch
 from torch import nn
+import torch.nn.functional  as F
 class Encoder2D_IN(nn.Module):
     def __init__(self, in_ch=3, out_ch=512):
         super().__init__()
@@ -76,7 +77,7 @@ class SparseEncoderIN(nn.Module):
             return spconv.SparseSequential(
                 spconv.SparseConv3d(cin, cout, 3, stride=stride, padding=1, bias=True),
                 # spconv.SparseBatchNorm(cout),
-                # nn.LayerNorm(cout),\
+                # nn.LayerNorm(cout),
                 spconv.SparseReLU(),
                 # nn.SiLU()
             )
@@ -89,7 +90,7 @@ class SparseEncoderIN(nn.Module):
         )
 
         self.head = nn.Sequential(
-            nn.LayerNorm(out_ch),
+            # nn.LayerNorm(out_ch),
             nn.LeakyReLU(0.2),
         )
 
@@ -97,8 +98,8 @@ class SparseEncoderIN(nn.Module):
         x = self.net(x)
         x = x.dense()
         x = torch.amax(x, dim=[2, 3, 4])  # smoother than amax
+        # x=F.normalize(x,p=2,dim=-1,eps=1e-7)
         return self.head(x)
-
 
 class SparseResidualBlock(nn.Module):
     """Residual block for sparse tensor: SubMConv3d + InstanceNorm + LeakyReLU"""

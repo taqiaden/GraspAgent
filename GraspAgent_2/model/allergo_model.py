@@ -39,9 +39,14 @@ class ALlergoPoseSampler(nn.Module):
                                           relu_negative_slope=0., activation=nn.SiLU(),use_sin=False,normalize=True,bias=True).to(
             'cuda')
 
+        self.biases = nn.Parameter(torch.tensor([0.]*19, dtype=torch.float32, device='cuda'), requires_grad=True).reshape(1,-1,1,1)
+
+
     def forward(self, features,depth,latent_vector):
 
         delta = self.delta(features,depth)
+
+        delta=F.tanh(delta)+self.biases[:,0:3]
 
         alpha = self.alpha(features,torch.cat([depth,delta],dim=1))
         alpha = F.normalize(alpha, dim=1)
@@ -50,6 +55,7 @@ class ALlergoPoseSampler(nn.Module):
         beta = F.normalize(beta, dim=1)
 
         fingers= self.fingers(features, torch.cat([depth,delta,alpha,beta], dim=1))
+        fingers=F.tanh(fingers)+self.biases[:,3:]
 
         pose = torch.cat([alpha,beta,delta,fingers], dim=1) #28
 
@@ -63,7 +69,7 @@ def depth_standardization(depth,mask):
 class Allergo_G(nn.Module):
     def __init__(self):
         super().__init__()
-        self.back_bone = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
+        self.back_bone = res_unet(in_c=1, Batch_norm=False, Instance_norm=True,
                                   relu_negative_slope=0., activation=None, IN_affine=False,
                                   activate_skip=False).to('cuda')
 
@@ -75,11 +81,11 @@ class Allergo_G(nn.Module):
 
         # self.back_bone3_ = res_unet(in_c=2, Batch_norm=False, Instance_norm=True,
         #                           relu_negative_slope=0., activation=None, IN_affine=False,activate_skip =False).to('cuda')
-        self.back_bone2_.apply(orthogonal_init_all)
+        self.back_bone2_.apply(init_weights_he_normal)
 
 
         self.AllergoPoseSampler_ = ALlergoPoseSampler()
-        self.AllergoPoseSampler_.apply(init_weights_he_normal)
+        # self.AllergoPoseSampler_.apply(init_weights_he_normal)
 
         self.grasp_quality_ =ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
@@ -95,6 +101,10 @@ class Allergo_G(nn.Module):
         self.grasp_collision3 = ContextGate_2d( 64, 25, 1, in_c3=0, relu_negative_slope=0.,
         activation=nn.SiLU(), use_sin=False, normalize=True, bias=True, cyclic=False).to('cuda')
 
+        self.grasp_quality_.apply(init_weights_he_normal)
+        self.grasp_collision_.apply(init_weights_he_normal)
+        self.grasp_collision2.apply(init_weights_he_normal)
+        self.grasp_collision3.apply(init_weights_he_normal)
 
         self.scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32, device='cuda'), requires_grad=True)
         self.bias = nn.Parameter(torch.tensor(-0.7, dtype=torch.float32, device='cuda'), requires_grad=True)
@@ -142,12 +152,12 @@ class Allergo_G(nn.Module):
 
         if detach_backbone:
             with torch.no_grad():
-                features = self.back_bone(input)  # if backbone is None else backbone(input)
+                features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
                 features2 = self.back_bone2_(standarized_depth_)  # *scale
                 # features3 = self.back_bone3_(input)#*scale
 
         else:
-            features = self.back_bone(input)  # if backbone is None else backbone(input)
+            features = self.back_bone(standarized_depth_)  # if backbone is None else backbone(input)
             features2 = self.back_bone2_(standarized_depth_)  # *scale
             # features3 = self.back_bone3_(input)  # *scale
 
